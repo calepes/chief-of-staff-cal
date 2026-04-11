@@ -22,6 +22,7 @@ import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { join, extname, sep } from 'path'
+import { routeCallback } from './callback-router'
 
 const STATE_DIR = process.env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'telegram')
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
@@ -499,7 +500,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'edit_message',
-      description: 'Edit a message the bot previously sent. Useful for interim progress updates. Edits don\'t trigger push notifications — send a new reply when a long task completes so the user\'s device pings.',
+      description: 'Edit a message the bot previously sent. Useful for interim progress updates. Edits don\'t trigger push notifications — send a new reply when a long task completes so the user\'s device pings. Supports updating inline keyboard buttons.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -510,6 +511,21 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             enum: ['text', 'markdownv2'],
             description: "Rendering mode. 'markdownv2' enables Telegram formatting (bold, italic, code, links). Caller must escape special chars per MarkdownV2 rules. Default: 'text' (plain, no escaping needed).",
+          },
+          buttons: {
+            type: 'array',
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  text: { type: 'string', description: 'Button label shown to user' },
+                  callback_data: { type: 'string', description: 'Payload sent back when tapped (max 64 bytes)' },
+                },
+                required: ['text', 'callback_data'],
+              },
+            },
+            description: 'Inline keyboard buttons. Same format as reply buttons. Pass empty array [] to remove buttons. Omit to keep existing buttons unchanged.',
           },
         },
         required: ['chat_id', 'message_id', 'text'],
@@ -631,11 +647,27 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         assertAllowedChat(args.chat_id as string)
         const editFormat = (args.format as string | undefined) ?? 'text'
         const editParseMode = editFormat === 'markdownv2' ? 'MarkdownV2' as const : undefined
+        const editButtonRows = args.buttons as Array<Array<{ text: string; callback_data: string }>> | undefined
+        let editReplyMarkup: InlineKeyboard | undefined
+        if (editButtonRows != null) {
+          editReplyMarkup = new InlineKeyboard()
+          if (editButtonRows.length > 0) {
+            for (const row of editButtonRows) {
+              for (const btn of row) {
+                editReplyMarkup.text(btn.text, btn.callback_data)
+              }
+              editReplyMarkup.row()
+            }
+          }
+        }
         const edited = await bot.api.editMessageText(
           args.chat_id as string,
           Number(args.message_id),
           args.text as string,
-          ...(editParseMode ? [{ parse_mode: editParseMode }] : []),
+          {
+            ...(editParseMode ? { parse_mode: editParseMode } : {}),
+            ...(editReplyMarkup != null ? { reply_markup: editReplyMarkup } : {}),
+          },
         )
         const id = typeof edited === 'object' ? edited.message_id : args.message_id
         return { content: [{ type: 'text', text: `edited (id: ${id})` }] }
@@ -762,7 +794,37 @@ bot.on('callback_query:data', async ctx => {
       await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
       return
     }
-    await ctx.answerCallbackQuery({ text: 'Procesando...' }).catch(() => {})
+
+    // Try mechanical routing first (direct Notion/Spotify updates, ~200ms)
+    const routed = await routeCallback(data)
+    if (routed) {
+      await ctx.answerCallbackQuery({ text: routed.toast ?? '' }).catch(() => {})
+      const msg = ctx.callbackQuery.message
+      if (msg && 'text' in msg && msg.text) {
+        await ctx.api.editMessageText(
+          msg.chat.id,
+          msg.message_id,
+          routed.editText,
+        ).catch(() => {})
+      }
+      return
+    }
+
+    // Not mechanical — forward to LLM as before
+    await ctx.answerCallbackQuery().catch(() => {})
+    const msg = ctx.callbackQuery.message
+    if (msg && 'text' in msg && msg.text) {
+      const buttonText = msg.reply_markup?.inline_keyboard
+        ?.flat()
+        ?.find(b => b.callback_data === data)
+        ?.text ?? data
+      await ctx.api.editMessageText(
+        msg.chat.id,
+        msg.message_id,
+        `${msg.text}\n\nSeleccionado: ${buttonText}`,
+      ).catch(() => {})
+    }
+
     const from = ctx.from
     const chat_id = String(ctx.callbackQuery.message?.chat.id ?? ctx.from.id)
     const msgId = ctx.callbackQuery.message?.message_id
