@@ -1,4 +1,5 @@
 import { updateTaskStatus, updateTaskDate } from './notion-client';
+import { play, pause, skipNext, skipPrevious, setVolume, nowPlaying } from './spotify-client';
 
 export interface RouteResult {
   editText: string;
@@ -49,6 +50,55 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
     const result = await updateTaskDate(id, 'Fecha', date);
     if (!result.ok) return { editText: `❌ Error: ${result.error}`, toast: 'Error' };
     return { editText: `📅 Fecha actualizada: ${date}`, toast: '📅 Actualizado' };
+  }
+
+  // spotify:play
+  if (data === 'spotify:play') {
+    const r = await play()
+    if (r.ok) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      const np = await nowPlaying()
+      return { editText: `▶️ Playing: ${np.track ?? 'Unknown'} — ${np.artist ?? ''}`, toast: '▶️' }
+    }
+    return { editText: `❌ ${r.error}`, toast: 'Error' }
+  }
+
+  // spotify:pause
+  if (data === 'spotify:pause') {
+    const r = await pause()
+    return { editText: r.ok ? '⏸ Paused' : `❌ ${r.error}`, toast: '⏸' }
+  }
+
+  // spotify:skip
+  if (data === 'spotify:skip') {
+    const r = await skipNext()
+    if (r.ok) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      const np = await nowPlaying()
+      return { editText: `⏭ ${np.track ?? 'Unknown'} — ${np.artist ?? ''}`, toast: '⏭' }
+    }
+    return { editText: `❌ ${r.error}`, toast: 'Error' }
+  }
+
+  // spotify:back
+  if (data === 'spotify:back') {
+    const r = await skipPrevious()
+    if (r.ok) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      const np = await nowPlaying()
+      return { editText: `⏮ ${np.track ?? 'Unknown'} — ${np.artist ?? ''}`, toast: '⏮' }
+    }
+    return { editText: `❌ ${r.error}`, toast: 'Error' }
+  }
+
+  // spotify:volup / spotify:voldown
+  if (data === 'spotify:volup') {
+    const r = await setVolume(60)
+    return { editText: r.ok ? '🔊 Volume up' : `❌ ${r.error}`, toast: '🔊' }
+  }
+  if (data === 'spotify:voldown') {
+    const r = await setVolume(40)
+    return { editText: r.ok ? '🔉 Volume down' : `❌ ${r.error}`, toast: '🔉' }
   }
 
   return null;
