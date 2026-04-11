@@ -39,5 +39,16 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Output:** `https://apps.lepesqueur.net/dailynews/{Pais}/{Pais}-{YYYYMMDD}.html`
 - **Repo:** calepes.github.io/dailynews/
 
+## Apple Health
+- **Worker:** `https://health.carlos-cb4.workers.dev`
+- **API Key:** en `~/.claude/channels/telegram/.env` como `HEALTH_API_KEY`
+- **Endpoints:**
+  - `POST /ingest` — recibe data de Health Auto Export (header X-Health-Key)
+  - `GET /summary?date=YYYY-MM-DD` — resumen del día
+  - `GET /trend?metric=X&days=N` — tendencia
+- **Métricas:** steps, sleep, weight, heart_rate, calories, distance
+- **Uso en /today:** incluir sección 🏥 Salud si hay data disponible
+- **Triggers naturales:** "cómo dormí", "pasos hoy", "salud semana", "peso"
+
 ## Audio
 - whisper-cpp instalado con modelo base para transcribir notas de voz de Telegram
