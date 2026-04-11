@@ -21,6 +21,30 @@
 ### Calendario
 - **Feature**: Escaneo de calendario semanal (Yape + personal + familia) desde Telegram
 
+### Callback Optimization
+- **Feature**: Notion client module — updates directos a Notion sin pasar por LLM
+- **Feature**: Callback router — prefijos mecánicos (t:d, t:c, t:s, t:sd) procesados en ~200ms
+- **Feature**: Router integrado en server.ts del fork del plugin
+
+### Menu & Botones
+- **Feature**: Menu configurable via `~/.claude/channels/telegram/menu.json`
+- **Feature**: Skill `/menu` para mostrar inline keyboard interactivo
+- **Feature**: Flujos de revisión de tareas documentados (botones <10, lotes >10)
+
+### Spotify
+- **Feature**: Cloudflare Worker OAuth (`spotify-auth.carlos-cb4.workers.dev`) — login, callback, token refresh
+- **Feature**: Spotify client module — play, pause, skip, nowPlaying, setVolume
+- **Feature**: Callbacks mecánicos en router (spotify:play, spotify:pause, spotify:skip, etc.)
+
+### Apple Health
+- **Feature**: Cloudflare Worker + D1 (`health.carlos-cb4.workers.dev`) — ingesta y consulta de datos
+- **Feature**: Endpoints: POST /ingest, GET /summary, GET /trend
+- **Feature**: Integración documentada para /today y triggers naturales
+
+### Specs & Planes
+- **Docs**: 4 specs de diseño aprobados en `docs/superpowers/specs/`
+- **Docs**: 4 planes de implementación en `docs/superpowers/plans/`
+
 ### Backlogs actualizados
 - Gestión Presupuesto Familiar: merchant adjustment UX con botones
 - Claude Code Setup: guardrails de seguridad

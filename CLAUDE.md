@@ -13,7 +13,8 @@ El diseño de este CoS se basa en el framework de Tal Raviv ("Build your persona
 Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 
 ## Telegram Bot (@calclaudecode_bot)
-- **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas
+- **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas, /menu
+- **Menú interactivo:** Configurable en `~/.claude/channels/telegram/menu.json`. Skill `/menu` lee el JSON y envía botones inline.
 - **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
 - **Botones inline en reply:** El tool `reply` del fork soporta parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}`. El keyboard se adjunta al último chunk.
 - **Callback format:** `[callback] prefix:action[:context]` — prefixes: menu, task, approve, spotify, nav
@@ -39,6 +40,13 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Output:** `https://apps.lepesqueur.net/dailynews/{Pais}/{Pais}-{YYYYMMDD}.html`
 - **Repo:** calepes.github.io/dailynews/
 
+## Spotify
+- **Worker OAuth:** `https://spotify-auth.carlos-cb4.workers.dev` (login, callback, token refresh)
+- **Credenciales:** `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` en secrets del Worker; `SPOTIFY_AUTH_WORKER_URL` en `~/.claude/channels/telegram/.env`
+- **Client module:** `telegram-plugin/spotify-client.ts` — play, pause, skip, nowPlaying, setVolume
+- **Callbacks mecánicos:** spotify:play, spotify:pause, spotify:skip, spotify:back, spotify:volup, spotify:voldown (procesados directo en el plugin)
+- **Búsqueda y discovery:** pasa por el LLM ("pon algo de Coldplay", "qué suena")
+
 ## Apple Health
 - **Worker:** `https://health.carlos-cb4.workers.dev`
 - **API Key:** en `~/.claude/channels/telegram/.env` como `HEALTH_API_KEY`
@@ -52,3 +60,11 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 
 ## Audio
 - whisper-cpp instalado con modelo base para transcribir notas de voz de Telegram
+
+## Specs y Planes
+- **Specs:** `docs/superpowers/specs/` — diseños aprobados
+- **Planes:** `docs/superpowers/plans/` — planes de implementación paso a paso
+- **Callback Optimization:** `2026-04-11-callback-optimization-*`
+- **Inline Buttons Menu:** `2026-04-11-inline-buttons-menu-*`
+- **Spotify Control:** `2026-04-11-spotify-control-*`
+- **Apple Health:** `2026-04-11-apple-health-*`
