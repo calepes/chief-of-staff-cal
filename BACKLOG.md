@@ -23,7 +23,8 @@
 - [x] Callback format: `[callback] prefix:action[:context]`
 - [x] Desplegado al cache del plugin
 - [x] CLAUDE.md global actualizado con mantenimiento del fork
-- [ ] Probar en nueva sesión de Claude Code (reiniciar channel)
+- [x] Parámetro `buttons` agregado al tool `reply` (schema + handler con InlineKeyboard)
+- [ ] Probar botones en nueva sesión de Claude Code (reiniciar channel)
 - [ ] Menú principal con botones (briefings, tareas, status, Spotify)
 - [ ] Flujo de revisión de tareas con botones (completar/cancelar/reprogramar)
 - [ ] Aprobaciones rápidas (sí/no)

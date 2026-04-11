@@ -6,6 +6,7 @@
 - **Feature**: Menú de comandos configurado (/briefing_bolivia, /briefing_peru, /today, /status, /tareas)
 - **Feature**: Fork del plugin de Telegram con soporte para botones inline interactivos
 - **Feature**: Reply keyboard (implementado y luego removido a favor de botones inline)
+- **Feature**: Parámetro `buttons` en tool `reply` — envío de inline keyboards con callbacks custom
 - **Feature**: Transcripción de notas de voz con whisper-cpp
 
 ### Briefings

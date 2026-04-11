@@ -15,6 +15,7 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 ## Telegram Bot (@calclaudecode_bot)
 - **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas
 - **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
+- **Botones inline en reply:** El tool `reply` del fork soporta parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}`. El keyboard se adjunta al último chunk.
 - **Callback format:** `[callback] prefix:action[:context]` — prefixes: menu, task, approve, spotify, nav
 - **Progreso en tareas largas:** Enviar mensaje inicial, editar con cada paso, mensaje final nuevo (para push notification)
 
