@@ -17,7 +17,16 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
 - **Botones inline en reply:** El tool `reply` del fork soporta parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}`. El keyboard se adjunta al último chunk.
 - **Callback format:** `[callback] prefix:action[:context]` — prefixes: menu, task, approve, spotify, nav
-- **Progreso en tareas largas:** Enviar mensaje inicial, editar con cada paso, mensaje final nuevo (para push notification)
+- **Callback optimization:** Prefijos mecánicos (t:d, t:c, t:s, t:sd) se procesan directo en el plugin via Notion API (~200ms). El resto pasa al LLM. Módulos: `callback-router.ts`, `notion-client.ts`
+- **Notion token:** en `~/.claude/channels/telegram/.env` como `NOTION_TOKEN`
+- **Progreso en tareas largas:** Enviar mensajes nuevos (no editar) para que cada update genere push notification
+
+### Flujos de revisión de tareas
+- **<10 tareas:** Botones inline uno por uno con estado, asignado, deadline, emojis
+- **>10 tareas:** Lotes de 5 + texto libre. Incluir: nombre, estado emoji, 👤 asignado, ⏰ deadline, ⚠️ si vencido
+- **Callbacks mecánicos:** Usar pageId completo (32 hex) en callback_data (t:d:{id32}, t:c:{id32}, t:s:{id32})
+- **Callbacks que requieren input:** Pasar al LLM (task:date, task:change, etc.)
+- **Mapeo personas:** Al inicio del flujo, resolver Notion person page IDs → nombres
 
 ## Notion
 - **Eisenhower (this week):** Matriz de priorización de tareas de Cal en Yape
