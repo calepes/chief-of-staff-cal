@@ -655,14 +655,14 @@ export function getAppHtml(): string {
         <button class="ctrl-btn" id="btn-shuffle" onclick="toggleShuffle()" title="Shuffle">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
         </button>
-        <button class="ctrl-btn" onclick="skipTrack(\\'previous\\')" title="Anterior">
+        <button class="ctrl-btn" onclick="skipTrack(&apos;previous&apos;)" title="Anterior">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="19,20 9,12 19,4" fill="currentColor" stroke="none"/><line x1="5" y1="4" x2="5" y2="20"/></svg>
         </button>
         <button class="ctrl-btn" id="btn-play" onclick="togglePlay()" title="Play/Pause">
           <svg id="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6,3 20,12 6,21"/></svg>
           <svg id="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
         </button>
-        <button class="ctrl-btn" onclick="skipTrack(\\'next\\')" title="Siguiente">
+        <button class="ctrl-btn" onclick="skipTrack(&apos;next&apos;)" title="Siguiente">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5,4 15,12 5,20" fill="currentColor" stroke="none"/><line x1="19" y1="4" x2="19" y2="20"/></svg>
         </button>
         <button class="ctrl-btn" id="btn-repeat" onclick="toggleRepeat()" title="Repeat">
@@ -682,7 +682,7 @@ export function getAppHtml(): string {
 
     <!-- Nav bar -->
     <div id="nav-bar">
-      <button class="nav-btn" id="nav-search" onclick="openSheet(\\'search\\')">
+      <button class="nav-btn" id="nav-search" onclick="openSheet(&apos;search&apos;)">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         Buscar
       </button>
@@ -690,7 +690,7 @@ export function getAppHtml(): string {
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor"/><circle cx="18" cy="16" r="3" fill="currentColor"/></svg>
         Sonando
       </button>
-      <button class="nav-btn" id="nav-queue" onclick="openSheet(\\'queue\\')">
+      <button class="nav-btn" id="nav-queue" onclick="openSheet(&apos;queue&apos;)">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         Cola
       </button>
@@ -701,12 +701,12 @@ export function getAppHtml(): string {
   <div id="toast"></div>
 
   <!-- Search sheet -->
-  <div class="sheet-overlay" id="overlay-search" onclick="closeSheet(\\'search\\')"></div>
+  <div class="sheet-overlay" id="overlay-search" onclick="closeSheet(&apos;search&apos;)"></div>
   <div class="sheet" id="sheet-search">
     <div class="sheet-handle"></div>
     <div class="sheet-header">
       <span class="sheet-title">Buscar</span>
-      <button class="sheet-close" onclick="closeSheet(\\'search\\')">
+      <button class="sheet-close" onclick="closeSheet(&apos;search&apos;)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -721,12 +721,12 @@ export function getAppHtml(): string {
   </div>
 
   <!-- Queue sheet -->
-  <div class="sheet-overlay" id="overlay-queue" onclick="closeSheet(\\'queue\\')"></div>
+  <div class="sheet-overlay" id="overlay-queue" onclick="closeSheet(&apos;queue&apos;)"></div>
   <div class="sheet" id="sheet-queue">
     <div class="sheet-handle"></div>
     <div class="sheet-header">
       <span class="sheet-title">Cola de reproducción</span>
-      <button class="sheet-close" onclick="closeSheet(\\'queue\\')">
+      <button class="sheet-close" onclick="closeSheet(&apos;queue&apos;)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
