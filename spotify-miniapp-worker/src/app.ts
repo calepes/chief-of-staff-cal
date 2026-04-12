@@ -15,8 +15,21 @@ export function getAppHtml(): string {
       color: #fff;
       overflow: hidden;
       height: 100vh;
-      height: 100dvh;
+      height: var(--tg-viewport-stable-height, 100dvh);
       position: relative;
+    }
+
+    body.light {
+      background: var(--tg-bg-color, #f0f0f0);
+      color: var(--tg-text-color, #000);
+    }
+
+    body.light #track-artist {
+      color: var(--tg-hint-color, #707070);
+    }
+
+    body.light #track-album {
+      color: var(--tg-hint-color, #909090);
     }
 
     #bg-gradient {
@@ -43,8 +56,8 @@ export function getAppHtml(): string {
       align-items: center;
       justify-content: space-evenly;
       height: 100vh;
-      height: 100dvh;
-      padding: 20px 24px 16px;
+      height: var(--tg-viewport-stable-height, 100dvh);
+      padding: calc(20px + var(--safe-area-top, 0px)) 24px calc(16px + var(--safe-area-bottom, 0px));
       max-width: 480px;
       margin: 0 auto;
     }
@@ -749,6 +762,40 @@ export function getAppHtml(): string {
     let searchTimer = null;
     let toastTimer = null;
 
+    // ── Theme helpers ──────────────────────────────────────────────────────
+    function applyTheme() {
+      if (!window.Telegram || !Telegram.WebApp) return;
+      const twa = Telegram.WebApp;
+      // colorScheme
+      if (twa.colorScheme === 'light') {
+        document.body.classList.add('light');
+      } else {
+        document.body.classList.remove('light');
+      }
+      // themeParams
+      const tp = twa.themeParams || {};
+      const root = document.documentElement;
+      if (tp.bg_color) root.style.setProperty('--tg-bg-color', tp.bg_color);
+      if (tp.text_color) root.style.setProperty('--tg-text-color', tp.text_color);
+      if (tp.hint_color) root.style.setProperty('--tg-hint-color', tp.hint_color);
+      if (tp.button_color) root.style.setProperty('--tg-button-color', tp.button_color);
+    }
+
+    function applySafeArea() {
+      if (!window.Telegram || !Telegram.WebApp) return;
+      const twa = Telegram.WebApp;
+      const root = document.documentElement;
+      const sa = twa.safeAreaInset || {};
+      root.style.setProperty('--safe-area-top', (sa.top || 0) + 'px');
+      root.style.setProperty('--safe-area-bottom', (sa.bottom || 0) + 'px');
+      root.style.setProperty('--safe-area-left', (sa.left || 0) + 'px');
+      root.style.setProperty('--safe-area-right', (sa.right || 0) + 'px');
+      // contentSafeAreaInset if available (Bot API 7.10+)
+      const csa = twa.contentSafeAreaInset || {};
+      root.style.setProperty('--content-safe-area-top', (csa.top || 0) + 'px');
+      root.style.setProperty('--content-safe-area-bottom', (csa.bottom || 0) + 'px');
+    }
+
     // ── Init ───────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
       if (window.Telegram && Telegram.WebApp) {
@@ -762,6 +809,11 @@ export function getAppHtml(): string {
             closeAllSheets();
           }
         });
+        // Apply theme and safe area on init
+        applyTheme();
+        applySafeArea();
+        // Subscribe to theme changes
+        Telegram.WebApp.onEvent('themeChanged', applyTheme);
       }
       startPoll();
       startProgressAnimation();
@@ -918,6 +970,9 @@ export function getAppHtml(): string {
 
     // ── Controls ───────────────────────────────────────────────────────────
     async function togglePlay() {
+      if (window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback) {
+        Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+      }
       const endpoint = isPlaying ? '/api/pause' : '/api/play';
       isPlaying = !isPlaying;
       updatePlayButton();
@@ -926,6 +981,9 @@ export function getAppHtml(): string {
     }
 
     async function skipTrack(direction) {
+      if (window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback) {
+        Telegram.WebApp.HapticFeedback.impactOccurred('light');
+      }
       await api('POST', '/api/' + direction);
       // Re-poll after short delay to let Spotify process the skip
       setTimeout(() => { clearInterval(pollTimer); poll(); pollTimer = setInterval(poll, pollInterval); }, 600);
@@ -1119,6 +1177,9 @@ export function getAppHtml(): string {
 
     // ── Playback actions ───────────────────────────────────────────────────
     async function playUri(uri) {
+      if (window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback) {
+        Telegram.WebApp.HapticFeedback.impactOccurred('light');
+      }
       closeAllSheets();
       await api('POST', '/api/play-uri', { uri });
       setTimeout(poll, 500);
