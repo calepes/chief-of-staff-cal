@@ -680,6 +680,10 @@ export function getAppHtml(): string {
     document.addEventListener('DOMContentLoaded', () => {
       if (window.Telegram && Telegram.WebApp) {
         Telegram.WebApp.expand();
+        Telegram.WebApp.ready();
+        if (Telegram.WebApp.disableVerticalSwipes) {
+          Telegram.WebApp.disableVerticalSwipes();
+        }
         Telegram.WebApp.BackButton.onClick(() => {
           if (document.querySelector('.sheet.open')) {
             closeAllSheets();

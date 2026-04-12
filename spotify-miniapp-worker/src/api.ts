@@ -3,7 +3,7 @@ import { spotifyFetch } from './spotify';
 export async function handleApi(
   request: Request,
   url: URL,
-  authWorkerUrl: string
+  authService: Fetcher
 ): Promise<Response> {
   const path = url.pathname.replace('/api', '');
   const cors = { 'Access-Control-Allow-Origin': '*' };
@@ -21,24 +21,24 @@ export async function handleApi(
 
   switch (path) {
     case '/now-playing':
-      return spotifyFetch(authWorkerUrl, 'GET', '/me/player/currently-playing');
+      return spotifyFetch(authService, 'GET', '/me/player/currently-playing');
 
     case '/play':
-      return spotifyFetch(authWorkerUrl, 'PUT', '/me/player/play');
+      return spotifyFetch(authService, 'PUT', '/me/player/play');
 
     case '/pause':
-      return spotifyFetch(authWorkerUrl, 'PUT', '/me/player/pause');
+      return spotifyFetch(authService, 'PUT', '/me/player/pause');
 
     case '/next':
-      return spotifyFetch(authWorkerUrl, 'POST', '/me/player/next');
+      return spotifyFetch(authService, 'POST', '/me/player/next');
 
     case '/previous':
-      return spotifyFetch(authWorkerUrl, 'POST', '/me/player/previous');
+      return spotifyFetch(authService, 'POST', '/me/player/previous');
 
     case '/volume': {
       const percent = url.searchParams.get('percent') ?? '50';
       return spotifyFetch(
-        authWorkerUrl,
+        authService,
         'PUT',
         `/me/player/volume?volume_percent=${encodeURIComponent(percent)}`
       );
@@ -47,20 +47,20 @@ export async function handleApi(
     case '/seek': {
       const posMs = url.searchParams.get('position_ms') ?? '0';
       return spotifyFetch(
-        authWorkerUrl,
+        authService,
         'PUT',
         `/me/player/seek?position_ms=${encodeURIComponent(posMs)}`
       );
     }
 
     case '/queue':
-      return spotifyFetch(authWorkerUrl, 'GET', '/me/player/queue');
+      return spotifyFetch(authService, 'GET', '/me/player/queue');
 
     case '/search': {
       const q = url.searchParams.get('q') ?? '';
       const type = url.searchParams.get('type') ?? 'track,artist,playlist';
       return spotifyFetch(
-        authWorkerUrl,
+        authService,
         'GET',
         `/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&limit=10`
       );
@@ -80,7 +80,7 @@ export async function handleApi(
       if (body.uri) playBody.uris = [body.uri];
       if (body.context_uri) playBody.context_uri = body.context_uri;
       if (body.offset) playBody.offset = body.offset;
-      return spotifyFetch(authWorkerUrl, 'PUT', '/me/player/play', playBody);
+      return spotifyFetch(authService, 'PUT', '/me/player/play', playBody);
     }
 
     default:

@@ -1,15 +1,16 @@
 // Token cache: avoid hitting auth worker on every request.
 // Spotify tokens last 60min; we cache for 50min.
+// Note: cache is best-effort — Workers may cold-start new isolates at any time.
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
 const TOKEN_TTL_MS = 50 * 60 * 1000; // 50 minutes
 
-export async function getToken(authWorkerUrl: string): Promise<string> {
+export async function getToken(authService: Fetcher): Promise<string> {
   if (cachedToken && Date.now() < tokenExpiresAt) {
     return cachedToken;
   }
 
-  const res = await fetch(`${authWorkerUrl}/token`);
+  const res = await authService.fetch('https://auth/token');
   if (!res.ok) {
     throw new Error(`Auth worker error: ${res.status}`);
   }
@@ -22,12 +23,12 @@ export async function getToken(authWorkerUrl: string): Promise<string> {
 const SPOTIFY_API = 'https://api.spotify.com/v1';
 
 export async function spotifyFetch(
-  authWorkerUrl: string,
+  authService: Fetcher,
   method: string,
   path: string,
   body?: unknown
 ): Promise<Response> {
-  const token = await getToken(authWorkerUrl);
+  const token = await getToken(authService);
 
   const init: RequestInit = {
     method,
@@ -47,7 +48,7 @@ export async function spotifyFetch(
   if (res.status === 401) {
     cachedToken = null;
     tokenExpiresAt = 0;
-    const freshToken = await getToken(authWorkerUrl);
+    const freshToken = await getToken(authService);
     const retryInit: RequestInit = {
       method,
       headers: {

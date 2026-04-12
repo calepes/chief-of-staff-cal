@@ -3,6 +3,7 @@ import { getAppHtml } from './app';
 
 export interface Env {
   SPOTIFY_AUTH_WORKER: string;
+  AUTH_SERVICE: Fetcher;
 }
 
 export default {
@@ -16,7 +17,7 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/')) {
-      return handleApi(request, url, env.SPOTIFY_AUTH_WORKER);
+      return handleApi(request, url, env.AUTH_SERVICE);
     }
 
     return new Response('Not found', { status: 404 });
