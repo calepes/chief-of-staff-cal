@@ -655,14 +655,14 @@ export function getAppHtml(): string {
         <button class="ctrl-btn" id="btn-shuffle" onclick="toggleShuffle()" title="Shuffle">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
         </button>
-        <button class="ctrl-btn" onclick="api(\\'POST\\', \\'/api/previous\\')" title="Anterior">
+        <button class="ctrl-btn" onclick="skipTrack(\\'previous\\')" title="Anterior">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="19,20 9,12 19,4" fill="currentColor" stroke="none"/><line x1="5" y1="4" x2="5" y2="20"/></svg>
         </button>
         <button class="ctrl-btn" id="btn-play" onclick="togglePlay()" title="Play/Pause">
           <svg id="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6,3 20,12 6,21"/></svg>
           <svg id="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
         </button>
-        <button class="ctrl-btn" onclick="api(\\'POST\\', \\'/api/next\\')" title="Siguiente">
+        <button class="ctrl-btn" onclick="skipTrack(\\'next\\')" title="Siguiente">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5,4 15,12 5,20" fill="currentColor" stroke="none"/><line x1="19" y1="4" x2="19" y2="20"/></svg>
         </button>
         <button class="ctrl-btn" id="btn-repeat" onclick="toggleRepeat()" title="Repeat">
@@ -923,6 +923,12 @@ export function getAppHtml(): string {
       updatePlayButton();
       await api('PUT', endpoint);
       resetPoll();
+    }
+
+    async function skipTrack(direction) {
+      await api('POST', '/api/' + direction);
+      // Re-poll after short delay to let Spotify process the skip
+      setTimeout(() => { clearInterval(pollTimer); poll(); pollTimer = setInterval(poll, pollInterval); }, 600);
     }
 
     function toggleShuffle() {
