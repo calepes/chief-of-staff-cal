@@ -1,0 +1,6 @@
+name = "spotify-miniapp"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+SPOTIFY_AUTH_WORKER = "https://spotify-auth.carlos-cb4.workers.dev"
