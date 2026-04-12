@@ -11,7 +11,7 @@ export function getAppHtml(): string {
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #2d1b69 100%);
+      background: #0f0a1a;
       color: #fff;
       overflow: hidden;
       height: 100vh;
@@ -22,8 +22,8 @@ export function getAppHtml(): string {
     #bg-gradient {
       position: fixed;
       inset: 0;
-      background: linear-gradient(135deg, #1a1a2e 0%, #2d1b69 100%);
-      transition: background 1.2s ease;
+      background: linear-gradient(160deg, #0f0a1a 0%, #1a1040 50%, #0d1b3e 100%);
+      transition: background 1.5s ease;
       z-index: 0;
     }
 
@@ -44,114 +44,123 @@ export function getAppHtml(): string {
       justify-content: space-evenly;
       height: 100vh;
       height: 100dvh;
-      padding: 16px 24px 24px;
+      padding: 20px 24px 16px;
       max-width: 480px;
       margin: 0 auto;
     }
 
     /* Album art */
-    .album-art-container {
-      width: min(280px, 65vw);
-      height: min(280px, 65vw);
-      border-radius: 16px;
-      background: rgba(255,255,255,0.08);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      box-shadow: 0 24px 64px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
+    #album-art {
+      width: min(260px, 62vw);
+      height: min(260px, 62vw);
+      border-radius: 20px;
+      object-fit: cover;
+      box-shadow: 0 28px 72px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.4);
+      display: none;
       flex-shrink: 0;
     }
 
-    .album-art-container img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      border-radius: 16px;
-    }
-
-    .art-placeholder {
-      font-size: 80px;
-      line-height: 1;
-      user-select: none;
+    #album-art-placeholder {
+      width: min(260px, 62vw);
+      height: min(260px, 62vw);
+      border-radius: 20px;
+      background: rgba(255,255,255,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.3);
+      flex-shrink: 0;
     }
 
     /* Track info */
-    .track-info {
+    #track-info {
       width: 100%;
       text-align: center;
       padding: 0 8px;
     }
 
-    .track-name {
-      font-size: 18px;
-      font-weight: 700;
+    #track-name {
+      font-size: 20px;
+      font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      margin-bottom: 4px;
+      margin-bottom: 5px;
+      color: #fff;
     }
 
-    .track-artist {
-      font-size: 14px;
-      color: rgba(255,255,255,0.65);
+    #track-artist {
+      font-size: 15px;
+      color: #b0b0c0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
     }
 
-    .track-album {
-      font-size: 12px;
-      color: rgba(255,255,255,0.4);
+    #track-album {
+      font-size: 13px;
+      color: #707088;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     /* Progress */
-    .progress-section {
+    #progress-container {
       width: 100%;
     }
 
-    .progress-bar-bg {
+    #progress-bar-bg {
       width: 100%;
-      height: 4px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 2px;
+      height: 3px;
+      background: rgba(255,255,255,0.18);
+      border-radius: 3px;
       cursor: pointer;
-      transition: height 0.15s ease;
       position: relative;
+      transition: height 0.15s ease;
     }
 
-    .progress-bar-bg:hover {
-      height: 6px;
+    #progress-bar-bg:hover,
+    #progress-bar-bg:active {
+      height: 5px;
     }
 
-    .progress-bar-fill {
+    #progress-bar {
       height: 100%;
-      border-radius: 2px;
-      background: linear-gradient(90deg, #1DB954, #1ed760);
-      transition: width 0.1s linear;
+      border-radius: 3px;
+      background: #1DB954;
       pointer-events: none;
+      transition: width 0.1s linear;
     }
 
-    .progress-times {
+    #progress-times {
       display: flex;
       justify-content: space-between;
-      margin-top: 6px;
+      margin-top: 8px;
       font-size: 11px;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.45);
     }
 
-    /* Controls */
-    .controls {
+    /* Glass controls panel */
+    #controls-panel {
+      width: 100%;
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(30px);
+      -webkit-backdrop-filter: blur(30px);
+      border-radius: 24px;
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 20px 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    #controls {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      gap: 10px;
       width: 100%;
     }
 
@@ -160,49 +169,45 @@ export function getAppHtml(): string {
       align-items: center;
       justify-content: center;
       border: none;
-      background: rgba(255,255,255,0.1);
+      background: transparent;
+      color: rgba(255,255,255,0.75);
+      cursor: pointer;
+      transition: color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+      flex-shrink: 0;
+      padding: 6px;
+      border-radius: 50%;
+    }
+
+    .ctrl-btn:active {
+      transform: scale(0.88);
+      opacity: 0.7;
+    }
+
+    .ctrl-btn:hover {
+      color: #fff;
+    }
+
+    #btn-play {
+      width: 56px;
+      height: 56px;
+      background: rgba(255,255,255,0.12);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       border-radius: 50%;
       color: #fff;
-      cursor: pointer;
-      transition: background 0.15s ease, transform 0.1s ease;
-      flex-shrink: 0;
+      padding: 0;
     }
 
-    .ctrl-btn:active {
-      transform: scale(0.92);
-    }
-
-    .ctrl-sm {
-      width: 40px;
-      height: 40px;
-      font-size: 16px;
-    }
-
-    .ctrl-md {
-      width: 44px;
-      height: 44px;
-      font-size: 20px;
-    }
-
-    .ctrl-lg {
-      width: 56px;
-      height: 56px;
-      font-size: 26px;
-      background: rgba(255,255,255,0.15);
-    }
-
-    .ctrl-active {
-      color: #1DB954;
-    }
-
-    .ctrl-btn:hover {
+    #btn-play:hover {
       background: rgba(255,255,255,0.2);
     }
 
+    .ctrl-active {
+      color: #1DB954 !important;
+    }
+
     /* Volume */
-    .volume-section {
+    #volume-container {
       display: flex;
       align-items: center;
       gap: 10px;
@@ -210,18 +215,19 @@ export function getAppHtml(): string {
     }
 
     .vol-icon {
-      font-size: 16px;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.45);
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
 
     input[type=range] {
       -webkit-appearance: none;
       appearance: none;
       flex: 1;
-      height: 4px;
+      height: 3px;
       background: rgba(255,255,255,0.2);
-      border-radius: 2px;
+      border-radius: 3px;
       outline: none;
       cursor: pointer;
     }
@@ -229,17 +235,17 @@ export function getAppHtml(): string {
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
-      width: 14px;
-      height: 14px;
+      width: 13px;
+      height: 13px;
       border-radius: 50%;
       background: #fff;
       cursor: pointer;
-      box-shadow: 0 0 4px rgba(0,0,0,0.3);
+      box-shadow: 0 0 4px rgba(0,0,0,0.4);
     }
 
     input[type=range]::-moz-range-thumb {
-      width: 14px;
-      height: 14px;
+      width: 13px;
+      height: 13px;
       border-radius: 50%;
       background: #fff;
       cursor: pointer;
@@ -247,9 +253,9 @@ export function getAppHtml(): string {
     }
 
     /* Nav bar */
-    .nav-bar {
+    #nav-bar {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       width: 100%;
     }
 
@@ -258,26 +264,34 @@ export function getAppHtml(): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
-      padding: 12px;
+      gap: 7px;
+      padding: 11px 8px;
       border: none;
-      background: rgba(255,255,255,0.1);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      border-radius: 16px;
-      color: #fff;
-      font-size: 14px;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 50px;
+      color: rgba(255,255,255,0.6);
+      font-size: 13px;
       font-weight: 500;
       cursor: pointer;
-      transition: background 0.15s ease;
+      transition: background 0.15s ease, color 0.15s ease;
+      border: 1px solid rgba(255,255,255,0.08);
     }
 
     .nav-btn:hover {
-      background: rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.14);
+      color: #fff;
     }
 
     .nav-btn:active {
-      background: rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.2);
+    }
+
+    .nav-btn.nav-active {
+      background: rgba(29,185,84,0.2);
+      color: #1DB954;
+      border-color: rgba(29,185,84,0.3);
     }
 
     /* Sheet overlays */
@@ -302,10 +316,11 @@ export function getAppHtml(): string {
       right: 0;
       bottom: 0;
       height: 85vh;
-      background: rgba(20, 14, 50, 0.85);
+      background: rgba(12, 8, 30, 0.97);
       backdrop-filter: blur(40px);
       -webkit-backdrop-filter: blur(40px);
       border-radius: 20px 20px 0 0;
+      border-top: 1px solid rgba(255,255,255,0.1);
       z-index: 11;
       transform: translateY(100%);
       transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
@@ -320,7 +335,7 @@ export function getAppHtml(): string {
     .sheet-handle {
       width: 36px;
       height: 4px;
-      background: rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.25);
       border-radius: 2px;
       margin: 12px auto 0;
       flex-shrink: 0;
@@ -344,58 +359,55 @@ export function getAppHtml(): string {
       height: 30px;
       border-radius: 50%;
       border: none;
-      background: rgba(255,255,255,0.15);
-      color: #fff;
-      font-size: 16px;
+      background: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.7);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: background 0.15s ease;
+    }
+
+    .sheet-close:hover {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
     }
 
     .sheet-body {
       flex: 1;
       overflow-y: auto;
-      padding: 0 16px 24px;
+      padding: 0 16px 32px;
     }
 
     .sheet-body::-webkit-scrollbar { display: none; }
 
     /* Search */
     .search-input-wrapper {
-      position: relative;
-      margin-bottom: 16px;
-    }
-
-    .search-input-wrapper::before {
-      content: '🔍';
-      position: absolute;
-      left: 12px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 14px;
-      pointer-events: none;
+      position: sticky;
+      top: 0;
+      background: transparent;
+      padding: 4px 0 12px;
+      margin-bottom: 4px;
     }
 
     .search-input {
       width: 100%;
-      padding: 12px 16px 12px 38px;
-      background: rgba(255,255,255,0.1);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 12px;
+      padding: 12px 16px 12px 16px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
       color: #fff;
       font-size: 15px;
       outline: none;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
     }
 
     .search-input::placeholder {
-      color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.35);
     }
 
     .search-input:focus {
-      border-color: rgba(29,185,84,0.5);
+      border-color: rgba(29,185,84,0.45);
+      background: rgba(255,255,255,0.1);
     }
 
     /* Results */
@@ -404,12 +416,13 @@ export function getAppHtml(): string {
     }
 
     .results-section-title {
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.45);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.07em;
       margin-bottom: 8px;
+      padding: 0 4px;
     }
 
     .result-item {
@@ -417,26 +430,26 @@ export function getAppHtml(): string {
       align-items: center;
       gap: 12px;
       padding: 10px 8px;
-      border-radius: 10px;
+      border-radius: 12px;
       cursor: pointer;
       transition: background 0.15s ease;
     }
 
     .result-item:hover, .result-item:active {
-      background: rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.08);
     }
 
     .result-item.now-playing {
-      background: rgba(29,185,84,0.15);
+      background: rgba(29,185,84,0.12);
     }
 
     .result-img {
       width: 44px;
       height: 44px;
-      border-radius: 6px;
+      border-radius: 8px;
       object-fit: cover;
       flex-shrink: 0;
-      background: rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.08);
     }
 
     .result-img.round {
@@ -458,7 +471,7 @@ export function getAppHtml(): string {
 
     .result-sub {
       font-size: 12px;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.45);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -475,17 +488,17 @@ export function getAppHtml(): string {
       align-items: center;
       gap: 12px;
       padding: 10px 8px;
-      border-radius: 10px;
+      border-radius: 12px;
       cursor: pointer;
       transition: background 0.15s ease;
     }
 
     .queue-item:hover {
-      background: rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.07);
     }
 
     .queue-item.now-playing {
-      background: rgba(29,185,84,0.15);
+      background: rgba(29,185,84,0.12);
     }
 
     .queue-item.now-playing .queue-name {
@@ -495,10 +508,10 @@ export function getAppHtml(): string {
     .queue-img {
       width: 44px;
       height: 44px;
-      border-radius: 6px;
+      border-radius: 8px;
       object-fit: cover;
       flex-shrink: 0;
-      background: rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.08);
     }
 
     .queue-text { flex: 1; min-width: 0; }
@@ -513,7 +526,7 @@ export function getAppHtml(): string {
 
     .queue-sub {
       font-size: 12px;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.45);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -521,17 +534,17 @@ export function getAppHtml(): string {
     }
 
     .queue-np-label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
-      color: rgba(255,255,255,0.35);
+      color: rgba(255,255,255,0.3);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      padding: 12px 8px 6px;
+      letter-spacing: 0.07em;
+      padding: 14px 8px 6px;
     }
 
     /* Skeleton */
     .skeleton {
-      background: rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.07);
       border-radius: 6px;
       position: relative;
       overflow: hidden;
@@ -541,8 +554,8 @@ export function getAppHtml(): string {
       content: '';
       position: absolute;
       inset: 0;
-      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%);
-      animation: shimmer 1.4s infinite;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.07) 50%, transparent 100%);
+      animation: shimmer 1.5s infinite;
     }
 
     @keyframes shimmer {
@@ -560,23 +573,50 @@ export function getAppHtml(): string {
     .skeleton-img {
       width: 44px;
       height: 44px;
-      border-radius: 6px;
+      border-radius: 8px;
       flex-shrink: 0;
     }
 
     .skeleton-text { flex: 1; }
-    .skeleton-line-a { height: 14px; border-radius: 4px; margin-bottom: 6px; width: 70%; }
-    .skeleton-line-b { height: 12px; border-radius: 4px; width: 45%; }
+    .skeleton-line-a { height: 14px; border-radius: 4px; margin-bottom: 7px; width: 65%; }
+    .skeleton-line-b { height: 12px; border-radius: 4px; width: 42%; }
 
     /* Empty state */
     .empty-state {
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 40px 20px;
-      color: rgba(255,255,255,0.35);
+      padding: 48px 20px;
+      color: rgba(255,255,255,0.3);
       font-size: 14px;
       text-align: center;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(30, 20, 60, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 50px;
+      font-size: 14px;
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      z-index: 100;
+      white-space: nowrap;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
     }
   </style>
 </head>
@@ -586,52 +626,79 @@ export function getAppHtml(): string {
 
   <div id="player">
     <!-- Album art -->
-    <div class="album-art-container" id="album-art-container">
-      <img id="art-img" src="" alt="" style="display:none;" />
-      <div class="art-placeholder" id="art-placeholder">🎵</div>
+    <img id="album-art" src="" alt="" />
+    <div id="album-art-placeholder">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor"/><circle cx="18" cy="16" r="3" fill="currentColor"/></svg>
     </div>
 
     <!-- Track info -->
-    <div class="track-info">
-      <div class="track-name" id="track-name">No hay nada sonando</div>
-      <div class="track-artist" id="track-artist">—</div>
-      <div class="track-album" id="track-album"></div>
+    <div id="track-info">
+      <div id="track-name">No hay nada sonando</div>
+      <div id="track-artist">—</div>
+      <div id="track-album"></div>
     </div>
 
     <!-- Progress bar -->
-    <div class="progress-section">
-      <div class="progress-bar-bg" id="progress-bar-bg" onclick="seekTo(event)">
-        <div class="progress-bar-fill" id="progress-bar" style="width:0%"></div>
+    <div id="progress-container">
+      <div id="progress-bar-bg" onclick="seekTo(event)">
+        <div id="progress-bar" style="width:0%"></div>
       </div>
-      <div class="progress-times" id="progress-times">
-        <span id="time-current">0:00</span>
+      <div id="progress-times">
+        <span id="time-elapsed">0:00</span>
         <span id="time-total">0:00</span>
       </div>
     </div>
 
-    <!-- Controls -->
-    <div class="controls">
-      <button class="ctrl-btn ctrl-sm" id="btn-shuffle" onclick="toggleShuffle()" title="Shuffle">⇄</button>
-      <button class="ctrl-btn ctrl-md" onclick="api(\\'POST\\', \\'/api/previous\\')" title="Anterior">⏮</button>
-      <button class="ctrl-btn ctrl-lg" id="btn-play" onclick="togglePlay()" title="Play/Pause">▶</button>
-      <button class="ctrl-btn ctrl-md" onclick="api(\\'POST\\', \\'/api/next\\')" title="Siguiente">⏭</button>
-      <button class="ctrl-btn ctrl-sm" id="btn-repeat" onclick="toggleRepeat()" title="Repeat">↺</button>
-    </div>
-
-    <!-- Volume -->
-    <div class="volume-section">
-      <span class="vol-icon">🔈</span>
-      <input type="range" id="volume-slider" min="0" max="100" value="50"
-             oninput="setVolume(this.value)" />
-      <span class="vol-icon">🔊</span>
+    <!-- Glass controls panel -->
+    <div id="controls-panel">
+      <div id="controls">
+        <button class="ctrl-btn" id="btn-shuffle" onclick="toggleShuffle()" title="Shuffle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+        </button>
+        <button class="ctrl-btn" onclick="api(\\'POST\\', \\'/api/previous\\')" title="Anterior">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="19,20 9,12 19,4" fill="currentColor" stroke="none"/><line x1="5" y1="4" x2="5" y2="20"/></svg>
+        </button>
+        <button class="ctrl-btn" id="btn-play" onclick="togglePlay()" title="Play/Pause">
+          <svg id="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6,3 20,12 6,21"/></svg>
+          <svg id="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
+        </button>
+        <button class="ctrl-btn" onclick="api(\\'POST\\', \\'/api/next\\')" title="Siguiente">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5,4 15,12 5,20" fill="currentColor" stroke="none"/><line x1="19" y1="4" x2="19" y2="20"/></svg>
+        </button>
+        <button class="ctrl-btn" id="btn-repeat" onclick="toggleRepeat()" title="Repeat">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+        </button>
+      </div>
+      <div id="volume-container">
+        <span class="vol-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
+        </span>
+        <input type="range" id="volume-slider" min="0" max="100" value="50" oninput="setVolume(this.value)" />
+        <span class="vol-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor"/><path d="M15.54 8.46a5 5 0 010 7.07"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
+        </span>
+      </div>
     </div>
 
     <!-- Nav bar -->
-    <div class="nav-bar">
-      <button class="nav-btn" onclick="openSheet(\\'search\\')">🔍 Buscar</button>
-      <button class="nav-btn" onclick="openSheet(\\'queue\\')">📋 Cola</button>
+    <div id="nav-bar">
+      <button class="nav-btn" id="nav-search" onclick="openSheet(\\'search\\')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Buscar
+      </button>
+      <button class="nav-btn nav-active" id="nav-playing">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor"/><circle cx="18" cy="16" r="3" fill="currentColor"/></svg>
+        Sonando
+      </button>
+      <button class="nav-btn" id="nav-queue" onclick="openSheet(\\'queue\\')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        Cola
+      </button>
     </div>
   </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
 
   <!-- Search sheet -->
   <div class="sheet-overlay" id="overlay-search" onclick="closeSheet(\\'search\\')"></div>
@@ -639,11 +706,14 @@ export function getAppHtml(): string {
     <div class="sheet-handle"></div>
     <div class="sheet-header">
       <span class="sheet-title">Buscar</span>
-      <button class="sheet-close" onclick="closeSheet(\\'search\\')">✕</button>
+      <button class="sheet-close" onclick="closeSheet(\\'search\\')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
     </div>
     <div class="sheet-body">
-      <div class="search-input-wrapper" id="search-input-wrapper">
-        <input class="search-input" id="search-input" type="text" placeholder="Artistas, canciones, playlists..."
+      <div class="search-input-wrapper">
+        <input class="search-input" id="search-input" type="text"
+               placeholder="Artistas, canciones, playlists..."
                oninput="debounceSearch(this.value)" />
       </div>
       <div id="search-results"></div>
@@ -656,7 +726,9 @@ export function getAppHtml(): string {
     <div class="sheet-handle"></div>
     <div class="sheet-header">
       <span class="sheet-title">Cola de reproducción</span>
-      <button class="sheet-close" onclick="closeSheet(\\'queue\\')">✕</button>
+      <button class="sheet-close" onclick="closeSheet(\\'queue\\')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
     </div>
     <div class="sheet-body">
       <div id="queue-list"></div>
@@ -675,6 +747,7 @@ export function getAppHtml(): string {
     let rafId = null;
     let volumeTimer = null;
     let searchTimer = null;
+    let toastTimer = null;
 
     // ── Init ───────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
@@ -694,6 +767,18 @@ export function getAppHtml(): string {
       startProgressAnimation();
     });
 
+    // ── Toast ──────────────────────────────────────────────────────────────
+    function showToast(msg, duration) {
+      duration = duration || 3000;
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        el.classList.remove('show');
+      }, duration);
+    }
+
     // ── API helper ─────────────────────────────────────────────────────────
     async function api(method, path, body) {
       try {
@@ -701,6 +786,13 @@ export function getAppHtml(): string {
         if (body) opts.body = JSON.stringify(body);
         const res = await fetch(path, opts);
         if (res.status === 204) return null;
+        if (res.status === 404) {
+          const text = await res.text();
+          if (text && text.includes('NO_ACTIVE_DEVICE')) {
+            showToast('Abre Spotify en un dispositivo');
+          }
+          return null;
+        }
         const text = await res.text();
         if (!text) return null;
         try { return JSON.parse(text); } catch { return null; }
@@ -747,28 +839,28 @@ export function getAppHtml(): string {
         track.album ? track.album.name : '';
 
       updateProgress();
-      document.getElementById('btn-play').textContent = isPlaying ? '⏸' : '▶';
+      updatePlayButton();
 
       if (newId !== currentTrackId) {
         currentTrackId = newId;
         const imgUrl = track.album && track.album.images && track.album.images[0]
           ? track.album.images[0].url : null;
         if (imgUrl) {
-          const img = document.getElementById('art-img');
+          const img = document.getElementById('album-art');
           img.onload = () => {
-            document.getElementById('art-placeholder').style.display = 'none';
+            document.getElementById('album-art-placeholder').style.display = 'none';
             img.style.display = 'block';
             extractColors(img);
           };
           img.onerror = () => {
             img.style.display = 'none';
-            document.getElementById('art-placeholder').style.display = 'flex';
+            document.getElementById('album-art-placeholder').style.display = 'flex';
             resetBackground();
           };
           img.src = imgUrl;
         } else {
-          document.getElementById('art-img').style.display = 'none';
-          document.getElementById('art-placeholder').style.display = 'flex';
+          document.getElementById('album-art').style.display = 'none';
+          document.getElementById('album-art-placeholder').style.display = 'flex';
           resetBackground();
         }
       }
@@ -778,14 +870,19 @@ export function getAppHtml(): string {
       document.getElementById('track-name').textContent = 'No hay nada sonando';
       document.getElementById('track-artist').textContent = '—';
       document.getElementById('track-album').textContent = '';
-      document.getElementById('btn-play').textContent = '▶';
       document.getElementById('progress-bar').style.width = '0%';
-      document.getElementById('time-current').textContent = '0:00';
+      document.getElementById('time-elapsed').textContent = '0:00';
       document.getElementById('time-total').textContent = '0:00';
       isPlaying = false;
       currentTrackId = null;
       progressMs = 0;
       durationMs = 0;
+      updatePlayButton();
+    }
+
+    function updatePlayButton() {
+      document.getElementById('icon-play').style.display = isPlaying ? 'none' : 'block';
+      document.getElementById('icon-pause').style.display = isPlaying ? 'block' : 'none';
     }
 
     // ── Progress ───────────────────────────────────────────────────────────
@@ -793,7 +890,7 @@ export function getAppHtml(): string {
       if (!durationMs) return;
       const pct = Math.min(100, (progressMs / durationMs) * 100);
       document.getElementById('progress-bar').style.width = pct + '%';
-      document.getElementById('time-current').textContent = formatMs(progressMs);
+      document.getElementById('time-elapsed').textContent = formatMs(progressMs);
       document.getElementById('time-total').textContent = formatMs(durationMs);
     }
 
@@ -823,7 +920,7 @@ export function getAppHtml(): string {
     async function togglePlay() {
       const endpoint = isPlaying ? '/api/pause' : '/api/play';
       isPlaying = !isPlaying;
-      document.getElementById('btn-play').textContent = isPlaying ? '⏸' : '▶';
+      updatePlayButton();
       await api('PUT', endpoint);
       resetPoll();
     }
@@ -864,15 +961,13 @@ export function getAppHtml(): string {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, 4, 4);
         const d = ctx.getImageData(0, 0, 4, 4).data;
-        // sample corners: top-left(0), top-right(3), bottom-left(12), bottom-right(15)
         const corners = [0, 3, 12, 15].map(i => {
           const base = i * 4;
           return [d[base], d[base+1], d[base+2]];
         });
-        // darken for background
-        const c0 = corners[0].map(v => Math.floor(v * 0.4));
-        const c1 = corners[3].map(v => Math.floor(v * 0.5));
-        const grad = \`linear-gradient(135deg, rgb(\${c0.join(',')}) 0%, rgb(\${c1.join(',')}) 100%)\`;
+        const c0 = corners[0].map(v => Math.floor(v * 0.35));
+        const c1 = corners[3].map(v => Math.floor(v * 0.45));
+        const grad = \`linear-gradient(160deg, rgb(\${c0.join(',')}) 0%, rgb(\${c1.join(',')}) 100%)\`;
         document.getElementById('bg-gradient').style.background = grad;
       } catch(e) {
         resetBackground();
@@ -881,7 +976,7 @@ export function getAppHtml(): string {
 
     function resetBackground() {
       document.getElementById('bg-gradient').style.background =
-        'linear-gradient(135deg, #1a1a2e 0%, #2d1b69 100%)';
+        'linear-gradient(160deg, #0f0a1a 0%, #1a1040 50%, #0d1b3e 100%)';
     }
 
     // ── Sheets ─────────────────────────────────────────────────────────────
