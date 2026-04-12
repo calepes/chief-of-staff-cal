@@ -49,6 +49,15 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Callbacks mecánicos:** spotify:play, spotify:pause, spotify:skip, spotify:back, spotify:volup, spotify:voldown (procesados directo en el plugin)
 - **Búsqueda y discovery:** pasa por el LLM ("pon algo de Coldplay", "qué suena")
 
+## Spotify Mini App (TWA)
+- **Worker:** `https://spotify-miniapp.carlos-cb4.workers.dev` — **desplegado**
+- **TWA deep link:** `https://t.me/calclaudecode_bot/spotify`
+- **Spec:** `docs/superpowers/specs/2026-04-12-spotify-miniapp-design.md`
+- **Funcionalidad:** Player visual, búsqueda, queue — estilo Dark Glass
+- **Auth:** Service Binding al auth worker existente (single-user)
+- **Polling:** cada 5s (15s cuando pierde foco)
+- **Entry points:** botón inline "🎵 Abrir Player" en menú Spotify + deep link TWA
+
 ## Apple Health
 - **Worker:** `https://health.carlos-cb4.workers.dev` — **desplegado**
 - **D1 database:** `health-data`
@@ -80,6 +89,7 @@ cp telegram-plugin/{server,notion-client,callback-router,spotify-client}.ts \
 ### Deploy workers
 ```bash
 cd spotify-auth-worker && npx wrangler deploy
+cd spotify-miniapp-worker && npx wrangler deploy
 cd health-worker && npx wrangler deploy
 ```
 
