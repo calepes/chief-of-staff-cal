@@ -94,43 +94,45 @@
 Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), guía completa
 
 **Fase 1: Hooks básicos** (30 min c/u)
-- [ ] 1.1 Hook SessionStart → inyectar fecha + tareas vencidas Notion + eventos Calendar al iniciar sesión
-- [ ] 1.2 Hook Stop → push notification a Telegram cuando Claude termina tarea larga
+- [x] 1.1a Hook SessionStart → inyectar fecha/hora actual (implementado 2026-04-12)
+- [ ] 1.1b Hook SessionStart → inyectar tareas vencidas Notion + eventos Calendar. Ref: OpenClaw usa `BOOT.md` que el agente lee al iniciar. Proyecto "clawhip" separa notificaciones del contexto de sesión para no contaminarlo.
+- [ ] 1.2 Hook Stop → push notification a Telegram cuando Claude termina tarea larga. Ref: clawhip event-to-channel router bypasea contexto de sesión.
 - [ ] 1.3 Hook PostCompact → guardar contexto automáticamente antes de perderlo
-- [ ] 1.4 Hook PostToolUse(Notion) → audit log de escrituras a Notion
+- [ ] 1.4 Hook PostToolUse(Notion) → audit log de escrituras a Notion. Ref: OpenClaw filtra por herramienta, append a audit.log con timestamp + acción + page ID.
 
 **Fase 2: Cron Jobs — Rutinas diarias** (1-2 hrs)
-- [ ] 2.1 Briefing matutino (7am L-V) → scheduled task: calendario + tareas + salud + noticias → Telegram
-- [ ] 2.2 Reporte nocturno (10pm) → resumen del día, completadas, pendientes para mañana
+- [ ] 2.1 Briefing matutino (7am L-V) → scheduled task con `--session isolated --tz America/La_Paz --announce`: calendario + tareas + salud + noticias → Telegram. Ref: `--session isolated` evita contaminar contexto principal, `--announce` envía a Telegram.
+- [ ] 2.2 Reporte nocturno (10pm) → resumen del día, completadas, pendientes para mañana. Mismo patrón que 2.1.
 - [ ] 2.3 Eisenhower semanal (Dom 9pm) → clasifica tareas en matriz, actualiza Notion, manda resumen
 
 **Fase 3: Heartbeat — Trabajo proactivo** (2 hrs)
-- [ ] 3.1 Heartbeat cada 30min → revisa tareas vencidas, mensajes pendientes, eventos próximos → alerta proactiva
-- [ ] 3.2 Heartbeat tasks como Markdown → carpeta heartbeat-tasks/ con instrucciones .md por tarea
-- [ ] 3.3 "Proactive ideas" (3x/día) → genera idea útil basada en contexto y la agrega a Notion
+- [ ] 3.1 Heartbeat cada 30min → revisa tareas vencidas, mensajes pendientes, eventos próximos → alerta proactiva si hay algo, silencio (`HEARTBEAT_OK`) si no. Ref: OpenClaw heartbeat razona sobre contexto antes de actuar (vs cron que ejecuta ciego).
+- [ ] 3.2 Heartbeat tasks como Markdown → carpeta `heartbeat-tasks/` con un .md por tarea: `check-tasks.md`, `check-calendar.md`, `proactive-idea.md`. Ref: Viticci (MacStories) usa este patrón exacto, invoca subagentes para tareas complejas en paralelo.
+- [ ] 3.3 "Proactive ideas" (3x/día) → genera idea útil basada en contexto y la agrega a Notion. Ref: Viticci agrega 3 ideas/día a su daily note en Notion.
 
 **Fase 4: Webhooks — Reaccionar al mundo** (medio día)
-- [ ] 4.1 Email webhook → Worker recibe Gmail webhook → resume y notifica en Telegram si importante
-- [ ] 4.2 GitHub PRs → notifica + propone review automático
+- [ ] 4.1 Email webhook → Gmail Watch API → Google Pub/Sub → Cloudflare Worker → Claude Code. Ref: existe `openclaw webhooks gmail setup` que configura todo; también `openclaw-gmail-proxy` (read-only, scrubbed de PII).
+- [ ] 4.2 GitHub PRs → webhook standard → notifica + review. Ref: caso avanzado: Sentry webhook → agente investiga error → hace fix → abre PR sin intervención humana.
 - [ ] 4.3 Health alertas → "dormiste <6h", "no caminaste hoy" (worker ya existe, agregar lógica)
-- [ ] 4.4 Notion changes → webhook cuando equipo modifica tareas → notifica a Cal
+- [ ] 4.4 Notion changes → webhook cuando equipo modifica tareas → notifica a Cal. Ref: Notion → webhook HTTP → endpoint Worker.
 
 **Fase 5: Auto-mejora continua** (1 día)
-- [ ] 5.1 Self-improving CLAUDE.md → registra fricciones, analiza patrones, propone mejoras. Cal aprueba por Telegram
-- [ ] 5.2 "Morning builds" (estilo Viticci) → overnight construye algo útil del backlog. Cal se despierta con PR
-- [ ] 5.3 Skills auto-instalables → detecta patrones repetitivos, se crea skills como archivos .md
+- [ ] 5.1 Self-improving → Crear `.learnings/` con `LEARNINGS.md`, `ERRORS.md`, `FEATURE_REQUESTS.md`. Triggers: fallo, corrección de Cal, API que falla. Entradas con ID, timestamp, prioridad. Se "promueven" a CLAUDE.md periódicamente. Cal aprueba por Telegram. Ref: ClawHub skill `self-improving-agent`.
+- [ ] 5.2 "Morning builds" → cron a las 11pm: "basado en el contexto de hoy, construye o mejora algo que le ahorre tiempo a Cal mañana". Resultados concretos de Viticci: CLI App Store API, Markdown linter, estimador de costos. Sesión isolada.
+- [ ] 5.3 Skills auto-instalables → detecta patrones repetitivos y se crea skills como archivos .md
 
 **Fase 6: Multi-agente** (1 día)
-- [ ] 6.1 Agentes especializados → Notion agent, Spotify agent, Research agent con contexto aislado
-- [ ] 6.2 Coordinador principal → delega a subagentes, preserva contexto del hilo principal
-- [ ] 6.3 Agent-to-agent → un agente asigna trabajo a otro (Research → Notion para guardar hallazgos)
+- [ ] 6.1 Agentes especializados → `notion-agent`, `research-agent`, `spotify-agent` con sesión aislada. Ref: proyecto `openclaw-agents` instala 9 agentes especializados con un comando + routing por grupo Telegram. Performance: 4 subagentes paralelos = 5min vs 20min secuencial.
+- [ ] 6.2 Coordinador principal → recibe intent de Cal, delega a subagentes, ensambla respuesta. Preserva contexto del hilo principal.
+- [ ] 6.3 Agent-to-agent → un agente asigna trabajo a otro (Research → Notion para guardar hallazgos). Ref: subagentes NO reciben session tools por defecto (seguridad), profundidad de nesting configurable.
 
 ### Agente Familiar (Cal + Noe)
 - [ ] **Nuevo agente dedicado** — separado del CoS de Yape, enfocado en coordinación familiar
-- [ ] **Calendarios Google** — conectar calendarios de Cal, Noe, Antonia, Catalina
-- [ ] **Telegram bidireccional** — tanto Cal como Noe pueden enviar mensajes y recibir respuestas
+- [ ] **Calendarios Google** — conectar calendarios de Cal, Noe, Antonia, Catalina. Ref: awesome-openclaw-usecases tiene setup concreto con OAuth read-only + calendario familiar compartido + calendario de pareja.
+- [ ] **Detección de conflictos** — lookahead 3 días, cuando hay colisión (reunión tarde + actividad hijo) sugiere soluciones y actualiza calendario. Ref: OpenClaw family calendar parsea PDFs de calendarios escolares via OCR.
+- [ ] **Briefing familiar diario** — eventos color-coded por fuente, conflictos destacados, contexto clima para eventos outdoor
+- [ ] **Telegram bidireccional** — grupo de Telegram separado donde Cal y Noe envían mensajes y reciben respuestas
 - [ ] **Funcionalidad core:** coordinación de horarios, recordatorios, tareas del hogar, actividades de las niñas
-- [ ] **Acceso:** grupo de Telegram o bot separado accesible por ambos
 
 ### Futuro
 - [ ] Migrar secrets a 1Password CLI (`op`)
