@@ -50,7 +50,7 @@ export function getAppHtml(): string {
     }
 
     /* Album art */
-    .art-container {
+    .album-art-container {
       width: min(280px, 65vw);
       height: min(280px, 65vw);
       border-radius: 16px;
@@ -65,7 +65,7 @@ export function getAppHtml(): string {
       flex-shrink: 0;
     }
 
-    .art-container img {
+    .album-art-container img {
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -174,26 +174,26 @@ export function getAppHtml(): string {
       transform: scale(0.92);
     }
 
-    .ctrl-btn.sm {
+    .ctrl-sm {
       width: 40px;
       height: 40px;
       font-size: 16px;
     }
 
-    .ctrl-btn.md {
+    .ctrl-md {
       width: 44px;
       height: 44px;
       font-size: 20px;
     }
 
-    .ctrl-btn.lg {
+    .ctrl-lg {
       width: 56px;
       height: 56px;
       font-size: 26px;
       background: rgba(255,255,255,0.15);
     }
 
-    .ctrl-btn.active {
+    .ctrl-active {
       color: #1DB954;
     }
 
@@ -484,11 +484,11 @@ export function getAppHtml(): string {
       background: rgba(255,255,255,0.08);
     }
 
-    .queue-item.current {
+    .queue-item.now-playing {
       background: rgba(29,185,84,0.15);
     }
 
-    .queue-item.current .queue-name {
+    .queue-item.now-playing .queue-name {
       color: #1DB954;
     }
 
@@ -520,7 +520,7 @@ export function getAppHtml(): string {
       margin-top: 2px;
     }
 
-    .queue-section-label {
+    .queue-np-label {
       font-size: 12px;
       font-weight: 700;
       color: rgba(255,255,255,0.35);
@@ -586,7 +586,7 @@ export function getAppHtml(): string {
 
   <div id="player">
     <!-- Album art -->
-    <div class="art-container" id="art-container">
+    <div class="album-art-container" id="album-art-container">
       <img id="art-img" src="" alt="" style="display:none;" />
       <div class="art-placeholder" id="art-placeholder">🎵</div>
     </div>
@@ -600,10 +600,10 @@ export function getAppHtml(): string {
 
     <!-- Progress bar -->
     <div class="progress-section">
-      <div class="progress-bar-bg" id="progress-bg" onclick="seekTo(event)">
-        <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+      <div class="progress-bar-bg" id="progress-bar-bg" onclick="seekTo(event)">
+        <div class="progress-bar-fill" id="progress-bar" style="width:0%"></div>
       </div>
-      <div class="progress-times">
+      <div class="progress-times" id="progress-times">
         <span id="time-current">0:00</span>
         <span id="time-total">0:00</span>
       </div>
@@ -611,11 +611,11 @@ export function getAppHtml(): string {
 
     <!-- Controls -->
     <div class="controls">
-      <button class="ctrl-btn sm" id="btn-shuffle" onclick="toggleShuffle()" title="Shuffle">⇄</button>
-      <button class="ctrl-btn md" onclick="api(\\'POST\\', \\'/api/previous\\')" title="Anterior">⏮</button>
-      <button class="ctrl-btn lg" id="btn-play" onclick="togglePlay()" title="Play/Pause">▶</button>
-      <button class="ctrl-btn md" onclick="api(\\'POST\\', \\'/api/next\\')" title="Siguiente">⏭</button>
-      <button class="ctrl-btn sm" id="btn-repeat" onclick="toggleRepeat()" title="Repeat">↺</button>
+      <button class="ctrl-btn ctrl-sm" id="btn-shuffle" onclick="toggleShuffle()" title="Shuffle">⇄</button>
+      <button class="ctrl-btn ctrl-md" onclick="api(\\'POST\\', \\'/api/previous\\')" title="Anterior">⏮</button>
+      <button class="ctrl-btn ctrl-lg" id="btn-play" onclick="togglePlay()" title="Play/Pause">▶</button>
+      <button class="ctrl-btn ctrl-md" onclick="api(\\'POST\\', \\'/api/next\\')" title="Siguiente">⏭</button>
+      <button class="ctrl-btn ctrl-sm" id="btn-repeat" onclick="toggleRepeat()" title="Repeat">↺</button>
     </div>
 
     <!-- Volume -->
@@ -642,7 +642,7 @@ export function getAppHtml(): string {
       <button class="sheet-close" onclick="closeSheet(\\'search\\')">✕</button>
     </div>
     <div class="sheet-body">
-      <div class="search-input-wrapper">
+      <div class="search-input-wrapper" id="search-input-wrapper">
         <input class="search-input" id="search-input" type="text" placeholder="Artistas, canciones, playlists..."
                oninput="debounceSearch(this.value)" />
       </div>
@@ -775,7 +775,7 @@ export function getAppHtml(): string {
       document.getElementById('track-artist').textContent = '—';
       document.getElementById('track-album').textContent = '';
       document.getElementById('btn-play').textContent = '▶';
-      document.getElementById('progress-fill').style.width = '0%';
+      document.getElementById('progress-bar').style.width = '0%';
       document.getElementById('time-current').textContent = '0:00';
       document.getElementById('time-total').textContent = '0:00';
       isPlaying = false;
@@ -788,7 +788,7 @@ export function getAppHtml(): string {
     function updateProgress() {
       if (!durationMs) return;
       const pct = Math.min(100, (progressMs / durationMs) * 100);
-      document.getElementById('progress-fill').style.width = pct + '%';
+      document.getElementById('progress-bar').style.width = pct + '%';
       document.getElementById('time-current').textContent = formatMs(progressMs);
       document.getElementById('time-total').textContent = formatMs(durationMs);
     }
@@ -826,12 +826,12 @@ export function getAppHtml(): string {
 
     function toggleShuffle() {
       const btn = document.getElementById('btn-shuffle');
-      btn.classList.toggle('active');
+      btn.classList.toggle('ctrl-active');
     }
 
     function toggleRepeat() {
       const btn = document.getElementById('btn-repeat');
-      btn.classList.toggle('active');
+      btn.classList.toggle('ctrl-active');
     }
 
     function setVolume(val) {
@@ -842,7 +842,7 @@ export function getAppHtml(): string {
     }
 
     function seekTo(e) {
-      const bg = document.getElementById('progress-bg');
+      const bg = document.getElementById('progress-bar-bg');
       const rect = bg.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       progressMs = Math.floor(pct * durationMs);
@@ -1042,8 +1042,8 @@ export function getAppHtml(): string {
         const img = cp.album && cp.album.images && cp.album.images[0]
           ? esc(cp.album.images[0].url) : '';
         const artist = cp.artists ? cp.artists.map(a => a.name).join(', ') : '';
-        html += '<div class="queue-section-label">Sonando ahora</div>';
-        html += \`<div class="queue-item current">
+        html += '<div class="queue-np-label">Sonando ahora</div>';
+        html += \`<div class="queue-item now-playing">
           \${img ? \`<img class="queue-img" src="\${img}" alt="" />\` : '<div class="queue-img skeleton"></div>'}
           <div class="queue-text">
             <div class="queue-name">\${esc(cp.name)}</div>
@@ -1052,7 +1052,7 @@ export function getAppHtml(): string {
         </div>\`;
       }
       if (data.queue && data.queue.length) {
-        html += '<div class="queue-section-label">A continuación</div>';
+        html += '<div class="queue-np-label">A continuación</div>';
         data.queue.forEach((t, i) => {
           if (i >= 20) return;
           const img = t.album && t.album.images && t.album.images[0]
@@ -1078,7 +1078,7 @@ export function getAppHtml(): string {
       if (s == null) return '';
       const d = document.createElement('div');
       d.textContent = String(s);
-      return d.innerHTML;
+      return d.innerHTML.replace(/'/g, '&#39;');
     }
 
     function renderSkeletons(n) {

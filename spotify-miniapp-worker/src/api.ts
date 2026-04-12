@@ -58,11 +58,15 @@ export async function handleApi(
     }
 
     case '/play-uri': {
-      const body = (await request.json()) as {
-        uri?: string;
-        context_uri?: string;
-        offset?: { uri?: string; position?: number };
-      };
+      let body: { uri?: string; context_uri?: string; offset?: { uri?: string; position?: number } };
+      try {
+        body = await request.json();
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', ...cors },
+        });
+      }
       const playBody: Record<string, unknown> = {};
       if (body.uri) playBody.uris = [body.uri];
       if (body.context_uri) playBody.context_uri = body.context_uri;
