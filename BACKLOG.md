@@ -29,7 +29,7 @@
 - [x] `callback-router.ts` — routing mecánico (t:d, t:c, t:s, t:sd) sin LLM (~200ms)
 - [x] Router integrado en `server.ts`, desplegado al cache
 - [x] Configurar NOTION_TOKEN en .env (2026-04-12)
-- [ ] Test end-to-end de callbacks mecánicos (requiere reiniciar channel)
+- [x] Test end-to-end de callbacks mecánicos (2026-04-12)
 - Specs: `docs/superpowers/specs/2026-04-11-callback-optimization-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-callback-optimization.md`
 
@@ -37,7 +37,9 @@
 - [x] Menú principal configurable (`menu.json`) — creado
 - [x] Skill `/menu` — creada
 - [x] Flujos de revisión de tareas documentados
-- [ ] Test end-to-end (requiere reiniciar channel)
+- [x] Test end-to-end del menú (2026-04-12) — probado: menú → Spotify → controles
+- [x] Soporte para botones URL (deep links)
+- [x] Toast de confirmación en callbacks no mecánicos
 - [ ] Aprobaciones rápidas (sí/no)
 - Spec: `docs/superpowers/specs/2026-04-11-inline-buttons-menu-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-inline-buttons-menu.md`
@@ -49,7 +51,8 @@
 - [x] Callbacks mecánicos en router — integrados
 - [x] Deploy Worker + secrets + wrangler v4 (2026-04-12)
 - [x] Auth flow — Cal visitó /login (2026-04-12)
-- [ ] Test end-to-end (requiere reiniciar channel)
+- [x] Test end-to-end (2026-04-12) — callback funciona, error esperado "No active device"
+- [ ] Deep link para abrir Spotify cuando no hay dispositivo activo
 - Spec: `docs/superpowers/specs/2026-04-11-spotify-control-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-spotify-control.md`
 

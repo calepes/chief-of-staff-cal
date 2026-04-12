@@ -15,6 +15,10 @@
 - **Feature**: Sleep analysis expandido a sub-métricas (sleep_totalSleep, sleep_deep, sleep_rem, sleep_core, sleep_awake)
 - **Feature**: Batch de D1 con límite de 500 statements
 
+### Telegram Plugin
+- **Feature**: Soporte para botones URL en reply y edit_message — deep links (spotify://, https://) además de callbacks
+- **Feature**: Toast de confirmación ("✓ {label}") en callbacks no mecánicos via answerCallbackQuery
+
 ### Docs
 - **Docs**: CLAUDE.md actualizado — Spotify, Health, Notion, comandos operativos
 - **Docs**: BACKLOG.md actualizado con items completados

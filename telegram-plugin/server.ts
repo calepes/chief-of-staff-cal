@@ -457,7 +457,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           buttons: {
             type: 'array',
-            description: 'Inline keyboard buttons. Each element is a row (array of buttons). Each button has text (label) and callback_data (payload sent back on tap, max 64 bytes). Example: [[{"text":"Yes","callback_data":"approve:yes"},{"text":"No","callback_data":"approve:no"}]]',
+            description: 'Inline keyboard buttons. Each element is a row (array of buttons). Each button has text (label) and either callback_data (payload sent back on tap) or url (opens link on tap). Example: [[{"text":"Yes","callback_data":"approve:yes"},{"text":"Open","url":"https://example.com"}]]',
             items: {
               type: 'array',
               items: {
@@ -465,8 +465,9 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
                 properties: {
                   text: { type: 'string', description: 'Button label shown to user' },
                   callback_data: { type: 'string', description: 'Payload sent back when tapped (max 64 bytes). Use format prefix:action[:context]' },
+                  url: { type: 'string', description: 'URL to open when tapped. Use for deep links (e.g. spotify://, https://open.spotify.com). Mutually exclusive with callback_data.' },
                 },
-                required: ['text', 'callback_data'],
+                required: ['text'],
               },
             },
           },
@@ -521,11 +522,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
                 properties: {
                   text: { type: 'string', description: 'Button label shown to user' },
                   callback_data: { type: 'string', description: 'Payload sent back when tapped (max 64 bytes)' },
+                  url: { type: 'string', description: 'URL to open when tapped. Mutually exclusive with callback_data.' },
                 },
-                required: ['text', 'callback_data'],
+                required: ['text'],
               },
             },
-            description: 'Inline keyboard buttons. Same format as reply buttons. Pass empty array [] to remove buttons. Omit to keep existing buttons unchanged.',
+            description: 'Inline keyboard buttons. Same format as reply buttons. Supports url buttons. Pass empty array [] to remove buttons. Omit to keep existing buttons unchanged.',
           },
         },
         required: ['chat_id', 'message_id', 'text'],
@@ -545,7 +547,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const files = (args.files as string[] | undefined) ?? []
         const format = (args.format as string | undefined) ?? 'text'
         const parseMode = format === 'markdownv2' ? 'MarkdownV2' as const : undefined
-        const buttonRows = args.buttons as Array<Array<{ text: string; callback_data: string }>> | undefined
+        const buttonRows = args.buttons as Array<Array<{ text: string; callback_data?: string; url?: string }>> | undefined
 
         assertAllowedChat(chat_id)
 
@@ -576,7 +578,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
               replyMarkup = new InlineKeyboard()
               for (const row of buttonRows) {
                 for (const btn of row) {
-                  replyMarkup.text(btn.text, btn.callback_data)
+                  if (btn.url) {
+                    replyMarkup.url(btn.text, btn.url)
+                  } else if (btn.callback_data) {
+                    replyMarkup.text(btn.text, btn.callback_data)
+                  }
                 }
                 replyMarkup.row()
               }
@@ -647,14 +653,18 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         assertAllowedChat(args.chat_id as string)
         const editFormat = (args.format as string | undefined) ?? 'text'
         const editParseMode = editFormat === 'markdownv2' ? 'MarkdownV2' as const : undefined
-        const editButtonRows = args.buttons as Array<Array<{ text: string; callback_data: string }>> | undefined
+        const editButtonRows = args.buttons as Array<Array<{ text: string; callback_data?: string; url?: string }>> | undefined
         let editReplyMarkup: InlineKeyboard | undefined
         if (editButtonRows != null) {
           editReplyMarkup = new InlineKeyboard()
           if (editButtonRows.length > 0) {
             for (const row of editButtonRows) {
               for (const btn of row) {
-                editReplyMarkup.text(btn.text, btn.callback_data)
+                if (btn.url) {
+                  editReplyMarkup.url(btn.text, btn.url)
+                } else if (btn.callback_data) {
+                  editReplyMarkup.text(btn.text, btn.callback_data)
+                }
               }
               editReplyMarkup.row()
             }
@@ -811,7 +821,10 @@ bot.on('callback_query:data', async ctx => {
     }
 
     // Not mechanical — forward to LLM as before
-    await ctx.answerCallbackQuery().catch(() => {})
+    const buttonLabel = ctx.callbackQuery.message && 'text' in ctx.callbackQuery.message
+      ? ctx.callbackQuery.message.reply_markup?.inline_keyboard?.flat()?.find(b => b.callback_data === data)?.text ?? data
+      : data
+    await ctx.answerCallbackQuery({ text: `✓ ${buttonLabel}` }).catch(() => {})
     const msg = ctx.callbackQuery.message
     if (msg && 'text' in msg && msg.text) {
       const buttonText = msg.reply_markup?.inline_keyboard
