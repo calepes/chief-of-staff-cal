@@ -19,6 +19,17 @@
 - **Feature**: Soporte para botones URL en reply y edit_message — deep links (spotify://, https://) además de callbacks
 - **Feature**: Toast de confirmación ("✓ {label}") en callbacks no mecánicos via answerCallbackQuery
 
+### Spotify Mini App (TWA)
+- **Feature**: Worker `spotify-miniapp.carlos-cb4.workers.dev` — API proxy (10 endpoints) + UI inline
+- **Feature**: Player Glass Immersive con SVG icons, búsqueda, cola, controles completos
+- **Feature**: Service Binding para Worker-to-Worker auth (fix error 1101)
+- **Feature**: TWA best practices — `ready()`, `disableVerticalSwipes()`
+- **Feature**: Toast "No active device" para feedback al usuario
+- **Fix**: Escape de comillas en onclick — `&apos;` en vez de `\'` en template literals HTML
+- **Fix**: Skip buttons con re-poll automático para actualizar UI
+- **Design**: 3 propuestas visuales (Minimal Noir, Vinyl Warmth, Glass Immersive) — Cal eligió C
+- **Config**: Mini app registrada en BotFather, menú actualizado con acceso directo
+
 ### Spotify Client
 - **Fix**: JSON parse error en respuestas vacías de Spotify API (nowPlaying después de skip)
 

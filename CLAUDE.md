@@ -13,7 +13,7 @@ El diseño de este CoS se basa en el framework de Tal Raviv ("Build your persona
 Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 
 ## Telegram Bot (@calclaudecode_bot)
-- **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas, /menu
+- **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas, /menu, /spotify
 - **Menú interactivo:** Configurable en `~/.claude/channels/telegram/menu.json`. Skill `/menu` lee el JSON y envía botones inline.
 - **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
 - **Botones inline en reply:** El tool `reply` del fork soporta parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}` o `{text, url}` (para deep links). El keyboard se adjunta al último chunk.
@@ -53,10 +53,10 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Worker:** `https://spotify-miniapp.carlos-cb4.workers.dev` — **desplegado**
 - **TWA deep link:** `https://t.me/calclaudecode_bot/spotify`
 - **Spec:** `docs/superpowers/specs/2026-04-12-spotify-miniapp-design.md`
-- **Funcionalidad:** Player visual, búsqueda, queue — estilo Dark Glass
-- **Auth:** Service Binding al auth worker existente (single-user)
+- **Funcionalidad:** Player visual, búsqueda, queue — estilo Glass Immersive (SVG icons)
+- **Auth:** Service Binding `AUTH_SERVICE` al auth worker (Worker-to-Worker requiere binding, no URL)
 - **Polling:** cada 5s (15s cuando pierde foco)
-- **Entry points:** botón inline "🎵 Abrir Player" en menú Spotify + deep link TWA
+- **Entry points:** botón "🎵 Spotify" en menú principal (URL directa a TWA)
 
 ## Apple Health
 - **Worker:** `https://health.carlos-cb4.workers.dev` — **desplegado**
@@ -94,7 +94,7 @@ cd health-worker && npx wrangler deploy
 ```
 
 ## Audio
-- whisper-cpp instalado con modelo base para transcribir notas de voz de Telegram
+- whisper-cli instalado (`/opt/homebrew/bin/whisper-cli`) con modelo base. Requiere conversión OGA→WAV con ffmpeg antes de transcribir
 
 ## Specs y Planes
 - **Specs:** `docs/superpowers/specs/` — diseños aprobados
@@ -103,3 +103,4 @@ cd health-worker && npx wrangler deploy
 - **Inline Buttons Menu:** `2026-04-11-inline-buttons-menu-*`
 - **Spotify Control:** `2026-04-11-spotify-control-*`
 - **Apple Health:** `2026-04-11-apple-health-*`
+- **Spotify Mini App:** `2026-04-12-spotify-miniapp-*`

@@ -67,10 +67,27 @@
 - Spec: `docs/superpowers/specs/2026-04-11-apple-health-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-apple-health.md`
 
+### Spotify Mini App (TWA) — Implementado (2026-04-12)
+- [x] Scaffold del proyecto (wrangler, package.json, index.ts)
+- [x] API proxy — 10 endpoints (now-playing, play, pause, next, previous, volume, seek, queue, search, play-uri)
+- [x] Service Binding para Worker-to-Worker auth (fix error 1101)
+- [x] Player UI Glass Immersive con SVG icons
+- [x] Búsqueda, cola, controles, progreso animado
+- [x] TWA best practices (ready, disableVerticalSwipes)
+- [x] Deploy a `spotify-miniapp.carlos-cb4.workers.dev`
+- [x] Mini app registrada en BotFather (short_name: spotify)
+- [x] Menú actualizado con acceso directo a TWA
+- [ ] themeParams / colorScheme — adaptar a tema claro de Telegram
+- [ ] safeAreaInset — padding para notch/Dynamic Island
+- [ ] HapticFeedback en controles (play, skip, seek)
+- [ ] Rate limit 429 — backoff exponencial en frontend
+- Spec: `docs/superpowers/specs/2026-04-12-spotify-miniapp-design.md`
+- Plan: `docs/superpowers/plans/2026-04-12-spotify-miniapp.md`
+
 ### UX Telegram — Mejoras de fluidez
 - [ ] **Editar mensaje en navegación de menú** — en vez de enviar mensaje nuevo al cambiar de menú (Menu → Spotify → Menu), editar el existente. Reduce clutter y se siente más fluido. (esfuerzo: bajo)
 - [ ] **Limitar keyboards a 4 filas max** — más de eso causa stutter en iOS. Paginar el resto. (esfuerzo: bajo)
-- [ ] **Mini App para flujos complejos** — página web embebida en Telegram (HTML/CSS/JS) para revisión de tareas, Eisenhower, briefings. Reusar diseño Liquid Glass. Bots que migraron bajaron abandono de 18% → 4%. (esfuerzo: medio)
+- [x] **Mini App para flujos complejos** — implementado: Spotify Mini App TWA (2026-04-12)
 - [ ] **MenuButtonWebApp** — reemplazar lista de comandos `/` con Mini App como menú principal del bot. (esfuerzo: medio)
 
 ### Futuro
