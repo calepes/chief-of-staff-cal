@@ -77,9 +77,9 @@
 - [x] Deploy a `spotify-miniapp.carlos-cb4.workers.dev`
 - [x] Mini app registrada en BotFather (short_name: spotify)
 - [x] Menú actualizado con acceso directo a TWA
-- [ ] themeParams / colorScheme — adaptar a tema claro de Telegram
-- [ ] safeAreaInset — padding para notch/Dynamic Island
-- [ ] HapticFeedback en controles (play, skip, seek)
+- [x] themeParams / colorScheme — adaptar a tema claro de Telegram (2026-04-12)
+- [x] safeAreaInset — padding para notch/Dynamic Island (2026-04-12)
+- [x] HapticFeedback en controles (play, skip, seek) (2026-04-12)
 - [ ] Rate limit 429 — backoff exponencial en frontend
 - Spec: `docs/superpowers/specs/2026-04-12-spotify-miniapp-design.md`
 - Plan: `docs/superpowers/plans/2026-04-12-spotify-miniapp.md`
@@ -89,6 +89,41 @@
 - [ ] **Limitar keyboards a 4 filas max** — más de eso causa stutter en iOS. Paginar el resto. (esfuerzo: bajo)
 - [x] **Mini App para flujos complejos** — implementado: Spotify Mini App TWA (2026-04-12)
 - [ ] **MenuButtonWebApp** — reemplazar lista de comandos `/` con Mini App como menú principal del bot. (esfuerzo: medio)
+
+### CoS Proactivo — Plan inspirado en OpenClaw (2026-04-12)
+Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), guía completa
+
+**Fase 1: Hooks básicos** (30 min c/u)
+- [ ] 1.1 Hook SessionStart → inyectar fecha + tareas vencidas Notion + eventos Calendar al iniciar sesión
+- [ ] 1.2 Hook Stop → push notification a Telegram cuando Claude termina tarea larga
+- [ ] 1.3 Hook PostCompact → guardar contexto automáticamente antes de perderlo
+- [ ] 1.4 Hook PostToolUse(Notion) → audit log de escrituras a Notion
+
+**Fase 2: Cron Jobs — Rutinas diarias** (1-2 hrs)
+- [ ] 2.1 Briefing matutino (7am L-V) → scheduled task: calendario + tareas + salud + noticias → Telegram
+- [ ] 2.2 Reporte nocturno (10pm) → resumen del día, completadas, pendientes para mañana
+- [ ] 2.3 Eisenhower semanal (Dom 9pm) → clasifica tareas en matriz, actualiza Notion, manda resumen
+
+**Fase 3: Heartbeat — Trabajo proactivo** (2 hrs)
+- [ ] 3.1 Heartbeat cada 30min → revisa tareas vencidas, mensajes pendientes, eventos próximos → alerta proactiva
+- [ ] 3.2 Heartbeat tasks como Markdown → carpeta heartbeat-tasks/ con instrucciones .md por tarea
+- [ ] 3.3 "Proactive ideas" (3x/día) → genera idea útil basada en contexto y la agrega a Notion
+
+**Fase 4: Webhooks — Reaccionar al mundo** (medio día)
+- [ ] 4.1 Email webhook → Worker recibe Gmail webhook → resume y notifica en Telegram si importante
+- [ ] 4.2 GitHub PRs → notifica + propone review automático
+- [ ] 4.3 Health alertas → "dormiste <6h", "no caminaste hoy" (worker ya existe, agregar lógica)
+- [ ] 4.4 Notion changes → webhook cuando equipo modifica tareas → notifica a Cal
+
+**Fase 5: Auto-mejora continua** (1 día)
+- [ ] 5.1 Self-improving CLAUDE.md → registra fricciones, analiza patrones, propone mejoras. Cal aprueba por Telegram
+- [ ] 5.2 "Morning builds" (estilo Viticci) → overnight construye algo útil del backlog. Cal se despierta con PR
+- [ ] 5.3 Skills auto-instalables → detecta patrones repetitivos, se crea skills como archivos .md
+
+**Fase 6: Multi-agente** (1 día)
+- [ ] 6.1 Agentes especializados → Notion agent, Spotify agent, Research agent con contexto aislado
+- [ ] 6.2 Coordinador principal → delega a subagentes, preserva contexto del hilo principal
+- [ ] 6.3 Agent-to-agent → un agente asigna trabajo a otro (Research → Notion para guardar hallazgos)
 
 ### Futuro
 - [ ] Migrar secrets a 1Password CLI (`op`)
