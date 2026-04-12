@@ -29,6 +29,15 @@
 - **Fix**: Skip buttons con re-poll automático para actualizar UI
 - **Design**: 3 propuestas visuales (Minimal Noir, Vinyl Warmth, Glass Immersive) — Cal eligió C
 - **Config**: Mini app registrada en BotFather, menú actualizado con acceso directo
+- **Feature**: TWA audit MEDIUM+LOW — themeParams, safeAreaInset, HapticFeedback, viewport vars
+
+### Claude Code Setup
+- **Feature**: Hook SessionStart — inyecta fecha/hora actual al iniciar sesión
+- **Feature**: Status line con fecha/hora + refreshInterval 60s
+- **Feature**: Skill `telegram-miniapp` — guía global para construir TWAs
+- **Research**: Auditoría Superpowers best practices — recomendaciones aplicadas
+- **Research**: OpenClaw articles — plan "CoS Proactivo" con 6 fases y 19 items
+- **Backlog**: Plan CoS Proactivo + Agente Familiar (Cal+Noe)
 
 ### Spotify Client
 - **Fix**: JSON parse error en respuestas vacías de Spotify API (nowPlaying después de skip)

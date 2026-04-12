@@ -93,6 +93,12 @@ cd spotify-miniapp-worker && npx wrangler deploy
 cd health-worker && npx wrangler deploy
 ```
 
+## Hooks & Automatización
+- **SessionStart hook:** inyecta fecha y hora actual como additionalContext al iniciar sesión
+- **Status line:** muestra `fecha hora | proyecto | contexto | modelo`, refreshInterval 60s
+- **Config:** `~/.claude/settings.json` (hooks) + `~/.claude/statusline-command.sh`
+- **Skill telegram-miniapp:** guía global para construir TWAs — checklist, gotchas, boilerplate
+
 ## Audio
 - whisper-cli instalado (`/opt/homebrew/bin/whisper-cli`) con modelo base. Requiere conversión OGA→WAV con ffmpeg antes de transcribir
 
