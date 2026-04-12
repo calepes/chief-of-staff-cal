@@ -2,9 +2,7 @@ name = "health"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
-# D1 database — create with: npx wrangler d1 create health-data
-# Then update the database_id below
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "health-data"
-# database_id = "UPDATE_AFTER_CREATE"
+[[d1_databases]]
+binding = "DB"
+database_name = "health-data"
+database_id = "4d76863b-4227-4b33-ae87-2c7c2a2de997"

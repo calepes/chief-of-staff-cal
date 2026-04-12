@@ -1,5 +1,24 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-12
+
+### Deploy & Configuración
+- **Deploy**: Spotify OAuth Worker desplegado — KV namespace, secrets, wrangler v4, auth completado
+- **Deploy**: Health Worker desplegado — D1 database creada, migración aplicada
+- **Config**: Notion token configurado en .env, integración "Claude CoS" conectada
+- **Config**: Spotify auth worker URL agregada a .env
+- **Config**: Health API key generada y configurada en .env
+- **Config**: Health Auto Export conectado en iPhone (auth via query param)
+
+### Health Worker
+- **Fix**: Adaptado parser de ingesta al formato real de Health Auto Export (estructura anidada data.metrics[].data[])
+- **Feature**: Sleep analysis expandido a sub-métricas (sleep_totalSleep, sleep_deep, sleep_rem, sleep_core, sleep_awake)
+- **Feature**: Batch de D1 con límite de 500 statements
+
+### Docs
+- **Docs**: CLAUDE.md actualizado — Spotify, Health, Notion, comandos operativos
+- **Docs**: BACKLOG.md actualizado con items completados
+
 ## 2026-04-11
 
 ### Telegram Bot

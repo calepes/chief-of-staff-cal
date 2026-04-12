@@ -7,33 +7,54 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
-    // Auth check
+// Auth check
     const apiKey = request.headers.get('X-Health-Key') ?? url.searchParams.get('key')
     if (apiKey !== env.HEALTH_API_KEY) {
       return new Response('Unauthorized', { status: 401 })
     }
 
     // POST /ingest — receive health data from Health Auto Export
+    // Format: { data: { metrics: [{ name, units, data: [{ date, qty, ... }] }] } }
     if (url.pathname === '/ingest' && request.method === 'POST') {
       try {
         const body = await request.json() as any
-        const metrics = body.data?.metrics ?? body.metrics ?? body
-        if (!Array.isArray(metrics)) {
-          return new Response('Expected metrics array', { status: 400 })
+        const metricGroups = body.data?.metrics ?? body.metrics
+        if (!Array.isArray(metricGroups)) {
+          return new Response(JSON.stringify({ error: 'Expected metrics array', keys: Object.keys(body) }), { status: 400 })
         }
 
         const stmt = env.DB.prepare(
           'INSERT INTO health_metrics (metric, value, unit, date, timestamp) VALUES (?, ?, ?, ?, ?)'
         )
 
-        const batch = metrics.map((m: any) => {
-          const date = (m.date ?? m.startDate ?? new Date().toISOString()).slice(0, 10)
-          const ts = m.date ?? m.startDate ?? new Date().toISOString()
-          return stmt.bind(m.name ?? m.metric, Number(m.qty ?? m.value), m.units ?? m.unit ?? '', date, ts)
-        })
+        const SLEEP_FIELDS = ['totalSleep', 'deep', 'rem', 'core', 'awake'] as const
+        const batch: ReturnType<typeof stmt.bind>[] = []
 
-        if (batch.length > 0) {
-          await env.DB.batch(batch)
+        for (const group of metricGroups) {
+          const name: string = group.name
+          const unit: string = group.units ?? ''
+          const points: any[] = group.data ?? []
+
+          for (const p of points) {
+            const date = (p.date ?? '').slice(0, 10)
+            const ts = p.date ?? new Date().toISOString()
+
+            if (name === 'sleep_analysis') {
+              // Expand sleep into sub-metrics
+              for (const field of SLEEP_FIELDS) {
+                if (p[field] != null) {
+                  batch.push(stmt.bind(`sleep_${field}`, Number(p[field]), 'hr', date, ts))
+                }
+              }
+            } else {
+              batch.push(stmt.bind(name, Number(p.qty ?? p.value ?? 0), unit, date, ts))
+            }
+          }
+        }
+
+        // D1 batch limit is 500 statements
+        for (let i = 0; i < batch.length; i += 500) {
+          await env.DB.batch(batch.slice(i, i + 500))
         }
 
         return new Response(JSON.stringify({ inserted: batch.length }), {

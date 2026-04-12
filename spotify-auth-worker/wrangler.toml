@@ -5,8 +5,6 @@ compatibility_date = "2024-01-01"
 [vars]
 SPOTIFY_REDIRECT_URI = "https://spotify-auth.carlos-cb4.workers.dev/callback"
 
-# KV namespace — create with: npx wrangler kv:namespace create SPOTIFY_TOKENS
-# Then update the id below
-# [[kv_namespaces]]
-# binding = "SPOTIFY_TOKENS"
-# id = "UPDATE_AFTER_CREATE"
+[[kv_namespaces]]
+binding = "SPOTIFY_TOKENS"
+id = "48ced0405e5447169456904a3684d46b"

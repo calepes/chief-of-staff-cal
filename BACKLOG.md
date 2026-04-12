@@ -28,8 +28,8 @@
 - [x] `notion-client.ts` — updates directos a Notion desde el plugin
 - [x] `callback-router.ts` — routing mecánico (t:d, t:c, t:s, t:sd) sin LLM (~200ms)
 - [x] Router integrado en `server.ts`, desplegado al cache
-- [ ] Configurar NOTION_TOKEN en .env (pendiente token de integración)
-- [ ] Test end-to-end de callbacks mecánicos
+- [x] Configurar NOTION_TOKEN en .env (2026-04-12)
+- [ ] Test end-to-end de callbacks mecánicos (requiere reiniciar channel)
 - Specs: `docs/superpowers/specs/2026-04-11-callback-optimization-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-callback-optimization.md`
 
@@ -43,22 +43,23 @@
 - Plan: `docs/superpowers/plans/2026-04-11-inline-buttons-menu.md`
 
 ### Spotify — Control desde Telegram (código listo, pendiente config)
-- [ ] Crear Spotify Developer App (Cal)
+- [x] Crear Spotify Developer App (2026-04-12)
 - [x] Cloudflare Worker para OAuth — creado
 - [x] `spotify-client.ts` en plugin — creado
 - [x] Callbacks mecánicos en router — integrados
-- [ ] Deploy Worker + secrets (Cal)
-- [ ] Auth flow (Cal visita /login)
-- [ ] Test end-to-end
+- [x] Deploy Worker + secrets + wrangler v4 (2026-04-12)
+- [x] Auth flow — Cal visitó /login (2026-04-12)
+- [ ] Test end-to-end (requiere reiniciar channel)
 - Spec: `docs/superpowers/specs/2026-04-11-spotify-control-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-spotify-control.md`
 
 ### Apple Health — Datos de salud desde Telegram (código listo, pendiente config)
 - [x] Cloudflare Worker + D1 — creado
 - [x] Migration SQL — creada
-- [ ] Deploy Worker + D1 + secrets (Cal)
-- [ ] Instalar y configurar Health Auto Export en iPhone (Cal)
-- [ ] Test ingesta de datos
+- [x] Deploy Worker + D1 + secrets (2026-04-12)
+- [x] Instalar y configurar Health Auto Export en iPhone (2026-04-12)
+- [x] Test ingesta de datos — data llegando correctamente (2026-04-12)
+- [x] Fix: parser adaptado a formato anidado real de Health Auto Export (2026-04-12)
 - [ ] Integrar en briefing /today como sección opcional
 - Spec: `docs/superpowers/specs/2026-04-11-apple-health-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-apple-health.md`

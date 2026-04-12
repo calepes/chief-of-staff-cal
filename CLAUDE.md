@@ -30,6 +30,7 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Mapeo personas:** Al inicio del flujo, resolver Notion person page IDs → nombres
 
 ## Notion
+- **Integración:** "Claude CoS" — conectada a la DB de Tareas
 - **Eisenhower (this week):** Matriz de priorización de tareas de Cal en Yape
 - **Base de datos Tareas:** `collection://1f2c4876-09dd-80d2-8c0c-000b7f35059b`
 - **Cal person ID:** `https://www.notion.so/2f2fc7e7523043b2b65c19d38f608de7`
@@ -41,22 +42,46 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Repo:** calepes.github.io/dailynews/
 
 ## Spotify
-- **Worker OAuth:** `https://spotify-auth.carlos-cb4.workers.dev` (login, callback, token refresh)
+- **Worker OAuth:** `https://spotify-auth.carlos-cb4.workers.dev` (login, callback, token refresh) — **desplegado y autenticado**
 - **Credenciales:** `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` en secrets del Worker; `SPOTIFY_AUTH_WORKER_URL` en `~/.claude/channels/telegram/.env`
+- **KV namespace:** `spotify-auth-SPOTIFY_TOKENS` (access_token + refresh_token)
 - **Client module:** `telegram-plugin/spotify-client.ts` — play, pause, skip, nowPlaying, setVolume
 - **Callbacks mecánicos:** spotify:play, spotify:pause, spotify:skip, spotify:back, spotify:volup, spotify:voldown (procesados directo en el plugin)
 - **Búsqueda y discovery:** pasa por el LLM ("pon algo de Coldplay", "qué suena")
 
 ## Apple Health
-- **Worker:** `https://health.carlos-cb4.workers.dev`
+- **Worker:** `https://health.carlos-cb4.workers.dev` — **desplegado**
+- **D1 database:** `health-data`
 - **API Key:** en `~/.claude/channels/telegram/.env` como `HEALTH_API_KEY`
+- **Auth:** via query param `?key=` (no header — Health Auto Export no envía headers custom correctamente)
 - **Endpoints:**
-  - `POST /ingest` — recibe data de Health Auto Export (header X-Health-Key)
-  - `GET /summary?date=YYYY-MM-DD` — resumen del día
-  - `GET /trend?metric=X&days=N` — tendencia
-- **Métricas:** steps, sleep, weight, heart_rate, calories, distance
+  - `POST /ingest?key=KEY` — recibe data de Health Auto Export
+  - `GET /summary?date=YYYY-MM-DD&key=KEY` — resumen del día
+  - `GET /trend?metric=X&days=N&key=KEY` — tendencia
+- **Formato ingesta:** `{ data: { metrics: [{ name, units, data: [{ date, qty, ... }] }] } }` — estructura anidada de Health Auto Export
+- **Métricas disponibles:** step_count, active_energy, heart_rate, heart_rate_variability, flights_climbed, apple_exercise_time, apple_stand_hour, apple_stand_time, physical_effort, time_in_daylight, stair_speed_up, stair_speed_down, breathing_disturbances
+- **Sleep:** se expande a sub-métricas: `sleep_totalSleep`, `sleep_deep`, `sleep_rem`, `sleep_core`, `sleep_awake` (unidad: hr)
 - **Uso en /today:** incluir sección 🏥 Salud si hay data disponible
 - **Triggers naturales:** "cómo dormí", "pasos hoy", "salud semana", "peso"
+
+## Comandos operativos
+
+### Telegram channel
+```bash
+claude --channels plugin:telegram@claude-plugins-official
+```
+
+### Deploy plugin fork (después de editar telegram-plugin/)
+```bash
+cp telegram-plugin/{server,notion-client,callback-router,spotify-client}.ts \
+  ~/.claude/plugins/cache/claude-plugins-official/telegram/0.0.5/
+```
+
+### Deploy workers
+```bash
+cd spotify-auth-worker && npx wrangler deploy
+cd health-worker && npx wrangler deploy
+```
 
 ## Audio
 - whisper-cpp instalado con modelo base para transcribir notas de voz de Telegram
