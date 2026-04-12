@@ -44,6 +44,15 @@ export async function handleApi(
       );
     }
 
+    case '/seek': {
+      const posMs = url.searchParams.get('position_ms') ?? '0';
+      return spotifyFetch(
+        authWorkerUrl,
+        'PUT',
+        `/me/player/seek?position_ms=${encodeURIComponent(posMs)}`
+      );
+    }
+
     case '/queue':
       return spotifyFetch(authWorkerUrl, 'GET', '/me/player/queue');
 
