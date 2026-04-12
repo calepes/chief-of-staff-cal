@@ -67,6 +67,12 @@
 - Spec: `docs/superpowers/specs/2026-04-11-apple-health-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-apple-health.md`
 
+### UX Telegram — Mejoras de fluidez
+- [ ] **Editar mensaje en navegación de menú** — en vez de enviar mensaje nuevo al cambiar de menú (Menu → Spotify → Menu), editar el existente. Reduce clutter y se siente más fluido. (esfuerzo: bajo)
+- [ ] **Limitar keyboards a 4 filas max** — más de eso causa stutter en iOS. Paginar el resto. (esfuerzo: bajo)
+- [ ] **Mini App para flujos complejos** — página web embebida en Telegram (HTML/CSS/JS) para revisión de tareas, Eisenhower, briefings. Reusar diseño Liquid Glass. Bots que migraron bajaron abandono de 18% → 4%. (esfuerzo: medio)
+- [ ] **MenuButtonWebApp** — reemplazar lista de comandos `/` con Mini App como menú principal del bot. (esfuerzo: medio)
+
 ### Futuro
 - [ ] Migrar secrets a 1Password CLI (`op`)
 - [ ] Webhook Cloudflare Worker para procesar callback_query server-side (alternativa si el fork del plugin da problemas de mantenimiento)

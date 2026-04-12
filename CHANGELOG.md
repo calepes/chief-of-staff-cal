@@ -19,9 +19,13 @@
 - **Feature**: Soporte para botones URL en reply y edit_message — deep links (spotify://, https://) además de callbacks
 - **Feature**: Toast de confirmación ("✓ {label}") en callbacks no mecánicos via answerCallbackQuery
 
+### Spotify Client
+- **Fix**: JSON parse error en respuestas vacías de Spotify API (nowPlaying después de skip)
+
 ### Docs
 - **Docs**: CLAUDE.md actualizado — Spotify, Health, Notion, comandos operativos
 - **Docs**: BACKLOG.md actualizado con items completados
+- **Docs**: Investigación UX Telegram — inline keyboards vs Mini Apps, mejores prácticas
 
 ## 2026-04-11
 

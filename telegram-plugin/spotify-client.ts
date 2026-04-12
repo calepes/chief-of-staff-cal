@@ -79,8 +79,16 @@ async function spotifyRequest(
       return { ok: true, status: 204 };
     }
 
-    const data = await res.json();
-    return { ok: true, status: res.status, data };
+    const text = await res.text();
+    if (!text) {
+      return { ok: true, status: res.status };
+    }
+    try {
+      const data = JSON.parse(text);
+      return { ok: true, status: res.status, data };
+    } catch {
+      return { ok: true, status: res.status };
+    }
   } catch (err) {
     return { ok: false, error: String(err) };
   }
