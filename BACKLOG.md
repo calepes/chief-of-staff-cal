@@ -125,6 +125,13 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - [ ] 6.2 Coordinador principal → delega a subagentes, preserva contexto del hilo principal
 - [ ] 6.3 Agent-to-agent → un agente asigna trabajo a otro (Research → Notion para guardar hallazgos)
 
+### Agente Familiar (Cal + Noe)
+- [ ] **Nuevo agente dedicado** — separado del CoS de Yape, enfocado en coordinación familiar
+- [ ] **Calendarios Google** — conectar calendarios de Cal, Noe, Antonia, Catalina
+- [ ] **Telegram bidireccional** — tanto Cal como Noe pueden enviar mensajes y recibir respuestas
+- [ ] **Funcionalidad core:** coordinación de horarios, recordatorios, tareas del hogar, actividades de las niñas
+- [ ] **Acceso:** grupo de Telegram o bot separado accesible por ambos
+
 ### Futuro
 - [ ] Migrar secrets a 1Password CLI (`op`)
 - [ ] Webhook Cloudflare Worker para procesar callback_query server-side (alternativa si el fork del plugin da problemas de mantenimiento)
