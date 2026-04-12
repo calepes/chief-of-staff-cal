@@ -1,4 +1,5 @@
 import { handleApi } from './api';
+import { getAppHtml } from './app';
 
 export interface Env {
   SPOTIFY_AUTH_WORKER: string;
@@ -9,7 +10,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/' || url.pathname === '') {
-      return new Response('<!-- app placeholder -->', {
+      return new Response(getAppHtml(), {
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
       });
     }
