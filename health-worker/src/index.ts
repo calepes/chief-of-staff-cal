@@ -24,7 +24,7 @@ export default {
         }
 
         const stmt = env.DB.prepare(
-          'INSERT INTO health_metrics (metric, value, unit, date, timestamp) VALUES (?, ?, ?, ?, ?)'
+          'INSERT OR IGNORE INTO health_metrics (metric, value, unit, date, timestamp) VALUES (?, ?, ?, ?, ?)'
         )
 
         const SLEEP_FIELDS = ['totalSleep', 'deep', 'rem', 'core', 'awake'] as const

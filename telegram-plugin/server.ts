@@ -127,6 +127,7 @@ function defaultAccess(): Access {
 }
 
 const MAX_CHUNK_LIMIT = 4096
+const MAX_KEYBOARD_ROWS = 4
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 
 // reply's files param takes any path. .env is ~60 bytes and ships as a
@@ -572,11 +573,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
               reply_to != null &&
               replyMode !== 'off' &&
               (replyMode === 'all' || i === 0)
-            // Attach inline keyboard to the last chunk only
+            // Attach inline keyboard to the last chunk only (max 4 rows to avoid iOS stutter)
             let replyMarkup: InlineKeyboard | undefined
             if (buttonRows && buttonRows.length > 0 && i === chunks.length - 1) {
               replyMarkup = new InlineKeyboard()
-              for (const row of buttonRows) {
+              const rowsToRender = buttonRows.slice(0, MAX_KEYBOARD_ROWS)
+              for (const row of rowsToRender) {
                 for (const btn of row) {
                   if (btn.url) {
                     replyMarkup.url(btn.text, btn.url)
@@ -658,7 +660,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         if (editButtonRows != null) {
           editReplyMarkup = new InlineKeyboard()
           if (editButtonRows.length > 0) {
-            for (const row of editButtonRows) {
+            const editRowsToRender = editButtonRows.slice(0, MAX_KEYBOARD_ROWS)
+            for (const row of editRowsToRender) {
               for (const btn of row) {
                 if (btn.url) {
                   editReplyMarkup.url(btn.text, btn.url)
@@ -825,17 +828,21 @@ bot.on('callback_query:data', async ctx => {
       ? ctx.callbackQuery.message.reply_markup?.inline_keyboard?.flat()?.find(b => b.callback_data === data)?.text ?? data
       : data
     await ctx.answerCallbackQuery({ text: `✓ ${buttonLabel}` }).catch(() => {})
-    const msg = ctx.callbackQuery.message
-    if (msg && 'text' in msg && msg.text) {
-      const buttonText = msg.reply_markup?.inline_keyboard
-        ?.flat()
-        ?.find(b => b.callback_data === data)
-        ?.text ?? data
-      await ctx.api.editMessageText(
-        msg.chat.id,
-        msg.message_id,
-        `${msg.text}\n\nSeleccionado: ${buttonText}`,
-      ).catch(() => {})
+    // For menu: callbacks, don't edit the message — the LLM will edit_message with new content
+    // For other callbacks, show "Seleccionado: X" as before
+    if (!data.startsWith('menu:')) {
+      const msg = ctx.callbackQuery.message
+      if (msg && 'text' in msg && msg.text) {
+        const buttonText = msg.reply_markup?.inline_keyboard
+          ?.flat()
+          ?.find(b => b.callback_data === data)
+          ?.text ?? data
+        await ctx.api.editMessageText(
+          msg.chat.id,
+          msg.message_id,
+          `${msg.text}\n\nSeleccionado: ${buttonText}`,
+        ).catch(() => {})
+      }
     }
 
     const from = ctx.from

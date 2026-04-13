@@ -63,7 +63,7 @@
 - [x] Instalar y configurar Health Auto Export en iPhone (2026-04-12)
 - [x] Test ingesta de datos — data llegando correctamente (2026-04-12)
 - [x] Fix: parser adaptado a formato anidado real de Health Auto Export (2026-04-12)
-- [ ] Integrar en briefing /today como sección opcional
+- [x] Integrar en briefing /today como sección opcional (2026-04-12)
 - Spec: `docs/superpowers/specs/2026-04-11-apple-health-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-apple-health.md`
 
@@ -80,13 +80,13 @@
 - [x] themeParams / colorScheme — adaptar a tema claro de Telegram (2026-04-12)
 - [x] safeAreaInset — padding para notch/Dynamic Island (2026-04-12)
 - [x] HapticFeedback en controles (play, skip, seek) (2026-04-12)
-- [ ] Rate limit 429 — backoff exponencial en frontend
+- [x] Rate limit 429 — backoff exponencial en frontend (2026-04-12)
 - Spec: `docs/superpowers/specs/2026-04-12-spotify-miniapp-design.md`
 - Plan: `docs/superpowers/plans/2026-04-12-spotify-miniapp.md`
 
 ### UX Telegram — Mejoras de fluidez
-- [ ] **Editar mensaje en navegación de menú** — en vez de enviar mensaje nuevo al cambiar de menú (Menu → Spotify → Menu), editar el existente. Reduce clutter y se siente más fluido. (esfuerzo: bajo)
-- [ ] **Limitar keyboards a 4 filas max** — más de eso causa stutter en iOS. Paginar el resto. (esfuerzo: bajo)
+- [x] **Editar mensaje en navegación de menú** — edit_message en callbacks menu:*, skill actualizado, server.ts no destruye mensaje en menu callbacks (2026-04-12)
+- [x] **Limitar keyboards a 4 filas max** — MAX_KEYBOARD_ROWS=4 en reply y edit_message (2026-04-12)
 - [x] **Mini App para flujos complejos** — implementado: Spotify Mini App TWA (2026-04-12)
 - [ ] **MenuButtonWebApp** — reemplazar lista de comandos `/` con Mini App como menú principal del bot. (esfuerzo: medio)
 
@@ -95,13 +95,19 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 
 **Fase 1: Hooks básicos** (30 min c/u)
 - [x] 1.1a Hook SessionStart → inyectar fecha/hora actual (implementado 2026-04-12)
-- [ ] 1.1b Hook SessionStart → inyectar tareas vencidas Notion + eventos Calendar. Ref: OpenClaw usa `BOOT.md` que el agente lee al iniciar. Proyecto "clawhip" separa notificaciones del contexto de sesión para no contaminarlo.
-- [ ] 1.2 Hook Stop → push notification a Telegram cuando Claude termina tarea larga. Ref: clawhip event-to-channel router bypasea contexto de sesión.
+- [x] 1.1b Hook SessionStart → tareas vencidas Notion + calendar. Script: `~/.claude/hooks/session-start-context.sh`. Nota: requiere compartir DB con integración "Claude CoS" para query directo; fallback a instrucciones MCP (2026-04-12)
+- [x] 1.2 Hook Stop → push notification a Telegram. Script: `~/.claude/hooks/stop-telegram-notify.sh`. Solo notifica en `end_turn` (2026-04-12)
 - [ ] 1.3 Hook PostCompact → guardar contexto automáticamente antes de perderlo
 - [ ] 1.4 Hook PostToolUse(Notion) → audit log de escrituras a Notion. Ref: OpenClaw filtra por herramienta, append a audit.log con timestamp + acción + page ID.
 
+**Fase 1.5: Outlook Calendar + Cron cache** (implementado 2026-04-12)
+- [x] ICS feed de Outlook integrado en hook SessionStart (cache local + launchd cada 4h)
+- [x] Script: `~/.claude/hooks/refresh-outlook-cache.sh`, cache: `~/.claude/hooks/cache/outlook-events.txt`
+- [x] launchd: `~/Library/LaunchAgents/com.claude.outlook-cache.plist`
+- [x] /today actualizado: refresca Outlook cache + Google Calendar MCP + Health
+
 **Fase 2: Cron Jobs — Rutinas diarias** (1-2 hrs)
-- [ ] 2.1 Briefing matutino (7am L-V) → scheduled task con `--session isolated --tz America/La_Paz --announce`: calendario + tareas + salud + noticias → Telegram. Ref: `--session isolated` evita contaminar contexto principal, `--announce` envía a Telegram.
+- [x] 2.1 Briefings diarios (5am) → trigger remoto combinado Bolivia + Perú + Colombia. ID: `trig_017HYzPBsdFkjGPb43BnjhPy`. Lee instrucciones de `docs/briefing-pais-instructions.md`, genera HTML Liquid Glass, publica en GitHub Pages, notifica por Telegram via Zapier MCP (2026-04-12)
 - [ ] 2.2 Reporte nocturno (10pm) → resumen del día, completadas, pendientes para mañana. Mismo patrón que 2.1.
 - [ ] 2.3 Eisenhower semanal (Dom 9pm) → clasifica tareas en matriz, actualiza Notion, manda resumen
 
@@ -126,13 +132,28 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - [ ] 6.2 Coordinador principal → recibe intent de Cal, delega a subagentes, ensambla respuesta. Preserva contexto del hilo principal.
 - [ ] 6.3 Agent-to-agent → un agente asigna trabajo a otro (Research → Notion para guardar hallazgos). Ref: subagentes NO reciben session tools por defecto (seguridad), profundidad de nesting configurable.
 
-### Agente Familiar (Cal + Noe)
-- [ ] **Nuevo agente dedicado** — separado del CoS de Yape, enfocado en coordinación familiar
-- [ ] **Calendarios Google** — conectar calendarios de Cal, Noe, Antonia, Catalina. Ref: awesome-openclaw-usecases tiene setup concreto con OAuth read-only + calendario familiar compartido + calendario de pareja.
-- [ ] **Detección de conflictos** — lookahead 3 días, cuando hay colisión (reunión tarde + actividad hijo) sugiere soluciones y actualiza calendario. Ref: OpenClaw family calendar parsea PDFs de calendarios escolares via OCR.
-- [ ] **Briefing familiar diario** — eventos color-coded por fuente, conflictos destacados, contexto clima para eventos outdoor
-- [ ] **Telegram bidireccional** — grupo de Telegram separado donde Cal y Noe envían mensajes y reciben respuestas
-- [ ] **Funcionalidad core:** coordinación de horarios, recordatorios, tareas del hogar, actividades de las niñas
+---
+
+## Otros Agentes (backlogs separados)
+
+Cada agente tiene su propia carpeta, CLAUDE.md y BACKLOG.md. Desde aquí se puede consultar y actualizar.
+
+| Agente | Ruta | Estado | Bot Telegram |
+|--------|------|--------|-------------|
+| **Inversiones** | `~/Documents/Claude Projects/Personal/Agents/Inversiones/` | MVP activo | pendiente |
+| **Gestión Presupuesto** | `~/Documents/Claude Projects/Personal/Agents/Presupuesto/` | Producción (5+ meses) | integrado en PFM |
+| **Familiar (Cal + Noe)** | `~/Documents/Claude Projects/Personal/Agents/Family/` | Planificación | pendiente |
+| **Learning** | `~/Documents/Claude Projects/Personal/Agents/Learning/` | Planificación | pendiente |
+| **Health & Fitness** | `~/Documents/Claude Projects/Personal/Agents/Health/` | Planificación | pendiente |
+| **Escolar (Antonia + Catalina)** | `~/Documents/Claude Projects/Personal/Agents/School/` | Planificación | pendiente |
+
+Notas:
+- **Inversiones** — MVP lanzado 2026-04-06. Portfolio, análisis fundamental, screening. Airtable + Kubera MCP + yfinance. 30 tests
+- **Gestión Presupuesto** — Producción desde nov 2025. 1,365+ transacciones. Dashboard Cloudflare Workers, bot Telegram (foto→categoriza), email polling BCP Perú, multi-moneda. D1+KV+R2+Airtable+Claude API. 26 tests E2E
+- **Learning** — Kindle, Feedbin, Readwise Reader. Tracking de libros en Notion
+- **Health & Fitness** — Coach data-driven. Health Worker ya desplegado con data real de Apple Health
+- **Escolar** — Calendario escolar, parciales/finales, material de repaso para Antonia y Catalina
+- **Familiar** — Coordinación Cal+Noe, calendarios, conflictos horarios
 
 ### Futuro
 - [ ] Migrar secrets a 1Password CLI (`op`)

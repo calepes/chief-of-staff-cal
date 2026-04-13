@@ -73,6 +73,19 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 - **Uso en /today:** incluir sección 🏥 Salud si hay data disponible
 - **Triggers naturales:** "cómo dormí", "pasos hoy", "salud semana", "peso"
 
+## Gestión de Viajes
+- **Fuente:** Flighty (iOS) → sincronizado a Google Calendar "AntoCataNoeCal"
+- **Calendar ID:** `c_4c2ogsnda3b61k1sd9eta6vc2k@group.calendar.google.com`
+- **Cada evento incluye:** booking code, horarios, ruta
+- **Check-in BoA:** Safari real via AppleScript (Playwright bloqueado por WAF Incapsula/Amadeus)
+  - `osascript -e 'tell application "Safari" to do JavaScript "..." in current tab of front window'`
+  - Prerrequisito: Safari > Settings > Developer > "Allow JavaScript from Apple Events"
+  - Iframe Amadeus cross-origin → usar System Events clicks `{x, y}` (requiere Accessibility)
+  - Flujo: boa.bo → cookies → Start Check-in → form (apellido + locator) → submit → iframe Amadeus
+  - Boarding pass se envía a Cal via Telegram (screenshot fullPage)
+- **Preferencia asiento:** el más adelante en pasillo; si no hay, el más adelante en fila del medio
+- **Triggers naturales:** "check-in vuelo", "próximo vuelo", "viajes esta semana"
+
 ## Comandos operativos
 
 ### Telegram channel

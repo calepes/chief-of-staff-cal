@@ -832,11 +832,24 @@ export function getAppHtml(): string {
     }
 
     // ── API helper ─────────────────────────────────────────────────────────
+    let backoffMs = 0;
     async function api(method, path, body) {
+      if (backoffMs > 0) {
+        await new Promise(r => setTimeout(r, backoffMs));
+      }
       try {
         const opts = { method, headers: { 'Content-Type': 'application/json' } };
         if (body) opts.body = JSON.stringify(body);
         const res = await fetch(path, opts);
+        if (res.status === 429) {
+          const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+          backoffMs = Math.max(backoffMs || 1000, retryAfter * 1000, 1000);
+          backoffMs = Math.min(backoffMs * 2, 30000);
+          console.warn('Rate limited, backoff:', backoffMs, 'ms');
+          showToast('Spotify rate limit — esperando...');
+          return null;
+        }
+        if (backoffMs > 0) backoffMs = 0;
         if (res.status === 204) return null;
         if (res.status === 404) {
           const text = await res.text();
