@@ -42,10 +42,30 @@
 ### Spotify Client
 - **Fix**: JSON parse error en respuestas vacías de Spotify API (nowPlaying después de skip)
 
-### Docs
-- **Docs**: CLAUDE.md actualizado — Spotify, Health, Notion, comandos operativos
-- **Docs**: BACKLOG.md actualizado con items completados
-- **Docs**: Investigación UX Telegram — inline keyboards vs Mini Apps, mejores prácticas
+### Quick Wins (sesión nocturna)
+- **Feature**: /today integra sección 🏥 Salud (consulta health worker) y 📅 Calendario (Outlook cache + Google Calendar MCP)
+- **Feature**: Navegación de menú con edit_message in-place (no mensaje nuevo) + botón "⬅️ Menu"
+- **Feature**: MAX_KEYBOARD_ROWS=4 en reply y edit_message (fix stutter iOS)
+
+### Hooks & Crons (sesión nocturna)
+- **Feature**: Hook SessionStart mejorado — tareas vencidas de Notion (API directa) + eventos Outlook (ICS cache) + Google Calendar (MCP)
+- **Feature**: Hook Stop — push notification Telegram cuando Claude termina (solo end_turn)
+- **Feature**: Outlook ICS cache — `refresh-outlook-cache.sh` + launchd cada 4h (`com.claude.outlook-cache`)
+- **Feature**: Cron briefings diarios 5am — launchd `com.claude.daily-briefings`, Bolivia+Perú+Colombia via claude CLI
+- **Fix**: Health Worker dedup — `INSERT OR IGNORE` + unique index + migration 0002 (eliminó ~24K filas duplicadas)
+
+### Spotify Mini App (sesión nocturna)
+- **Feature**: Backoff exponencial en 429 rate limit (1s→30s, resetea en success, toast "esperando...")
+
+### Organización (sesión nocturna)
+- **Feature**: Carpetas Yape unificadas (removido espacio trailing + merge Océano Azul)
+- **Feature**: Gestión de Viajes integrado al CoS (Flighty, check-in BoA, preferencias)
+- **Feature**: Gestión Presupuesto Familiar movido de Apps/ a Agents/Presupuesto/
+- **Feature**: Estructura de agentes — Family, Learning, Health, School con CLAUDE.md + BACKLOG.md
+- **Feature**: Tabla de agentes en BACKLOG.md con rutas, estados, y bots Telegram
+- **Docs**: CLAUDE.md global y proyecto actualizados con ruta Agents/
+- **Docs**: Briefing instructions commiteados para agentes remotos
+- **Docs**: Notion DB Tareas — esquema completo (32 props), ID corregido para API directa
 
 ## 2026-04-11
 
