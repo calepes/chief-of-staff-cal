@@ -88,7 +88,11 @@
 - [x] **Editar mensaje en navegación de menú** — edit_message en callbacks menu:*, skill actualizado, server.ts no destruye mensaje en menu callbacks (2026-04-12)
 - [x] **Limitar keyboards a 4 filas max** — MAX_KEYBOARD_ROWS=4 en reply y edit_message (2026-04-12)
 - [x] **Mini App para flujos complejos** — implementado: Spotify Mini App TWA (2026-04-12)
+- [x] **Loading transitions mecánicas** — callbacks `menu:*` hacen edit instantáneo ("⏳ Cargando...") en el plugin antes de pasar al LLM (~150ms). Approach A: edit texto + quitar botones (2026-04-12)
 - [ ] **MenuButtonWebApp** — reemplazar lista de comandos `/` con Mini App como menú principal del bot. (esfuerzo: medio)
+
+### Documentación Telegram
+- [x] **telegram-reference.md** — referencia cross-project consolidada en `~/Documents/Claude Projects/telegram-reference.md`. Cubre: bot, plugin fork, callbacks, UX patterns, integraciones (CoS, Presupuesto, MCP), workers, hooks, gotchas (2026-04-12)
 
 ### CoS Proactivo — Plan inspirado en OpenClaw (2026-04-12)
 Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), guía completa

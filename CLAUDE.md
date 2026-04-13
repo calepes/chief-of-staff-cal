@@ -12,14 +12,17 @@ El diseño de este CoS se basa en el framework de Tal Raviv ("Build your persona
 ## Context de Yape
 Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 
+## Telegram Reference (cross-project)
+Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — referencia consolidada de bot, plugin fork, callbacks, UX patterns, integraciones, workers, y gotchas across all projects.
+
 ## Telegram Bot (@calclaudecode_bot)
 - **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas, /menu, /spotify
 - **Menú interactivo:** Configurable en `~/.claude/channels/telegram/menu.json`. Skill `/menu` lee el JSON y envía botones inline.
 - **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
 - **Botones inline en reply:** El tool `reply` del fork soporta parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}` o `{text, url}` (para deep links). El keyboard se adjunta al último chunk.
 - **Callback format:** `[callback] prefix:action[:context]` — prefixes: menu, task, approve, spotify, nav
-- **Callback optimization:** Prefijos mecánicos (t:d, t:c, t:s, t:sd) se procesan directo en el plugin via Notion API (~200ms). El resto pasa al LLM. Módulos: `callback-router.ts`, `notion-client.ts`
-- **Navegación de menú:** Callbacks `menu:*` no editan el mensaje original — el LLM usa `edit_message` para actualizar in-place con nuevo contenido + botón "⬅️ Menu"
+- **Callback optimization:** Prefijos mecánicos (t:d, t:c, t:s, t:sd, spotify:*) se procesan directo en el plugin (~200ms). Callbacks `menu:*` muestran loading transition mecánica (edit texto + quitar botones) antes de pasar al LLM. Módulos: `callback-router.ts`, `notion-client.ts`
+- **Navegación de menú:** Callbacks `menu:*` hacen edit mecánico instantáneo ("⏳ Cargando...") en el plugin, luego el LLM edita con contenido final + botón "⬅️ Menu"
 - **MAX_KEYBOARD_ROWS:** 4 filas máximo en inline keyboards (reply y edit_message) para evitar stutter en iOS
 - **Notion token:** en `~/.claude/channels/telegram/.env` como `NOTION_TOKEN`
 - **Progreso en tareas largas:** Enviar mensajes nuevos (no editar) para que cada update genere push notification

@@ -47,6 +47,11 @@
 - **Feature**: Navegación de menú con edit_message in-place (no mensaje nuevo) + botón "⬅️ Menu"
 - **Feature**: MAX_KEYBOARD_ROWS=4 en reply y edit_message (fix stutter iOS)
 
+### Telegram UX & Documentación (sesión nocturna 2)
+- **Feature**: Loading transitions mecánicas en plugin para callbacks `menu:*` — edit instantáneo (~150ms) con "⏳ Cargando..." antes de pasar al LLM
+- **Docs**: `telegram-reference.md` — referencia cross-project consolidada (bot, plugin fork, callbacks, UX, integraciones, workers, gotchas)
+- **Docs**: Referencia agregada en `Claude Projects/CLAUDE.md` y CoS `CLAUDE.md`
+
 ### Hooks & Crons (sesión nocturna)
 - **Feature**: Hook SessionStart mejorado — tareas vencidas de Notion (API directa) + eventos Outlook (ICS cache) + Google Calendar (MCP)
 - **Feature**: Hook Stop — push notification Telegram cuando Claude termina (solo end_turn)

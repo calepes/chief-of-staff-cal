@@ -828,9 +828,25 @@ bot.on('callback_query:data', async ctx => {
       ? ctx.callbackQuery.message.reply_markup?.inline_keyboard?.flat()?.find(b => b.callback_data === data)?.text ?? data
       : data
     await ctx.answerCallbackQuery({ text: `✓ ${buttonLabel}` }).catch(() => {})
-    // For menu: callbacks, don't edit the message — the LLM will edit_message with new content
-    // For other callbacks, show "Seleccionado: X" as before
-    if (!data.startsWith('menu:')) {
+    // For menu: callbacks, show instant loading transition (~150ms) before LLM processes
+    if (data.startsWith('menu:')) {
+      const LOADING: Record<string, string> = {
+        'menu:main':    '⏳ Cargando menú...',
+        'menu:tareas':  '⏳ Cargando tareas...',
+        'menu:status':  '⏳ Cargando status...',
+        'menu:today':   '⏳ Cargando briefing...',
+      }
+      const loadingText = LOADING[data] ?? `⏳ Cargando...`
+      const msg = ctx.callbackQuery.message
+      if (msg && 'text' in msg && msg.text) {
+        await ctx.api.editMessageText(
+          msg.chat.id,
+          msg.message_id,
+          loadingText,
+          { reply_markup: { inline_keyboard: [] } },
+        ).catch(() => {})
+      }
+    } else {
       const msg = ctx.callbackQuery.message
       if (msg && 'text' in msg && msg.text) {
         const buttonText = msg.reply_markup?.inline_keyboard
