@@ -1,5 +1,28 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-12 (noche) — 2026-04-13
+
+### Telegram UX
+- **Fix**: Contenido de callbacks del menú ahora se envía como reply nuevo (no edit_message) — evita que el plugin destruya el contenido al navegar de vuelta
+- **Fix**: Eliminados botones callback en mensajes de contenido — el plugin hacía edit mecánico al presionarlos
+
+### Cron Briefings
+- **Fix**: `timeout` → `gtimeout` (coreutils) — `timeout` no existe en macOS
+- **Feature**: Notificación a Telegram via curl cuando un briefing falla (timeout o error)
+- **Feature**: Rutas de GitHub Pages explícitas en el prompt para evitar búsquedas con find
+- **Feature**: `Skill` agregado a --allowedTools del cron
+- **Fix**: Removido `set -euo pipefail` para que no aborte si un país falla
+
+### Briefings
+- **Feature**: Briefing Peru 12 abril 2026 — cobertura elecciones generales (Keiko 16.6%, empate técnico segundo lugar, escándalo ONPE 63K votantes)
+
+### Skill /today
+- **Feature**: Sección de tareas Notion agregada — semana actual, agrupadas por asignado, ordenadas por deadline
+
+### Backlog
+- **Feature**: Agregado item Google Maps API (distancias/tiempos) al backlog CoS
+- **Feature**: Agregado item Tipo de Gasto (Factura) al backlog Presupuesto
+
 ## 2026-04-12
 
 ### Deploy & Configuración

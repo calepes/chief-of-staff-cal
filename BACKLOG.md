@@ -162,3 +162,4 @@ Notas:
 ### Futuro
 - [ ] Migrar secrets a 1Password CLI (`op`)
 - [ ] Webhook Cloudflare Worker para procesar callback_query server-side (alternativa si el fork del plugin da problemas de mantenimiento)
+- [ ] **Google Maps API — distancias y tiempos** → integrar API de Google Maps (Distance Matrix / Directions) para calcular tiempos de traslado entre reuniones, sugerir hora de salida, alertar cuando hay reuniones consecutivas en ubicaciones distintas. Útil para /today y briefings con agenda presencial.

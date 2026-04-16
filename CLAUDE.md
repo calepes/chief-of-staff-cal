@@ -9,7 +9,7 @@ El diseño de este CoS se basa en el framework de Tal Raviv ("Build your persona
 - **Backlog:** `BACKLOG.md`
 - **Artículo procesado:** `/Users/calepes/Documents/Claude Projects/Claude Code Setup/docs/articulos/01kcy4phpx-tal-raviv-personal-ai-copilot.md`
 
-## Context de Yape
+## Contexto de Yape
 Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 
 ## Telegram Reference (cross-project)
@@ -21,8 +21,8 @@ Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — refere
 - **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
 - **Botones inline en reply:** El tool `reply` del fork soporta parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}` o `{text, url}` (para deep links). El keyboard se adjunta al último chunk.
 - **Callback format:** `[callback] prefix:action[:context]` — prefixes: menu, task, approve, spotify, nav
-- **Callback optimization:** Prefijos mecánicos (t:d, t:c, t:s, t:sd, spotify:*) se procesan directo en el plugin (~200ms). Callbacks `menu:*` muestran loading transition mecánica (edit texto + quitar botones) antes de pasar al LLM. Módulos: `callback-router.ts`, `notion-client.ts`
-- **Navegación de menú:** Callbacks `menu:*` hacen edit mecánico instantáneo ("⏳ Cargando...") en el plugin, luego el LLM edita con contenido final + botón "⬅️ Menu"
+- **Callback optimization:** Prefijos mecánicos (t:d, t:c, t:s, t:sd, spotify:*) se procesan directo en el plugin (~200ms). Módulos: `callback-router.ts`, `notion-client.ts`
+- **Navegación de menú:** Callbacks `menu:*` hacen edit mecánico instantáneo ("⏳ Cargando...") en el plugin, luego el LLM envía el contenido como **reply nuevo** (NO edit_message) sin botones callback, y restaura el menú original arriba. No usar edit para contenido porque el plugin destruye el mensaje al hacer edit mecánico
 - **MAX_KEYBOARD_ROWS:** 4 filas máximo en inline keyboards (reply y edit_message) para evitar stutter en iOS
 - **Notion token:** en `~/.claude/channels/telegram/.env` como `NOTION_TOKEN`
 - **Progreso en tareas largas:** Enviar mensajes nuevos (no editar) para que cada update genere push notification
@@ -121,10 +121,14 @@ cd health-worker && npx wrangler deploy
 - **Stop hook:** `~/.claude/hooks/stop-telegram-notify.sh` — push notification a Telegram cuando Claude termina (solo en `end_turn`)
 - **Outlook cache:** `~/.claude/hooks/refresh-outlook-cache.sh` — descarga ICS, extrae hoy/mañana, guarda en `~/.claude/hooks/cache/outlook-events.txt`
 - **Cron Outlook:** launchd `com.claude.outlook-cache` — cada 4 horas + al boot
-- **Cron Briefings:** launchd `com.claude.daily-briefings` — 5:00am diario, genera briefings Bolivia + Perú + Colombia via claude CLI
+- **Cron Briefings:** launchd `com.claude.daily-briefings` — 5:00am diario, genera briefings Bolivia + Perú + Colombia via claude CLI. Usa `gtimeout` 15min por país (coreutils). Notifica errores a Telegram via curl
 - **Status line:** muestra `fecha hora | proyecto | contexto | modelo`, refreshInterval 60s
 - **Config:** `~/.claude/settings.json` (hooks) + `~/.claude/statusline-command.sh`
 - **Skill telegram-miniapp:** guía global para construir TWAs — checklist, gotchas, boilerplate
+
+## Skill /today
+- **Ubicación:** `~/.claude/commands/today.md`
+- **Secciones:** scope (proyecto vs panorama), calendario (Outlook + Google), salud (health worker), tareas Notion (semana actual agrupadas por asignado)
 
 ## Audio
 - whisper-cli instalado (`/opt/homebrew/bin/whisper-cli`) con modelo base. Requiere conversión OGA→WAV con ffmpeg antes de transcribir
