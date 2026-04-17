@@ -155,7 +155,7 @@ Notas:
 - **Inversiones** — MVP lanzado 2026-04-06. Portfolio, análisis fundamental, screening. Airtable + Kubera MCP + yfinance. 30 tests
 - **Gestión Presupuesto** — Producción desde nov 2025. 1,365+ transacciones. Dashboard Cloudflare Workers, bot Telegram (foto→categoriza), email polling BCP Perú, multi-moneda. D1+KV+R2+Airtable+Claude API. 26 tests E2E
 - **Learning** — Kindle, Feedbin, Readwise Reader. Tracking de libros en Notion
-- **Health & Fitness** — Coach data-driven. Health Worker ya desplegado con data real de Apple Health
+- **Health & Fitness** — Coach data-driven. Health Worker vive en `Health/health-worker/` (desplegado en `health.carlos-cb4.workers.dev`, recibiendo data real)
 - **Escolar** — Calendario escolar, parciales/finales, material de repaso para Antonia y Catalina
 - **Familiar** — Coordinación Cal+Noe, calendarios, conflictos horarios
 

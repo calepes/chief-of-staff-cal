@@ -1,5 +1,24 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-17
+
+### Refactor estructural
+- **Move**: `health-worker/` movido de `Chief of Staff Cal/` a `Health/` — vive con su agente
+- **Update**: `CoS/CLAUDE.md` reducido a consumer con quick-ref de endpoints + pointer a `Health/CLAUDE.md`
+- **Update**: `Health/CLAUDE.md` enriquecido con especificación completa del worker (endpoints, ingesta, métricas, dedup, deploy, ejemplos curl)
+
+### Notion (cross-project)
+- **Feature**: Creado `~/Documents/Claude Projects/notion-reference.md` — referencia global cargada bajo demanda: mapeo personas (pageId ↔ nombre) para 7 miembros del equipo Yape, schema DB Tareas (32 props), patterns jq para outputs grandes (70KB+), gotchas (users vs pages en API)
+- **Update**: `Claude Projects/CLAUDE.md` referencia `notion-reference.md` junto a telegram-reference.md
+- **Update**: `CoS/CLAUDE.md` sección Notion reducida a pointer al archivo cross-project
+
+### Handoff Health
+- **Feature**: Creado `Health/SESSION-HANDOFF.md` con contexto heredado de la sesión CoS para arrancar trabajo en el agente Health (Fase 1: metas + baseline + BD Notion + bot propio)
+
+### Docs
+- **Update**: Sección Audio de `CoS/CLAUDE.md` ahora incluye path completo del modelo whisper (`ggml-base.bin`) y comando completo de transcripción OGA → WAV → texto
+- **Update**: `Health/CLAUDE.md` añade ejemplo POST /ingest para debugging
+
 ## 2026-04-12 (noche) — 2026-04-13
 
 ### Telegram UX

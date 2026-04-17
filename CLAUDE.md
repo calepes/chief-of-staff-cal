@@ -35,13 +35,8 @@ Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — refere
 - **Mapeo personas:** Al inicio del flujo, resolver Notion person page IDs → nombres
 
 ## Notion
-- **Integración:** "Claude CoS" — conectada a la DB de Tareas (acceso completo a páginas)
-- **Eisenhower (this week):** Matriz de priorización de tareas de Cal en Yape
-- **Base de datos Tareas (API):** `1f2c487609dd802985dcd7ad59110ddd` — usar este ID para queries via Notion API
-- **Data source ID (MCP):** `1f2c4876-09dd-80d2-8c0c-000b7f35059b` — para queries via MCP notion-query-database-view
-- **Cal person ID:** `https://www.notion.so/2f2fc7e7523043b2b65c19d38f608de7`
-- **Vista "Todas activas":** `view://33fc4876-09dd-819b-8397-000cbdf243dc` (creada para queries ad-hoc)
-- **Esquema DB Tareas:** 32 propiedades. Estado (status: Backlog, Sin empezar, En curso, Focus, Waiting for, Cancelada, Listo), Fecha, Deadline, Urgencia v2, Importancia V2, Prioridad CAL (P1-P4), Asignado a (relation→People), Eisenhower (formula)
+- **Integración:** "Claude CoS" — conectada a DB de Tareas y People
+- **Referencia:** `~/Documents/Claude Projects/notion-reference.md` (cross-project, cargar bajo demanda)
 
 ## Briefings
 - **Skill:** /briefing-pais — genera HTML Liquid Glass, publica en GitHub Pages, notifica por Telegram
@@ -67,21 +62,16 @@ Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — refere
 - **Polling:** cada 5s (15s cuando pierde foco)
 - **Entry points:** botón "🎵 Spotify" en menú principal (URL directa a TWA)
 
-## Apple Health
-- **Worker:** `https://health.carlos-cb4.workers.dev` — **desplegado**
-- **D1 database:** `health-data`
-- **API Key:** en `~/.claude/channels/telegram/.env` como `HEALTH_API_KEY`
-- **Auth:** via query param `?key=` (no header — Health Auto Export no envía headers custom correctamente)
-- **Endpoints:**
-  - `POST /ingest?key=KEY` — recibe data de Health Auto Export
-  - `GET /summary?date=YYYY-MM-DD&key=KEY` — resumen del día
-  - `GET /trend?metric=X&days=N&key=KEY` — tendencia
-- **Formato ingesta:** `{ data: { metrics: [{ name, units, data: [{ date, qty, ... }] }] } }` — estructura anidada de Health Auto Export
-- **Métricas disponibles:** step_count, active_energy, heart_rate, heart_rate_variability, flights_climbed, apple_exercise_time, apple_stand_hour, apple_stand_time, physical_effort, time_in_daylight, stair_speed_up, stair_speed_down, breathing_disturbances
-- **Sleep:** se expande a sub-métricas: `sleep_totalSleep`, `sleep_deep`, `sleep_rem`, `sleep_core`, `sleep_awake` (unidad: hr)
-- **Dedup:** `INSERT OR IGNORE` + unique index en (metric, date, timestamp, value). Migration 0002.
-- **Uso en /today:** incluir sección 🏥 Salud si hay data disponible
-- **Triggers naturales:** "cómo dormí", "pasos hoy", "salud semana", "peso"
+## Apple Health (consumo)
+Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects/Personal/Agents/Health/health-worker/`. Ver `Health/CLAUDE.md` para detalles completos.
+
+**Endpoints (quick ref para consumir desde CoS):**
+- `GET https://health.carlos-cb4.workers.dev/summary?date=YYYY-MM-DD&key=$HEALTH_API_KEY` — resumen del día
+- `GET https://health.carlos-cb4.workers.dev/trend?metric=X&days=N&key=$HEALTH_API_KEY` — tendencia
+- API Key: `~/.claude/channels/telegram/.env` como `HEALTH_API_KEY`
+
+**Uso en /today:** sección 🏥 Salud si hay data disponible.
+**Triggers naturales:** "cómo dormí", "pasos hoy", "salud semana", "peso".
 
 ## Gestión de Viajes
 - **Fuente:** Flighty (iOS) → sincronizado a Google Calendar "AntoCataNoeCal"
@@ -113,7 +103,8 @@ cp telegram-plugin/{server,notion-client,callback-router,spotify-client}.ts \
 ```bash
 cd spotify-auth-worker && npx wrangler deploy
 cd spotify-miniapp-worker && npx wrangler deploy
-cd health-worker && npx wrangler deploy
+# Health worker vive en el agente Health:
+cd ../../Health/health-worker && npx wrangler deploy
 ```
 
 ## Hooks & Automatización
@@ -131,7 +122,12 @@ cd health-worker && npx wrangler deploy
 - **Secciones:** scope (proyecto vs panorama), calendario (Outlook + Google), salud (health worker), tareas Notion (semana actual agrupadas por asignado)
 
 ## Audio
-- whisper-cli instalado (`/opt/homebrew/bin/whisper-cli`) con modelo base. Requiere conversión OGA→WAV con ffmpeg antes de transcribir
+- whisper-cli: `/opt/homebrew/bin/whisper-cli` · modelo: `/opt/homebrew/share/whisper-cpp/models/ggml-base.bin`
+- Flujo transcripción nota de voz Telegram (OGA):
+  ```
+  ffmpeg -hide_banner -loglevel error -y -i IN.oga -ar 16000 -ac 1 OUT.wav
+  whisper-cli -m /opt/homebrew/share/whisper-cpp/models/ggml-base.bin -l es -nt -f OUT.wav
+  ```
 
 ## Specs y Planes
 - **Specs:** `docs/superpowers/specs/` — diseños aprobados
