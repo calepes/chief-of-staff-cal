@@ -40,7 +40,7 @@
 - [x] Test end-to-end del menú (2026-04-12) — probado: menú → Spotify → controles
 - [x] Soporte para botones URL (deep links)
 - [x] Toast de confirmación en callbacks no mecánicos
-- [ ] Aprobaciones rápidas (sí/no)
+- [x] Aprobaciones rápidas (sí/no) — callbacks `approve:yes[:context]` y `approve:no[:context]` procesados mecánicamente (2026-04-19)
 - Spec: `docs/superpowers/specs/2026-04-11-inline-buttons-menu-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-inline-buttons-menu.md`
 
@@ -52,7 +52,7 @@
 - [x] Deploy Worker + secrets + wrangler v4 (2026-04-12)
 - [x] Auth flow — Cal visitó /login (2026-04-12)
 - [x] Test end-to-end (2026-04-12) — callback funciona, error esperado "No active device"
-- [ ] Deep link para abrir Spotify cuando no hay dispositivo activo
+- [x] Deep link para abrir Spotify cuando no hay dispositivo activo — callback-router detecta "No active device" y responde con botón URL "🎵 Abrir Spotify" (2026-04-19)
 - Spec: `docs/superpowers/specs/2026-04-11-spotify-control-design.md`
 - Plan: `docs/superpowers/plans/2026-04-11-spotify-control.md`
 
@@ -89,7 +89,7 @@
 - [x] **Limitar keyboards a 4 filas max** — MAX_KEYBOARD_ROWS=4 en reply y edit_message (2026-04-12)
 - [x] **Mini App para flujos complejos** — implementado: Spotify Mini App TWA (2026-04-12)
 - [x] **Loading transitions mecánicas** — callbacks `menu:*` hacen edit instantáneo ("⏳ Cargando...") en el plugin antes de pasar al LLM (~150ms). Approach A: edit texto + quitar botones (2026-04-12)
-- [ ] **MenuButtonWebApp** — reemplazar lista de comandos `/` con Mini App como menú principal del bot. (esfuerzo: medio)
+- [x] **MenuButtonWebApp** — script `scripts/setup-menu-button.sh` configura setChatMenuButton apuntando a Mini App (2026-04-19). Actual: Spotify Mini App con label "🎵 Abrir". Cambiar en el futuro si se crea una Mini App main menu
 
 ### Documentación Telegram
 - [x] **telegram-reference.md** — referencia cross-project consolidada en `~/Documents/Claude Projects/telegram-reference.md`. Cubre: bot, plugin fork, callbacks, UX patterns, integraciones (CoS, Presupuesto, MCP), workers, hooks, gotchas (2026-04-12)
@@ -101,8 +101,8 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - [x] 1.1a Hook SessionStart → inyectar fecha/hora actual (implementado 2026-04-12)
 - [x] 1.1b Hook SessionStart → tareas vencidas Notion + calendar. Script: `~/.claude/hooks/session-start-context.sh`. Nota: requiere compartir DB con integración "Claude CoS" para query directo; fallback a instrucciones MCP (2026-04-12)
 - [x] 1.2 Hook Stop → push notification a Telegram. Script: `~/.claude/hooks/stop-telegram-notify.sh`. Solo notifica en `end_turn` (2026-04-12)
-- [ ] 1.3 Hook PostCompact → guardar contexto automáticamente antes de perderlo
-- [ ] 1.4 Hook PostToolUse(Notion) → audit log de escrituras a Notion. Ref: OpenClaw filtra por herramienta, append a audit.log con timestamp + acción + page ID.
+- [x] 1.3 Hook PreCompact → snapshot del transcript antes de compactar. Script: `~/.claude/hooks/pre-compact-snapshot.sh`. Últimos 20 snapshots en `~/.claude/compact-snapshots/` (2026-04-19)
+- [x] 1.4 Hook PostToolUse(Notion) → audit log de escrituras. Script: `~/.claude/hooks/notion-audit.sh` filtrado a `mcp__notion__.*`, loguea a `~/.claude/logs/notion-audit.log` con rotación a 5MB (2026-04-19)
 
 **Fase 1.5: Outlook Calendar + Cron cache** (implementado 2026-04-12)
 - [x] ICS feed de Outlook integrado en hook SessionStart (cache local + launchd cada 4h)
@@ -112,13 +112,13 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 
 **Fase 2: Cron Jobs — Rutinas diarias** (1-2 hrs)
 - [x] 2.1 Briefings diarios (5am) → trigger remoto combinado Bolivia + Perú + Colombia. ID: `trig_017HYzPBsdFkjGPb43BnjhPy`. Lee instrucciones de `docs/briefing-pais-instructions.md`, genera HTML Liquid Glass, publica en GitHub Pages, notifica por Telegram via Zapier MCP (2026-04-12)
-- [ ] 2.2 Reporte nocturno (10pm) → resumen del día, completadas, pendientes para mañana. Mismo patrón que 2.1.
-- [ ] 2.3 Eisenhower semanal (Dom 9pm) → clasifica tareas en matriz, actualiza Notion, manda resumen
+- [x] 2.2 Reporte nocturno (22:00) → launchd `com.claude.nightly-report` + `~/.claude/hooks/nightly-report.sh`. Resumen día (completadas, eventos), pendientes hoy, plan mañana, sugerencia accionable (2026-04-19)
+- [x] 2.3 Eisenhower semanal (Dom 21:00) → launchd `com.claude.eisenhower-weekly` + `~/.claude/hooks/eisenhower-weekly.sh`. Clasifica tareas en Q1-Q4, reporta por Telegram. V1 solo reporta (no actualiza Notion) — agregar campo Eisenhower si Cal lo pide (2026-04-19)
 
-**Fase 3: Heartbeat — Trabajo proactivo** (2 hrs)
-- [ ] 3.1 Heartbeat cada 30min → revisa tareas vencidas, mensajes pendientes, eventos próximos → alerta proactiva si hay algo, silencio (`HEARTBEAT_OK`) si no. Ref: OpenClaw heartbeat razona sobre contexto antes de actuar (vs cron que ejecuta ciego).
-- [ ] 3.2 Heartbeat tasks como Markdown → carpeta `heartbeat-tasks/` con un .md por tarea: `check-tasks.md`, `check-calendar.md`, `proactive-idea.md`. Ref: Viticci (MacStories) usa este patrón exacto, invoca subagentes para tareas complejas en paralelo.
-- [ ] 3.3 "Proactive ideas" (3x/día) → genera idea útil basada en contexto y la agrega a Notion. Ref: Viticci agrega 3 ideas/día a su daily note en Notion.
+**Fase 3: Heartbeat — Trabajo proactivo** (implementado 2026-04-19)
+- [x] 3.1 Heartbeat cada 30min → `~/.claude/hooks/heartbeat.sh` + launchd `com.claude.heartbeat` (cargado, 7am-22:30 cada 30min). Razona sobre contexto, agrupa alerts por prioridad (high/medium/low), buffer único a Telegram, contador de fallos consecutivos (≥3 → alerta). Log rotation 5MB. Status script: `heartbeat-status.sh`. Spec: `2026-04-19-heartbeat-fase3-design.md`. Plan: `2026-04-19-heartbeat-fase3.md`
+- [x] 3.2 Heartbeat tasks como Markdown → `~/.claude/heartbeat-tasks/` con frontmatter (`name`, `schedule: every|morning-only|afternoon-only|midday-only`, `priority: high|medium|low`). Checks creados: `overdue-tasks.md` (Notion vencidas), `flight-checkin.md` (Google Calendar AntoCataNoeCal), `incomplete-tasks.md` (sin asignado/deadline, morning-only), `midday-steps.md` (Health worker, alerta si <3000 al mediodía). Cada check responde `HEARTBEAT_OK` o `ALERT\n<mensaje>`
+- [x] 3.3 "Proactive ideas" (3x/día) → `~/.claude/hooks/proactive-ideas.sh` + plist `com.claude.proactive-ideas` (creado, NO cargado hasta que Cal configure tokens X/Threads + NOTION_IDEAS_DB_ID). Slots: 9am=foco 🎯, 14:00=tactical ⚡, 19:00=lookahead 🔮. Lee posts propios X+Threads últimas 24h + tareas activas Notion → JSON {title, body, source} → Notion DB "Ideas Proactivas (CoS)" (id `59e0439d7fe0483ab735575b9e0c1007`, anidada bajo "💡 Ideas") + Telegram. Graceful degradation si falta cualquier API.
 
 **Fase 4: Webhooks — Reaccionar al mundo** (medio día)
 - [ ] 4.1 Email webhook → Gmail Watch API → Google Pub/Sub → Cloudflare Worker → Claude Code. Ref: existe `openclaw webhooks gmail setup` que configura todo; también `openclaw-gmail-proxy` (read-only, scrubbed de PII).
