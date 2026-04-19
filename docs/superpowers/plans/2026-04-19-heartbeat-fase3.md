@@ -42,27 +42,30 @@ THREADS_TOKEN=...
 THREADS_USER_ID=...
 ```
 
-- [ ] **Step 4: Crear DB "Ideas" en Notion**
+- [ ] **Step 4: DB "Ideas Proactivas (CoS)" — YA CREADA (2026-04-19)**
 
-Vía Notion UI, crear nueva DB "Ideas" con propiedades:
-- Título (title) — default
+DB anidada bajo página existente "💡 Ideas" en Areas/Cal.
+
+URL: https://www.notion.so/59e0439d7fe0483ab735575b9e0c1007
+Database ID: `59e0439d7fe0483ab735575b9e0c1007`
+
+Properties:
+- Título (title)
 - Cuerpo (rich_text)
 - Fecha (date)
 - Source (select: X, Threads, Calendar, Health, Mixto)
-- Estado (status: pending, accepted, dismissed, done)
 - Slot (select: foco, tactical, lookahead)
+- Estado (status default Notion: "Sin empezar", "En curso", "Listo")
 
 - [ ] **Step 5: Compartir DB con integración Claude CoS**
 
 En la DB → ⋯ → Add connections → "Claude CoS"
 
-- [ ] **Step 6: Anotar database_ids**
-
-Vía Notion API o URL: `https://www.notion.so/<workspace>/<DATABASE_ID>?v=...`
+- [ ] **Step 6: Anotar database_ids en .env**
 
 Agregar al `.env` (DB Ideas nueva + DB Tareas existente, requerida por proactive-ideas.sh):
 ```
-NOTION_IDEAS_DB_ID=...
+NOTION_IDEAS_DB_ID=59e0439d7fe0483ab735575b9e0c1007
 NOTION_TASKS_DB_ID=...
 ```
 
@@ -1204,7 +1207,7 @@ write_notion() {
           "Cuerpo": { rich_text: [{ text: { content: $body } }] },
           "Fecha": { date: { start: $date } },
           "Source": { select: { name: $source } },
-          "Estado": { status: { name: "pending" } },
+          "Estado": { status: { name: "Sin empezar" } },
           "Slot": { select: { name: $slot } }
         }
       }')" > /dev/null

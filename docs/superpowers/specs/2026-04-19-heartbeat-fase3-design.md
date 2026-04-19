@@ -129,13 +129,13 @@ Cada .md termina con un comentario `<!-- Test scenario: ... -->` describiendo c�
 - 14:00 — "tactical alert": vs el plan de la mañana, ¿qué se está atrasando? 1 ajuste sugerido.
 - 19:00 — "lookahead mañana": síntesis del día + 1-2 preparativos para mañana.
 
-**Notion DB "Ideas" (a crear):**
+**Notion DB "Ideas Proactivas (CoS)" (creada 2026-04-19, ID `59e0439d7fe0483ab735575b9e0c1007`, anidada bajo página "💡 Ideas" en Areas/Cal):**
 - Título (title)
 - Cuerpo (rich_text)
 - Fecha (date)
 - Source (select: X, Threads, Calendar, Health, Mixto)
-- Estado (status: pending, accepted, dismissed, done)
 - Slot (select: foco, tactical, lookahead)
+- Estado (status default Notion: "Sin empezar", "En curso", "Listo")
 
 ## Testing
 
