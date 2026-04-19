@@ -11,6 +11,16 @@ ENV_FILE="$HOME/.claude/channels/telegram/.env"
 # Carga .env si existe (TELEGRAM_BOT_TOKEN, etc)
 [[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
 
+DRY_RUN=0
+ONLY_CHECK=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --only) ONLY_CHECK="$2"; shift 2 ;;
+    *) echo "Uso: heartbeat.sh [--dry-run] [--only <name>]"; exit 1 ;;
+  esac
+done
+
 log() {
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >> "$LOG_FILE"
 }
@@ -63,6 +73,12 @@ run_check() {
 # send_telegram <text>
 send_telegram() {
   local text="$1"
+  if (( DRY_RUN )); then
+    echo "=== DRY RUN — would send ==="
+    echo "$text"
+    echo "=== /DRY RUN ==="
+    return 0
+  fi
   local chat_id="${TELEGRAM_CHAT_ID:-94137698}"
   local token="${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN no definido}"
   curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
@@ -71,6 +87,15 @@ send_telegram() {
 }
 
 main() {
+  # Rotación: si log > 5MB, mover a .1 y empezar limpio
+  if [[ -f "$LOG_FILE" ]]; then
+    local size
+    size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)
+    if (( size > 5 * 1024 * 1024 )); then
+      mv "$LOG_FILE" "${LOG_FILE}.1"
+    fi
+  fi
+
   log "heartbeat start"
   local -a high_buf=() medium_buf=() low_buf=()
   local checks_total=0 checks_failed=0
@@ -80,6 +105,9 @@ main() {
     name=$(parse_frontmatter "$f" name)
     schedule=$(parse_frontmatter "$f" schedule)
     priority=$(parse_frontmatter "$f" priority)
+    if [[ -n "$ONLY_CHECK" && "$name" != "$ONLY_CHECK" ]]; then
+      continue
+    fi
     if ! should_run "$schedule"; then
       log "skip $name (schedule=$schedule)"
       continue
