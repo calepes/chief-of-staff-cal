@@ -69,6 +69,48 @@ fetch_notion_tasks() {
     || echo "(Notion query failed)"
 }
 
+write_notion() {
+  local title="$1" body="$2" source="$3" slot="$4"
+  local today
+  today=$(date +%Y-%m-%d)
+
+  if [[ -z "${NOTION_TOKEN:-}" || -z "${NOTION_IDEAS_DB_ID:-}" ]]; then
+    log "skip write_notion: NOTION config faltante"
+    return
+  fi
+
+  curl -s -X POST "https://api.notion.com/v1/pages" \
+    -H "Authorization: Bearer ${NOTION_TOKEN}" \
+    -H "Notion-Version: 2022-06-28" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -nc \
+      --arg dbid "$NOTION_IDEAS_DB_ID" \
+      --arg title "$title" \
+      --arg body "$body" \
+      --arg date "$today" \
+      --arg source "$source" \
+      --arg slot "$slot" \
+      '{
+        parent: { database_id: $dbid },
+        properties: {
+          "Título": { title: [{ text: { content: $title } }] },
+          "Cuerpo": { rich_text: [{ text: { content: $body } }] },
+          "Fecha": { date: { start: $date } },
+          "Source": { select: { name: $source } },
+          "Estado": { status: { name: "Sin empezar" } },
+          "Slot": { select: { name: $slot } }
+        }
+      }')" > /dev/null
+}
+
+send_telegram() {
+  local text="$1"
+  local chat_id="${TELEGRAM_CHAT_ID:-94137698}"
+  curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+    -d "chat_id=${chat_id}" \
+    --data-urlencode "text=${text}" > /dev/null
+}
+
 # === Construir prompt ===
 build_prompt() {
   local x_posts threads_posts tasks intent
@@ -128,11 +170,29 @@ main() {
     exit 1
   fi
 
-  IDEA_TITLE=$(echo "$response" | jq -r '.title')
-  IDEA_BODY=$(echo "$response" | jq -r '.body')
-  IDEA_SOURCE=$(echo "$response" | jq -r '.source')
+  local title body source emoji
+  title=$(echo "$response" | jq -r '.title')
+  body=$(echo "$response" | jq -r '.body')
+  source=$(echo "$response" | jq -r '.source')
 
-  log "got idea: $IDEA_TITLE"
+  log "got idea: $title"
+
+  log "writing to notion"
+  write_notion "$title" "$body" "$source" "$SLOT"
+
+  log "sending telegram"
+  case "$SLOT" in
+    foco) emoji="🎯" ;;
+    tactical) emoji="⚡" ;;
+    lookahead) emoji="🔮" ;;
+  esac
+  send_telegram "${emoji} ${title}
+
+${body}
+
+(slot: ${SLOT}, source: ${source})"
+
+  log "done"
 }
 
 main "$@"
