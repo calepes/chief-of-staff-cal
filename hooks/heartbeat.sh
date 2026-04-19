@@ -73,6 +73,7 @@ send_telegram() {
 main() {
   log "heartbeat start"
   local -a high_buf=() medium_buf=() low_buf=()
+  local checks_total=0 checks_failed=0
   for f in "$TASKS_DIR"/*.md; do
     [[ -f "$f" ]] || continue
     local name schedule priority
@@ -83,6 +84,7 @@ main() {
       log "skip $name (schedule=$schedule)"
       continue
     fi
+    checks_total=$((checks_total + 1))
     log "run $name"
     local body
     if body=$(run_check "$f"); then
@@ -97,6 +99,7 @@ main() {
         log "ok $name"
       fi
     else
+      checks_failed=$((checks_failed + 1))
       log "error $name"
     fi
   done
@@ -113,6 +116,25 @@ main() {
   else
     log "silent"
   fi
+
+  # Failure counter: si todos los checks fallaron, incrementar; si no, reset
+  local fail_state="$STATE_DIR/heartbeat-failures"
+  if (( checks_total > 0 && checks_failed == checks_total )); then
+    local count
+    count=$(cat "$fail_state" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    echo "$count" > "$fail_state"
+    log "all checks failed (count=$count)"
+    if (( count >= 3 )); then
+      curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+        -d "chat_id=${TELEGRAM_CHAT_ID:-94137698}" \
+        --data-urlencode "text=⚠️ heartbeat caído (3+ runs con todos los checks fallando)" \
+        > /dev/null
+    fi
+  else
+    echo 0 > "$fail_state"
+  fi
+
   log "heartbeat end"
 }
 
