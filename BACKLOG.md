@@ -120,11 +120,11 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - [x] 3.2 Heartbeat tasks como Markdown → `~/.claude/heartbeat-tasks/` con frontmatter (`name`, `schedule: every|morning-only|afternoon-only|midday-only`, `priority: high|medium|low`). Checks creados: `overdue-tasks.md` (Notion vencidas), `flight-checkin.md` (Google Calendar AntoCataNoeCal), `incomplete-tasks.md` (sin asignado/deadline, morning-only), `midday-steps.md` (Health worker, alerta si <3000 al mediodía). Cada check responde `HEARTBEAT_OK` o `ALERT\n<mensaje>`
 - [x] 3.3 "Proactive ideas" (3x/día) → `~/.claude/hooks/proactive-ideas.sh` + plist `com.claude.proactive-ideas` (creado, NO cargado hasta que Cal configure tokens X/Threads + NOTION_IDEAS_DB_ID). Slots: 9am=foco 🎯, 14:00=tactical ⚡, 19:00=lookahead 🔮. Lee posts propios X+Threads últimas 24h + tareas activas Notion → JSON {title, body, source} → Notion DB "Ideas Proactivas (CoS)" (id `59e0439d7fe0483ab735575b9e0c1007`, anidada bajo "💡 Ideas") + Telegram. Graceful degradation si falta cualquier API.
 
-**Fase 4: Webhooks — Reaccionar al mundo** (medio día)
-- [ ] 4.1 Email webhook → Gmail Watch API → Google Pub/Sub → Cloudflare Worker → Claude Code. Ref: existe `openclaw webhooks gmail setup` que configura todo; también `openclaw-gmail-proxy` (read-only, scrubbed de PII).
-- [ ] 4.2 GitHub PRs → webhook standard → notifica + review. Ref: caso avanzado: Sentry webhook → agente investiga error → hace fix → abre PR sin intervención humana.
+**Fase 4: Webhooks — Reaccionar al mundo**
 - [ ] 4.3 Health alertas → "dormiste <6h", "no caminaste hoy" (worker ya existe, agregar lógica)
-- [ ] 4.4 Notion changes → webhook cuando equipo modifica tareas → notifica a Cal. Ref: Notion → webhook HTTP → endpoint Worker.
+- ~~4.1 Email webhook (Gmail)~~ — descartado (no relevante hoy)
+- ~~4.2 GitHub PRs~~ — descartado (Cal no hace code review)
+- ~~4.4 Notion changes~~ — descartado (no relevante)
 
 **Fase 5: Auto-mejora continua** (1 día)
 - [ ] 5.1 Self-improving → Crear `.learnings/` con `LEARNINGS.md`, `ERRORS.md`, `FEATURE_REQUESTS.md`. Triggers: fallo, corrección de Cal, API que falla. Entradas con ID, timestamp, prioridad. Se "promueven" a CLAUDE.md periódicamente. Cal aprueba por Telegram. Ref: ClawHub skill `self-improving-agent`.
