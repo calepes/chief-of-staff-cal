@@ -104,7 +104,7 @@ EOF
 
 main() {
   log "building prompt"
-  local prompt
+  local prompt response
   prompt=$(build_prompt)
   log "prompt built ($(echo "$prompt" | wc -l) lines)"
 
@@ -112,7 +112,27 @@ main() {
     echo "=== DRY RUN — prompt ==="
     echo "$prompt"
     echo "=== /DRY RUN ==="
+    echo
+    echo "(skip claude call en dry-run)"
+    exit 0
   fi
+
+  log "calling claude"
+  if ! response=$(echo "$prompt" | gtimeout 90s claude -p 2>>"$LOG_FILE"); then
+    log "claude call failed"
+    exit 1
+  fi
+
+  if ! echo "$response" | jq -e . > /dev/null 2>&1; then
+    log "invalid JSON response: $response"
+    exit 1
+  fi
+
+  IDEA_TITLE=$(echo "$response" | jq -r '.title')
+  IDEA_BODY=$(echo "$response" | jq -r '.body')
+  IDEA_SOURCE=$(echo "$response" | jq -r '.source')
+
+  log "got idea: $IDEA_TITLE"
 }
 
 main "$@"
