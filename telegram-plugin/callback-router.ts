@@ -1,9 +1,32 @@
 import { updateTaskStatus, updateTaskDate } from './notion-client';
 import { play, pause, skipNext, skipPrevious, setVolume, nowPlaying } from './spotify-client';
 
+export interface RouteButton {
+  text: string;
+  url?: string;
+  callback_data?: string;
+}
+
 export interface RouteResult {
   editText: string;
   toast?: string;
+  buttons?: RouteButton[][];
+}
+
+function spotifyNoDeviceResult(action: string): RouteResult {
+  return {
+    editText: `🔇 No hay dispositivo Spotify activo.\n\nAbre Spotify en tu teléfono o compu, reproduce algo, y vuelve a intentar ${action}.`,
+    toast: '🔇 Abre Spotify',
+    buttons: [[
+      { text: '🎵 Abrir Spotify', url: 'https://open.spotify.com' },
+    ]],
+  };
+}
+
+function isNoDeviceError(err?: string): boolean {
+  if (!err) return false;
+  const lower = err.toLowerCase();
+  return lower.includes('no active device') || lower.includes('no_active_device') || lower.includes('404');
 }
 
 const PATTERNS = {
@@ -60,13 +83,16 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
       const np = await nowPlaying()
       return { editText: `▶️ Playing: ${np.track ?? 'Unknown'} — ${np.artist ?? ''}`, toast: '▶️' }
     }
+    if (isNoDeviceError(r.error)) return spotifyNoDeviceResult('play')
     return { editText: `❌ ${r.error}`, toast: 'Error' }
   }
 
   // spotify:pause
   if (data === 'spotify:pause') {
     const r = await pause()
-    return { editText: r.ok ? '⏸ Paused' : `❌ ${r.error}`, toast: '⏸' }
+    if (r.ok) return { editText: '⏸ Paused', toast: '⏸' }
+    if (isNoDeviceError(r.error)) return spotifyNoDeviceResult('pause')
+    return { editText: `❌ ${r.error}`, toast: 'Error' }
   }
 
   // spotify:skip
@@ -77,6 +103,7 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
       const np = await nowPlaying()
       return { editText: `⏭ ${np.track ?? 'Unknown'} — ${np.artist ?? ''}`, toast: '⏭' }
     }
+    if (isNoDeviceError(r.error)) return spotifyNoDeviceResult('skip')
     return { editText: `❌ ${r.error}`, toast: 'Error' }
   }
 
@@ -88,17 +115,34 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
       const np = await nowPlaying()
       return { editText: `⏮ ${np.track ?? 'Unknown'} — ${np.artist ?? ''}`, toast: '⏮' }
     }
+    if (isNoDeviceError(r.error)) return spotifyNoDeviceResult('back')
     return { editText: `❌ ${r.error}`, toast: 'Error' }
   }
 
   // spotify:volup / spotify:voldown
   if (data === 'spotify:volup') {
     const r = await setVolume(60)
-    return { editText: r.ok ? '🔊 Volume up' : `❌ ${r.error}`, toast: '🔊' }
+    if (r.ok) return { editText: '🔊 Volume up', toast: '🔊' }
+    if (isNoDeviceError(r.error)) return spotifyNoDeviceResult('volumen')
+    return { editText: `❌ ${r.error}`, toast: 'Error' }
   }
   if (data === 'spotify:voldown') {
     const r = await setVolume(40)
-    return { editText: r.ok ? '🔉 Volume down' : `❌ ${r.error}`, toast: '🔉' }
+    if (r.ok) return { editText: '🔉 Volume down', toast: '🔉' }
+    if (isNoDeviceError(r.error)) return spotifyNoDeviceResult('volumen')
+    return { editText: `❌ ${r.error}`, toast: 'Error' }
+  }
+
+  // approve:yes / approve:no — aprobaciones rápidas (router mecánico)
+  if (data.startsWith('approve:yes') || data.startsWith('approve:no')) {
+    const isYes = data.startsWith('approve:yes')
+    const context = data.split(':').slice(2).join(':') || ''
+    const label = isYes ? '✅ Aprobado' : '❌ Rechazado'
+    const suffix = context ? ` — ${context}` : ''
+    return {
+      editText: `${label}${suffix}`,
+      toast: label,
+    }
   }
 
   return null;

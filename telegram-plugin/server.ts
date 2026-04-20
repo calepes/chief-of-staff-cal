@@ -814,10 +814,23 @@ bot.on('callback_query:data', async ctx => {
       await ctx.answerCallbackQuery({ text: routed.toast ?? '' }).catch(() => {})
       const msg = ctx.callbackQuery.message
       if (msg && 'text' in msg && msg.text) {
+        let editMarkup: InlineKeyboard | undefined
+        if (routed.buttons && routed.buttons.length > 0) {
+          editMarkup = new InlineKeyboard()
+          const rowsToRender = routed.buttons.slice(0, MAX_KEYBOARD_ROWS)
+          for (const row of rowsToRender) {
+            for (const btn of row) {
+              if (btn.url) editMarkup.url(btn.text, btn.url)
+              else if (btn.callback_data) editMarkup.text(btn.text, btn.callback_data)
+            }
+            editMarkup.row()
+          }
+        }
         await ctx.api.editMessageText(
           msg.chat.id,
           msg.message_id,
           routed.editText,
+          editMarkup ? { reply_markup: editMarkup } : {},
         ).catch(() => {})
       }
       return
@@ -1141,9 +1154,11 @@ bot.catch(err => {
   process.stderr.write(`telegram channel: handler error (polling continues): ${err.error}\n`)
 })
 
-// 409 Conflict = another getUpdates consumer is still active (zombie from a
-// previous session, or a second Claude Code instance). Retry with backoff
-// until the slot frees up instead of crashing on the first rejection.
+// Retry polling with backoff on any error. Previously only 409 was retried —
+// a single ETIMEDOUT/ECONNRESET/DNS failure rejected bot.start(), the catch
+// returned, and polling stopped permanently while the process stayed alive
+// (MCP stdin keeps it running). Outbound tools kept working but the bot was
+// deaf to inbound messages until a full restart.
 void (async () => {
   for (let attempt = 1; ; attempt++) {
     try {
@@ -1151,6 +1166,7 @@ void (async () => {
         onStart: info => {
           botUsername = info.username
           process.stderr.write(`telegram channel: polling as @${info.username}\n`)
+          attempt = 0
           void bot.api.setMyCommands(
             [
               { command: 'start', description: 'Welcome and setup guide' },
@@ -1164,28 +1180,22 @@ void (async () => {
       return // bot.stop() was called — clean exit from the loop
     } catch (err) {
       if (shuttingDown) return
-      if (err instanceof GrammyError && err.error_code === 409) {
-        if (attempt >= 8) {
-          process.stderr.write(
-            `telegram channel: 409 Conflict persists after ${attempt} attempts — ` +
-            `another poller is holding the bot token (stray 'bun server.ts' process or a second session). Exiting.\n`,
-          )
-          return
-        }
-        const delay = Math.min(1000 * attempt, 15000)
-        const detail = attempt === 1
-          ? ' — another instance is polling (zombie session, or a second Claude Code running?)'
-          : ''
-        process.stderr.write(
-          `telegram channel: 409 Conflict${detail}, retrying in ${delay / 1000}s\n`,
-        )
-        await new Promise(r => setTimeout(r, delay))
-        continue
-      }
       // bot.stop() mid-setup rejects with grammy's "Aborted delay" — expected, not an error.
       if (err instanceof Error && err.message === 'Aborted delay') return
-      process.stderr.write(`telegram channel: polling failed: ${err}\n`)
-      return
+      const is409 = err instanceof GrammyError && err.error_code === 409
+      if (is409 && attempt >= 8) {
+        process.stderr.write(
+          `telegram channel: 409 Conflict persists after ${attempt} attempts — ` +
+          `another poller is holding the bot token (stray 'bun server.ts' process or a second session). Exiting.\n`,
+        )
+        return
+      }
+      const delay = Math.min(1000 * attempt, 15000)
+      const detail = is409
+        ? `409 Conflict${attempt === 1 ? ' — another instance is polling (zombie session, or a second Claude Code running?)' : ''}`
+        : `polling error: ${err}`
+      process.stderr.write(`telegram channel: ${detail}, retrying in ${delay / 1000}s\n`)
+      await new Promise(r => setTimeout(r, delay))
     }
   }
 })()
