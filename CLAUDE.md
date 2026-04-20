@@ -5,6 +5,7 @@ Chief of Staff digital para Cal — claridad y foco operativo. AI copilot que co
 
 ## Referencia clave
 El diseño de este CoS se basa en el framework de Tal Raviv ("Build your personal AI copilot"):
+- **Arquitectura:** `docs/ARCHITECTURE.md` — mapa de componentes (launchd, hooks, flujos, invariantes)
 - **Guía de implementación:** `guia-implementacion-copilot.md` — checklist detallado paso a paso
 - **Backlog:** `BACKLOG.md`
 - **Artículo procesado:** `/Users/calepes/Documents/Claude Projects/Claude Code Setup/docs/articulos/01kcy4phpx-tal-raviv-personal-ai-copilot.md`
@@ -105,6 +106,9 @@ Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects
 - **`set -euo pipefail` + `grep -c` sin match** — grep devuelve exit 1, `-e` mata el script silencioso. Usar `set -uo pipefail` en scripts de status/conteo
 - **Plugin Telegram cache tiene 0.0.5 y 0.0.6** — el deploy con wildcard `telegram/*/` las cubre ambas, no quitar versiones viejas hasta confirmar cuál usa el harness
 - **PostToolUse hook `tool_response`** no tiene `exit_code` top-level para Bash — el hook asume 0 por default. Filtrar errores por contenido de output es ruidoso (feedback loops); mejor asumir que el harness pasa solo errores reales
+- **SNI filtering bloquea Telegram en ciertas redes**: algunas WiFi (guest, hoteles, captive portals) bloquean `api.telegram.org` con "Connection reset by peer" durante TLS handshake. Daemon arranca OK pero no puede hacer polling, bot queda mudo. No es la oficina por default — es red-específico. Diagnóstico rápido: `curl -s https://api.telegram.org/bot$TOKEN/getMe` devuelve vacío mientras `curl https://google.com` funciona. Fix: cambiar red (hotspot iPhone o VPN)
+- **Zombies de bun tras kill mal del cos-agent**: si `kill` del agent no limpia su subprocess `bun server.ts`, quedan haciendo polling huérfanos y causan conflict 409 al próximo arranque. Limpiar con `pkill -9 -f "bun server.ts"` antes de `launchctl bootstrap`
+- **Debug estado launchd:** `launchctl print gui/$(id -u)/com.cal.<agent>` muestra estado detallado (running/failed, PID, PATH, args). Más útil que `launchctl list | grep` cuando algo no arranca
 
 ## Comandos operativos
 
@@ -141,6 +145,13 @@ echo 0 > ~/.claude/state/heartbeat-failures
 
 ## Hooks & Automatización
 - **SessionStart hook:** `~/.claude/hooks/session-start-context.sh` — inyecta fecha/hora + tareas vencidas de Notion (API directa) + eventos Outlook hoy/mañana (cache) + instrucciones para Google Calendar (MCP)
+- **Channel conflict guard (SessionStart/SessionEnd):** `.claude/settings.json` del proyecto registra dos hooks:
+  - `cos-channel-bootout.sh` (SessionStart): si la sesión interactiva usa `--channels plugin:telegram` con el bot default, descarga el launchd agent `com.cal.cos-agent` para que no compitan por `getUpdates` (Telegram long-poll solo permite UN consumidor por bot → conflict 409 reparte mensajes aleatoriamente)
+  - `cos-channel-bootstrap.sh` (SessionEnd): cuando cierras la última sesión interactiva del CoS, recarga el cos-agent para que retome escucha en background
+  - **Invariante:** nunca corren simultáneo agent launchd + sesión interactiva del mismo bot. Siempre hay exactamente un consumidor activo
+  - Ignora sesiones con `TELEGRAM_STATE_DIR=` custom (ej. family-agent usa otro bot)
+  - **Anti self-sabotage:** el plist del cos-agent tiene `COS_AGENT_BG=1` en env — los hooks lo chequean y exit 0 si corren dentro del propio agent (sin esto, el SessionStart del agent haría bootout de su propio launchd → KeepAlive respawn → loop spawneando bun zombies). Misma lógica en Family con `FAMILY_AGENT_BG=1`
+  - Si abres múltiples sesiones interactivas, el bootstrap espera hasta cerrar la última
 - **Stop hook:** `~/.claude/hooks/stop-telegram-notify.sh` — push notification a Telegram cuando Claude termina (solo en `end_turn`)
 - **PreCompact hook:** `~/.claude/hooks/pre-compact-snapshot.sh` — copia transcript a `~/.claude/compact-snapshots/` antes de compactar (últimos 20). Notifica Telegram si trigger=manual
 - **PostToolUse hook (Notion):** `~/.claude/hooks/notion-audit.sh` — filtrado a `mcp__notion__.*` (solo writes). Loguea a `~/.claude/logs/notion-audit.log` con rotación a 5MB
@@ -150,7 +161,7 @@ echo 0 > ~/.claude/state/heartbeat-failures
 - **Cron Reporte nocturno:** launchd `com.claude.nightly-report` — 22:00 diario, ejecuta `~/.claude/hooks/nightly-report.sh`. Resumen día + plan mañana via Telegram
 - **Cron Eisenhower semanal:** launchd `com.claude.eisenhower-weekly` — domingo 21:00, ejecuta `~/.claude/hooks/eisenhower-weekly.sh`. Clasifica tareas activas en matriz Q1-Q4 via Telegram
 - **Heartbeat engine:** launchd `com.claude.heartbeat` — cada 30min de 7am a 22:30. `~/.claude/hooks/heartbeat.sh` lee `~/.claude/heartbeat-tasks/*.md` (frontmatter `schedule`+`priority`), ejecuta cada check con `claude -p` (timeout 60s), agrupa ALERTs por prioridad en un único mensaje a Telegram. Failure counter en `~/.claude/state/heartbeat-failures` → alerta si ≥3 consecutivos. Status: `~/.claude/hooks/heartbeat-status.sh`. Flags: `--dry-run`, `--only <name>` (este último bypassa el filtro de `schedule` para testing). Repo copies: `hooks/heartbeat*.sh`, `heartbeat-tasks/`, `launchd/com.claude.heartbeat.plist`
-- **Gotcha launchd PATH:** Plists que invocan `claude` CLI DEBEN incluir `/Users/calepes/.local/bin` en `EnvironmentVariables.PATH` (no está en homebrew). Sin esto: `gtimeout: failed to run command 'claude'` y silencio. Si el counter de fallos llega a 3 → alerta "heartbeat caído"
+- **Gotcha launchd PATH:** Plists que invocan `claude` CLI DEBEN incluir `/Users/calepes/.local/bin` (claude) y `/Users/calepes/.bun/bin` (bun, usado por MCP servers de plugins como el de Telegram) en `EnvironmentVariables.PATH`. Sin claude: `gtimeout: failed to run command 'claude'` y silencio (heartbeat caído tras 3 fallos). Sin bun: plugin MCP falla con "1 MCP server failed", daemon arranca pero sin polling (bot no recibe mensajes)
 - **Heartbeat checks actuales:**
   - **Tasks/calendario:** `overdue-tasks.md` (every/high), `flight-checkin.md` (every/high), `incomplete-tasks.md` (morning-only/medium), `midday-steps.md` (midday-only/medium)
   - **Health (4.3):** `health-sleep.md` (morning-wake/high — anoche <6h), `health-steps-evening.md` (evening/medium — <6k a las 17-19h), `health-sedentary.md` (business-hours/low — <70% stand hours esperados), `health-hrv-weekly.md` (weekly-monday-am/medium — HRV semana <80% baseline 4 sem), `health-daylight.md` (late-afternoon/low — <15min daylight), `health-strength-weekly.md` (weekly-monday-am/medium — <3 sesiones strength/sem, meta 3x), `health-bodycomp-weekly.md` (weekly-monday-am/low — recordatorio medir o trend body fat/lean mass)

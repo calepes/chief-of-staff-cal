@@ -2,6 +2,13 @@
 
 ## 2026-04-20
 
+### Telegram — Channel conflict guard (cos-agent + family-agent)
+- **Feature**: Hooks `cos-channel-bootout.sh` (SessionStart) + `cos-channel-bootstrap.sh` (SessionEnd) en `~/.claude/hooks/`. Registrados en `.claude/settings.json` del proyecto. Al abrir sesión interactiva `claude --channels`, descargan el launchd agent `com.cal.cos-agent` para evitar conflict 409 (solo UN poller por bot token). Al cerrar la última sesión interactiva, recargan el daemon automáticamente
+- **Feature**: Misma lógica replicada para Family (`family-channel-bootout.sh` + `family-channel-bootstrap.sh`). Filtran por `TELEGRAM_STATE_DIR=/Users/calepes/.claude/channels/telegram-family`. Registrados en `Family/.claude/settings.json`. Copias en `Family/hooks/`
+- **Fix crítico**: Añadido `/Users/calepes/.bun/bin` al PATH de los dos plists (`com.cal.cos-agent.plist` y `com.cal.family-agent.plist`). Sin esto, `bun` no estaba disponible para launchd → plugin MCP de Telegram fallaba ("1 MCP server failed") → daemon arrancaba pero sin polling → bot mudo aunque el proceso estuviera vivo
+- **Fix self-sabotage**: env var `COS_AGENT_BG=1` / `FAMILY_AGENT_BG=1` en los plists. Los hooks lo chequean y exit 0 si corren dentro del propio daemon. Sin este flag: el SessionStart hook también dispara al arrancar el launchd → el daemon se descargaba a sí mismo → KeepAlive respawn → loop spawneando bun zombies
+- **Docs**: CLAUDE.md del CoS con sección "Channel conflict guard" extendida + gotchas nuevos (SNI filtering en WiFis específicas, bun PATH, zombies bun, debug con `launchctl print gui/$(id -u)/<agent>`). CLAUDE.md del Family con sección "Channel conflict guard" + mismos gotchas
+
 ### Cleanup — Remover integración Spotify completa
 - **Removido del plugin:** `telegram-plugin/spotify-client.ts` eliminado, handlers `spotify:play|pause|skip|back|volup|voldown` y función `spotifyNoDeviceResult` / `isNoDeviceError` quitados de `callback-router.ts`. Imports de `spotify-client` removidos. Redesplegado a plugin cache 0.0.5 + 0.0.6
 - **Removido del repo:** carpetas `spotify-miniapp-worker/` y `spotify-auth-worker/` borradas completas
