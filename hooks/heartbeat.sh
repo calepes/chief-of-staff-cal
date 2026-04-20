@@ -43,13 +43,19 @@ strip_frontmatter() {
 # should_run <schedule> → exit 0 if should run now, 1 otherwise
 should_run() {
   local schedule="$1"
-  local hour
+  local hour dow
   hour=$(date +%H)
+  dow=$(date +%u)
   case "$schedule" in
     every) return 0 ;;
     morning-only) (( 10#$hour < 12 )) && return 0 || return 1 ;;
     afternoon-only) (( 10#$hour >= 12 )) && return 0 || return 1 ;;
     midday-only) [[ "$hour" == "12" ]] && return 0 || return 1 ;;
+    morning-wake) (( 10#$hour >= 7 && 10#$hour < 9 )) && return 0 || return 1 ;;
+    evening) (( 10#$hour >= 17 && 10#$hour < 19 )) && return 0 || return 1 ;;
+    business-hours) (( 10#$hour >= 10 && 10#$hour < 19 && 10#$dow >= 1 && 10#$dow <= 5 )) && return 0 || return 1 ;;
+    weekly-monday-am) [[ "$dow" == "1" ]] && (( 10#$hour >= 8 && 10#$hour < 9 )) && return 0 || return 1 ;;
+    late-afternoon) (( 10#$hour >= 17 && 10#$hour < 18 )) && return 0 || return 1 ;;
     *) return 1 ;;
   esac
 }
@@ -96,6 +102,9 @@ main() {
     fi
   fi
 
+  # Cleanup state files >7 días (idempotente)
+  find "$STATE_DIR" -name 'health-alerts-*.json' -mtime +7 -delete 2>/dev/null || true
+
   log "heartbeat start"
   local -a high_buf=() medium_buf=() low_buf=()
   local checks_total=0 checks_failed=0
@@ -108,7 +117,8 @@ main() {
     if [[ -n "$ONLY_CHECK" && "$name" != "$ONLY_CHECK" ]]; then
       continue
     fi
-    if ! should_run "$schedule"; then
+    # Cuando se usa --only, bypassear el filtro de schedule
+    if [[ -z "$ONLY_CHECK" ]] && ! should_run "$schedule"; then
       log "skip $name (schedule=$schedule)"
       continue
     fi
