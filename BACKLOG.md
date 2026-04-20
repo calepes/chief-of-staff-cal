@@ -109,6 +109,8 @@
 - [x] **Mini App para flujos complejos** — implementado: Spotify Mini App TWA (2026-04-12)
 - [x] **Loading transitions mecánicas** — callbacks `menu:*` hacen edit instantáneo ("⏳ Cargando...") en el plugin antes de pasar al LLM (~150ms). Approach A: edit texto + quitar botones (2026-04-12)
 - [x] **MenuButtonWebApp** — script `scripts/setup-menu-button.sh` configura setChatMenuButton apuntando a Mini App (2026-04-19). Actual: Spotify Mini App con label "🎵 Abrir". Cambiar en el futuro si se crea una Mini App main menu
+- [x] **Polling robusto** — telegram-plugin retry en cualquier error (no solo 409). Reset attempt counter en onStart. Antes ETIMEDOUT/ECONNRESET mataban el polling silenciosamente (2026-04-19)
+- [x] **Health check end-to-end** — `scripts/health-check.sh` detecta long-poll colgado (200+empty vs 409 Conflict) y fuerza relanzamiento del LaunchAgent (2026-04-19)
 
 ### Documentación Telegram
 - [x] **telegram-reference.md** — referencia cross-project consolidada en `~/Documents/Claude Projects/telegram-reference.md`. Cubre: bot, plugin fork, callbacks, UX patterns, integraciones (CoS, Presupuesto, MCP), workers, hooks, gotchas (2026-04-12)
