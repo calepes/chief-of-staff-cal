@@ -1,7 +1,7 @@
 import { updateTaskStatus, updateTaskDate } from './notion-client';
 import { play, pause, skipNext, skipPrevious, setVolume, nowPlaying } from './spotify-client';
-import { execFileSync } from 'child_process';
-import { readFileSync, existsSync } from 'fs';
+import { execFileSync, spawn } from 'child_process';
+import { readFileSync, existsSync, renameSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -43,6 +43,8 @@ const PATTERNS = {
   learnDrop:    /^learn:drop:([a-z]+-\d{4}-\d{2}-\d{2}-\d{3})$/,
   learnKeepAll: /^learn:keepall:([0-9a-f]{8})$/,
   learnDropAll: /^learn:dropall:([0-9a-f]{8})$/,
+  buildApprove: /^build:approve:(build-\d{4}-\d{2}-\d{2}-[0-9a-f]{8})$/,
+  buildReject:  /^build:reject:(build-\d{4}-\d{2}-\d{2}-[0-9a-f]{8})$/,
 };
 
 function runLearningsLib(fn: string, ...args: string[]): { ok: boolean; error?: string } {
@@ -203,6 +205,43 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
       if (r.ok) ok++; else fail++;
     }
     return { editText: `🗑 ${ok} learnings descartados${fail > 0 ? ` (${fail} errores)` : ''}`, toast: `🗑 ${ok} descartados` };
+  }
+
+  // build:approve:<id> — dispara ejecutor async (no bloquea el callback)
+  m = data.match(PATTERNS.buildApprove);
+  if (m) {
+    const id = m[1];
+    const execScript = join(homedir(), '.claude/hooks/morning-build-execute.sh');
+    if (!existsSync(execScript)) {
+      return { editText: `❌ Executor no encontrado: ${execScript}`, toast: 'Error' };
+    }
+    try {
+      const child = spawn('/bin/bash', [execScript, id], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+      return { editText: `🔨 Morning-build ejecutando: ${id}\n\nTe aviso cuando termine.`, toast: '🔨 Ejecutando' };
+    } catch (e: any) {
+      return { editText: `❌ Error lanzando executor: ${e?.message || e}`, toast: 'Error' };
+    }
+  }
+
+  // build:reject:<id> — archiva la propuesta
+  m = data.match(PATTERNS.buildReject);
+  if (m) {
+    const id = m[1];
+    const proposalFile = join(homedir(), `.claude/morning-builds/proposals/${id}.json`);
+    const rejectedDir = join(homedir(), '.claude/morning-builds/rejected');
+    try {
+      execFileSync('/bin/mkdir', ['-p', rejectedDir]);
+      if (existsSync(proposalFile)) {
+        renameSync(proposalFile, join(rejectedDir, `${id}.json`));
+      }
+      return { editText: `🗑 Morning-build descartado: ${id}`, toast: '🗑 Descartado' };
+    } catch (e: any) {
+      return { editText: `❌ Error archivando: ${e?.message || e}`, toast: 'Error' };
+    }
   }
 
   // approve:yes / approve:no — aprobaciones rápidas (router mecánico)

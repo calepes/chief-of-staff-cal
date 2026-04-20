@@ -2,6 +2,14 @@
 
 ## 2026-04-20
 
+### Fase 5.2 — Morning Builds (scope B: propuesta + ejecución auto-restringida)
+- **Feature**: `morning-build.sh` (cron 22:30) analiza contexto del día (git log, learnings pending, heartbeat log, tareas mañana) e invoca `claude -p` para generar UNA propuesta JSON concreta de mejora. Guarda a `~/.claude/morning-builds/proposals/<id>.json` y envía a Telegram con botones ✅/❌
+- **Feature**: `morning-build-execute.sh <id>` ejecuta propuesta aprobada. Invoca `claude -p` con scope restringido a `commands/*`, `heartbeat-tasks/*`, `hooks/*.sh`, docs (`CLAUDE.md`, `BACKLOG.md`, `CHANGELOG.md`, `docs/**`). Bloquea plugin TS, workers, plists, settings.json. Clasifica output `DONE|ABORT|FAIL`, archiva JSON a implemented/failed/, notifica Telegram con commit hash
+- **Feature**: Callbacks `build:approve:<id>` y `build:reject:<id>` mecánicos en `callback-router.ts`. Approve lanza executor async via `spawn` detached (no bloquea el callback). Reject mueve JSON a `rejected/`
+- **Prompts**: `morning-build-prompt.md` (criterios de qué proponer + formato JSON) y `morning-build-exec-prompt.md` (scope explícito + respuestas `DONE|ABORT|FAIL`)
+- **Plist**: `com.claude.morning-build` (creado, NO cargado — requiere aprobación Cal antes de activar)
+- **Fix colateral**: `heartbeat.sh` — `--only <check>` ya NO incrementa failure counter (evita falso "heartbeat caído" durante debug con `--only`)
+
 ### Fase 5.1 — Self-improving Learnings
 - **Feature**: Sistema de captura de aprendizajes con filesystem-RAG en `~/.claude/learnings/cos/`. CLAUDE.md queda lean — todo el conocimiento histórico vive en learnings/ + index.md como mapa central
 - **Feature**: Skill `/learn <tipo> "<desc>"` para captura intencional (correction, decision, idea, error, pattern)

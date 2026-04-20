@@ -163,7 +163,7 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 
 **Fase 5: Auto-mejora continua** (1 día)
 - [x] 5.1 Self-improving (2026-04-20) — sistema captura learnings en `~/.claude/learnings/cos/` (filesystem-RAG indexado), review diario en nightly-report con botones, sync semanal a repo. Tipos: correction/error/decision/idea/pattern. Componentes: skill `/learn`, hook PostToolUse `learn-error.sh`, batch nocturno `extract-learnings.sh`, callbacks `learn:*` mecánicos. Plists `extract-learnings` (21:55) y `sync-learnings` (domingo 21:00) creados pero no cargados — requieren aprobación explícita de Cal. Spec/plan en `docs/superpowers/`
-- [ ] 5.2 "Morning builds" → cron a las 11pm: "basado en el contexto de hoy, construye o mejora algo que le ahorre tiempo a Cal mañana". Resultados concretos de Viticci: CLI App Store API, Markdown linter, estimador de costos. Sesión isolada.
+- [x] 5.2 Morning builds (2026-04-20) — cron 22:30 genera propuesta via `claude -p` con contexto del día (git log, learnings, heartbeat, tareas mañana), manda a Telegram con botones ✅/❌. Al aprobar, executor corre en background con scope estricto (commands/, heartbeat-tasks/, hooks/, docs/, CLAUDE.md, BACKLOG.md, CHANGELOG.md — NO plugin, NO workers, NO plists) y auto-commitea. Callbacks `build:approve|reject:<id>` mecánicos en plugin fork. Plist creado pero no cargado
 - [ ] 5.3 Skills auto-instalables → detecta patrones repetitivos y se crea skills como archivos .md
 
 **Fase 6: Multi-agente** (1 día)
