@@ -1,5 +1,9 @@
 import { updateTaskStatus, updateTaskDate } from './notion-client';
 import { play, pause, skipNext, skipPrevious, setVolume, nowPlaying } from './spotify-client';
+import { execFileSync } from 'child_process';
+import { readFileSync, existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 export interface RouteButton {
   text: string;
@@ -35,7 +39,29 @@ const PATTERNS = {
   skip:     /^t:s:([0-9a-f]{32})$/,
   deadline: /^t:sd:([0-9a-f]{32}):dl:(\d{4}-\d{2}-\d{2})$/,
   fecha:    /^t:sd:([0-9a-f]{32}):f:(\d{4}-\d{2}-\d{2})$/,
+  learnKeep:    /^learn:keep:([a-z]+-\d{4}-\d{2}-\d{2}-\d{3})$/,
+  learnDrop:    /^learn:drop:([a-z]+-\d{4}-\d{2}-\d{2}-\d{3})$/,
+  learnKeepAll: /^learn:keepall:([0-9a-f]{8})$/,
+  learnDropAll: /^learn:dropall:([0-9a-f]{8})$/,
 };
+
+function runLearningsLib(fn: string, ...args: string[]): { ok: boolean; error?: string } {
+  const lib = join(homedir(), '.claude/hooks/learnings-lib.sh');
+  if (!existsSync(lib)) return { ok: false, error: 'learnings-lib.sh not found' };
+  try {
+    const script = `set -e\nsource '${lib}'\n${fn} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
+    execFileSync('/bin/bash', ['-c', script], { stdio: 'pipe', encoding: 'utf8' });
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.stderr?.toString() || e?.message || String(e) };
+  }
+}
+
+function readBatchIds(batchId: string): string[] {
+  const path = join(homedir(), '.claude/state/learn-batches', batchId);
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf8').split('\n').map((s: string) => s.trim()).filter(Boolean);
+}
 
 export async function routeCallback(data: string): Promise<RouteResult | null> {
   let m: RegExpMatchArray | null;
@@ -131,6 +157,52 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
     if (r.ok) return { editText: '🔉 Volume down', toast: '🔉' }
     if (isNoDeviceError(r.error)) return spotifyNoDeviceResult('volumen')
     return { editText: `❌ ${r.error}`, toast: 'Error' }
+  }
+
+  // learn:keep:<id> — flip pending:false valid:true
+  m = data.match(PATTERNS.learnKeep);
+  if (m) {
+    const id = m[1];
+    const r = runLearningsLib('flip_pending', id, 'true');
+    if (!r.ok) return { editText: `❌ Error: ${r.error}`, toast: 'Error' };
+    return { editText: `✅ Learning guardado: ${id}`, toast: '✅ Guardado' };
+  }
+
+  // learn:drop:<id> — archivar
+  m = data.match(PATTERNS.learnDrop);
+  if (m) {
+    const id = m[1];
+    const r = runLearningsLib('move_to_archive', id);
+    if (!r.ok) return { editText: `❌ Error: ${r.error}`, toast: 'Error' };
+    return { editText: `🗑 Learning descartado: ${id}`, toast: '🗑 Descartado' };
+  }
+
+  // learn:keepall:<batch_id> — flip todos los pending del batch
+  m = data.match(PATTERNS.learnKeepAll);
+  if (m) {
+    const batchId = m[1];
+    const ids = readBatchIds(batchId);
+    if (ids.length === 0) return { editText: '❌ Batch no encontrado', toast: 'Error' };
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      const r = runLearningsLib('flip_pending', id, 'true');
+      if (r.ok) ok++; else fail++;
+    }
+    return { editText: `✅ ${ok} learnings guardados${fail > 0 ? ` (${fail} errores)` : ''}`, toast: `✅ ${ok} guardados` };
+  }
+
+  // learn:dropall:<batch_id> — archivar todos los pending del batch
+  m = data.match(PATTERNS.learnDropAll);
+  if (m) {
+    const batchId = m[1];
+    const ids = readBatchIds(batchId);
+    if (ids.length === 0) return { editText: '❌ Batch no encontrado', toast: 'Error' };
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      const r = runLearningsLib('move_to_archive', id);
+      if (r.ok) ok++; else fail++;
+    }
+    return { editText: `🗑 ${ok} learnings descartados${fail > 0 ? ` (${fail} errores)` : ''}`, toast: `🗑 ${ok} descartados` };
   }
 
   // approve:yes / approve:no — aprobaciones rápidas (router mecánico)

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.sync-learnings</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>$HOME/Claude\ Projects/Personal/Agents/Chief\ of\ Staff\ Cal/scripts/sync-learnings.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>21</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/calepes/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/calepes</string>
+    </dict>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.claude.sync-learnings.err.log</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/com.claude.sync-learnings.out.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

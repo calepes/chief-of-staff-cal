@@ -1,5 +1,20 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-20
+
+### Fase 5.1 — Self-improving Learnings
+- **Feature**: Sistema de captura de aprendizajes con filesystem-RAG en `~/.claude/learnings/cos/`. CLAUDE.md queda lean — todo el conocimiento histórico vive en learnings/ + index.md como mapa central
+- **Feature**: Skill `/learn <tipo> "<desc>"` para captura intencional (correction, decision, idea, error, pattern)
+- **Feature**: Hook PostToolUse `learn-error.sh` captura errores automáticamente. Fix: solo dispara cuando `exit_code != 0` (el match de "error" en output texto era demasiado ruidoso y generaba feedback loop)
+- **Feature**: Batch nocturno `extract-learnings.sh` lee transcripts del día via `claude -p` (prompt en `extract-learnings-prompt.md`). Plist `com.claude.extract-learnings` 21:55 daily (creado, NO cargado)
+- **Feature**: `nightly-report.sh` extendido — LLM genera sección Learnings desde index.md + arma keyboard con callbacks `learn:keep|drop|keepall|dropall`, escribe batch IDs a `~/.claude/state/learn-batches/<id>`
+- **Feature**: Callbacks `learn:*` mecánicos en `callback-router.ts` (ejecutan `flip_pending` / `move_to_archive` via bash, ~200ms, no pasan por LLM)
+- **Feature**: Sync semanal `sync-learnings.sh` (domingo 21:00, plist NO cargado) — rsync `~/.claude/learnings/cos/` → `docs/learnings/` + commit + push
+- **Library**: `~/.claude/hooks/learnings-lib.sh` — bash 3.2 compat (sin associative arrays). Funciones: `generate_id`, `slug`, `hash_normalize`, `is_duplicate`, `append_entry`, `update_index`, `find_entry_in_index`, `flip_pending`, `move_to_archive`, `tipo_to_filename`
+- **Utilities**: `rebuild-learnings-index.sh` (recovery desde archivos de detalle), `learnings-status.sh` (cursor, pendings, top errores)
+- **Backlog update**: Agregado "Deshacer Spotify Mini App (TWA)" por feedback de Cal — la UX es lenta
+- **Spec/Plan**: `docs/superpowers/specs/2026-04-19-self-improving-learnings-design.md` + `docs/superpowers/plans/2026-04-19-self-improving-learnings.md`
+
 ## 2026-04-19 (noche)
 
 ### Telegram plugin — robustez polling + Spotify UX

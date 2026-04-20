@@ -2,6 +2,20 @@
 
 ## Pendientes
 
+### Deshacer Spotify Mini App (TWA) y features asociadas
+- **Motivo:** Cal reporta que la Mini App funciona lenta y no le gusta la UX
+- **Alcance a remover:**
+  - Worker `spotify-miniapp.carlos-cb4.workers.dev` (desprovisionar)
+  - Código en `spotify-miniapp-worker/` del repo
+  - Botón "🎵 Abrir" en el menú de Telegram (setChatMenuButton → default)
+  - Entry point "Mini App" en `menu.json` / flujos del bot
+  - Referencias en CLAUDE.md (sección "Spotify Mini App (TWA)")
+  - Mantener: control Spotify por callbacks mecánicos (spotify:play/pause/skip/etc) y búsqueda vía LLM — esos sí gustan
+- **Pendiente decidir:**
+  - ¿Mantener el auth worker (`spotify-auth.carlos-cb4.workers.dev`) para los callbacks mecánicos? (sí — es prerequisito)
+  - ¿Reemplazar con algo o solo simplificar al control por botones?
+- **Status:** Capturado 2026-04-20 — pendiente priorizar
+
 ### Referencia: Filesystem-based knowledge system (alt RAG) — @soyabraham.ia
 - **Fuente:** Post de Threads — https://www.threads.com/@soyabraham.ia/post/DXUxwD3jVX6
 - **Autor:** Abraham Olvera (@soyabraham.ia), inspirado en Andrej Karpathy
@@ -148,7 +162,7 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - ~~4.4 Notion changes~~ — descartado (no relevante)
 
 **Fase 5: Auto-mejora continua** (1 día)
-- [ ] 5.1 Self-improving → Crear `.learnings/` con `LEARNINGS.md`, `ERRORS.md`, `FEATURE_REQUESTS.md`. Triggers: fallo, corrección de Cal, API que falla. Entradas con ID, timestamp, prioridad. Se "promueven" a CLAUDE.md periódicamente. Cal aprueba por Telegram. Ref: ClawHub skill `self-improving-agent`.
+- [x] 5.1 Self-improving (2026-04-20) — sistema captura learnings en `~/.claude/learnings/cos/` (filesystem-RAG indexado), review diario en nightly-report con botones, sync semanal a repo. Tipos: correction/error/decision/idea/pattern. Componentes: skill `/learn`, hook PostToolUse `learn-error.sh`, batch nocturno `extract-learnings.sh`, callbacks `learn:*` mecánicos. Plists `extract-learnings` (21:55) y `sync-learnings` (domingo 21:00) creados pero no cargados — requieren aprobación explícita de Cal. Spec/plan en `docs/superpowers/`
 - [ ] 5.2 "Morning builds" → cron a las 11pm: "basado en el contexto de hoy, construye o mejora algo que le ahorre tiempo a Cal mañana". Resultados concretos de Viticci: CLI App Store API, Markdown linter, estimador de costos. Sesión isolada.
 - [ ] 5.3 Skills auto-instalables → detecta patrones repetitivos y se crea skills como archivos .md
 
