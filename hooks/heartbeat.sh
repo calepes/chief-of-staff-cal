@@ -180,9 +180,12 @@ main() {
     log "silent"
   fi
 
-  # Failure counter: si todos los checks fallaron, incrementar; si no, reset
+  # Failure counter: si todos los checks fallaron, incrementar; si no, reset.
+  # Skip si se usó --only (modo debug) — no queremos que tests manuales disparen "heartbeat caído"
   local fail_state="$STATE_DIR/heartbeat-failures"
-  if (( checks_total > 0 && checks_failed == checks_total )); then
+  if [[ -n "$ONLY_CHECK" ]]; then
+    log "skip failure counter (--only mode)"
+  elif (( checks_total > 0 && checks_failed == checks_total )); then
     local count
     count=$(cat "$fail_state" 2>/dev/null || echo 0)
     count=$((count + 1))
