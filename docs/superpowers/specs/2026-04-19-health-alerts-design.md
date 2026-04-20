@@ -18,7 +18,7 @@ Justificación (vs reactive en el worker):
 
 ## Componentes
 
-### 1. Cinco checks `.md` nuevos
+### 1. Siete checks `.md` nuevos
 
 | Archivo | Schedule | Prioridad | Threshold | Mensaje |
 |---|---|---|---|---|
@@ -27,8 +27,12 @@ Justificación (vs reactive en el worker):
 | `health-sedentary.md` | business-hours | low | `apple_stand_hour == 0` en últimas 2h | "Llevas 2h sin levantarte. Stand 1 min." |
 | `health-hrv-weekly.md` | weekly-monday-am | medium | HRV semana actual < 80% del promedio últimas 4 semanas | "HRV bajó {N}% esta semana. Considera bajar intensidad o dormir más." |
 | `health-daylight.md` | late-afternoon | low | `time_in_daylight < 15min` hoy | "Solo {N}min de daylight hoy. Hay 1-2h de sol — sal a caminar." |
+| `health-strength-weekly.md` | weekly-monday-am | medium | sesiones de strength últimos 7 días < 3 | "Llevas {N} sesiones de fuerza esta semana (meta: 3). Última: hace {D} días." |
+| `health-bodycomp-weekly.md` | weekly-monday-am | low | última medición body_fat o lean_body_mass > 7 días: "recordar medir" / si hay data: "reportar trend vs semana pasada" | Sin data: "Sin medición de body comp en {N} días. Pésate hoy." / Con data: "Body fat: {X}% ({±Y}% vs sem pasada). Lean: {Z}kg ({±W}kg)." |
 
 `midday-steps.md` (ya existente, alerta si <3000 al mediodía) queda sin cambios.
+
+**Endpoint nuevo del worker:** `health-strength-weekly` consume `GET /workouts/summary?days=7&type=strength` (ya existe en el worker — reusable).
 
 ### 2. Extensión `should_run()` en `heartbeat.sh`
 
@@ -59,7 +63,9 @@ Donde `dow=$(date +%u)` (1=lunes, 7=domingo).
   "steps_evening": true,
   "sedentary": true,
   "hrv_degraded": true,
-  "daylight_low": true
+  "daylight_low": true,
+  "strength_weekly": true,
+  "bodycomp_weekly": true
 }
 ```
 
@@ -75,6 +81,8 @@ Donde `dow=$(date +%u)` (1=lunes, 7=domingo).
 - `sedentary` (health-sedentary.md) — nota: este puede tener sentido alertar más de 1 vez/día en el futuro, pero v1 = 1 vez
 - `hrv_degraded` (health-hrv-weekly.md)
 - `daylight_low` (health-daylight.md)
+- `strength_weekly` (health-strength-weekly.md)
+- `bodycomp_weekly` (health-bodycomp-weekly.md)
 
 ## Flujo por check
 
@@ -124,7 +132,7 @@ rm -f ~/.claude/state/health-alerts-$(date +%Y-%m-%d).json
 
 ## Entregables
 
-- 5 archivos `.md` en `~/.claude/heartbeat-tasks/` + copias en `heartbeat-tasks/` del repo
+- 7 archivos `.md` en `~/.claude/heartbeat-tasks/` + copias en `heartbeat-tasks/` del repo
 - Edit a `~/.claude/hooks/heartbeat.sh` (función `should_run`) + copia en `hooks/` del repo
 - Edit a `~/.claude/hooks/heartbeat.sh` para limpieza de state files >7 días
 - Update `CLAUDE.md` (sección Heartbeat checks actuales)

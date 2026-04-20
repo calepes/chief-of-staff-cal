@@ -2,6 +2,25 @@
 
 ## Pendientes
 
+### Referencia: Filesystem-based knowledge system (alt RAG) — @soyabraham.ia
+- **Fuente:** Post de Threads — https://www.threads.com/@soyabraham.ia/post/DXUxwD3jVX6
+- **Autor:** Abraham Olvera (@soyabraham.ia), inspirado en Andrej Karpathy
+- **Idea:** Reemplazar RAG con vector DB por estructura de filesystem + CLAUDE.md como esquema mental
+- **Estructura propuesta:**
+  - `raw/` — fuentes inmutables (artículos, transcripts, PDFs originales)
+  - `wiki/` — knowledge compilado (síntesis del raw)
+  - `outputs/` — respuestas archivadas
+  - `CLAUDE.md` — instrucciones de cómo pensar
+  - `index.md` — mapa central, LLM busca directo (sin embeddings)
+  - `log.md` — memoria persistente cronológica entre sesiones
+  - **Health check** periódico — detecta contradicciones y archivos huérfanos
+- **Qué adoptar (mi recomendación):**
+  1. **`index.md` como mapa central** — útil cuando crece el proyecto, evita que el LLM adivine dónde está cada cosa
+  2. **Health check semanal** — como heartbeat task adicional, escanea docs y reporta inconsistencias
+  3. (Opcional) `raw/` vs `wiki/` separation — overkill hoy, considerar si el volumen crece
+- **Aplicar a:** Refactorizar la organización de docs/, specs/, plans/ del CoS si decidimos adoptarlo
+- **Status:** Pendiente decidir alcance + prioridad (no es urgente, framework ya funciona bien)
+
 ### Referencia: AI Copilot framework (Tal Raviv)
 - **Fuente:** Artículo #45 — "Build your personal AI copilot" (Tal Raviv via Lenny's Newsletter)
 - **Resumen:** Framework de 4 pasos para construir un AI copilot como thinking partner a largo plazo
@@ -121,7 +140,7 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - [x] 3.3 "Proactive ideas" (3x/día) → `~/.claude/hooks/proactive-ideas.sh` + plist `com.claude.proactive-ideas` (creado, NO cargado hasta que Cal configure tokens X/Threads + NOTION_IDEAS_DB_ID). Slots: 9am=foco 🎯, 14:00=tactical ⚡, 19:00=lookahead 🔮. Lee posts propios X+Threads últimas 24h + tareas activas Notion → JSON {title, body, source} → Notion DB "Ideas Proactivas (CoS)" (id `59e0439d7fe0483ab735575b9e0c1007`, anidada bajo "💡 Ideas") + Telegram. Graceful degradation si falta cualquier API.
 
 **Fase 4: Webhooks — Reaccionar al mundo**
-- [ ] 4.3 Health alertas → "dormiste <6h", "no caminaste hoy" (worker ya existe, agregar lógica)
+- [x] 4.3 Health alertas reactivas (2026-04-19) — 7 checks via heartbeat: sleep, steps-evening, sedentary, hrv-weekly, daylight, strength-weekly (meta 3x/sem), bodycomp-weekly. Anti-spam con state file diario. Spec+plan en `docs/superpowers/`
 - ~~4.1 Email webhook (Gmail)~~ — descartado (no relevante hoy)
 - ~~4.2 GitHub PRs~~ — descartado (Cal no hace code review)
 - ~~4.4 Notion changes~~ — descartado (no relevante)

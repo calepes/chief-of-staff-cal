@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Agregar 5 alertas de salud al heartbeat engine (sueño, pasos PM, sedentarismo, HRV semanal, daylight) con anti-spam diario.
+**Goal:** Agregar 7 alertas de salud al heartbeat engine (sueño, pasos PM, sedentarismo, HRV semanal, daylight, strength semanal, body comp semanal) con anti-spam diario.
 
 **Architecture:** Reusa el heartbeat engine de Fase 3. Cada alerta es un `~/.claude/heartbeat-tasks/health-*.md` con frontmatter (`schedule`, `priority`). State file diario en `~/.claude/state/health-alerts-YYYY-MM-DD.json` previene spam. Extensión a `should_run()` agrega 5 schedule values.
 
@@ -27,6 +27,8 @@
 - `~/.claude/heartbeat-tasks/health-sedentary.md` (+ copia en repo)
 - `~/.claude/heartbeat-tasks/health-hrv-weekly.md` (+ copia en repo)
 - `~/.claude/heartbeat-tasks/health-daylight.md` (+ copia en repo)
+- `~/.claude/heartbeat-tasks/health-strength-weekly.md` (+ copia en repo)
+- `~/.claude/heartbeat-tasks/health-bodycomp-weekly.md` (+ copia en repo)
 
 ---
 
@@ -545,7 +547,164 @@ git commit -m "feat(heartbeat): check health-daylight (alerta si <15min al sol a
 
 ---
 
-## Task 7: End-to-end smoke test
+## Task 7: Check health-strength-weekly.md (sesiones de fuerza < 3/semana)
+
+**Files:**
+- Create: `~/.claude/heartbeat-tasks/health-strength-weekly.md`
+- Create: `/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal/heartbeat-tasks/health-strength-weekly.md`
+
+- [ ] **Step 1: Crear el .md**
+
+```bash
+cat > ~/.claude/heartbeat-tasks/health-strength-weekly.md <<'EOF'
+---
+name: health-strength-weekly
+schedule: weekly-monday-am
+priority: medium
+---
+
+# Check sesiones de fuerza semanal
+
+Meta: 3 sesiones de strength training por semana.
+
+State file: `~/.claude/state/health-alerts-$(date +%Y-%m-%d).json`
+
+Si la key `strength_weekly` ya existe en el state file de hoy, responde EXACTAMENTE:
+HEARTBEAT_OK
+
+Si no existe, consulta:
+
+```
+GET https://health.carlos-cb4.workers.dev/workouts/summary?days=7&type=strength&key=$HEALTH_API_KEY
+```
+
+Reglas:
+- Worker caído (no responde 200) → HEARTBEAT_OK
+- `count >= 3` → HEARTBEAT_OK (meta cumplida)
+- `count < 3` → actualiza state y alerta.
+
+Para "última sesión hace N días": del array `workouts` toma el `date` del primer elemento (ya viene ordenado DESC). Si el array está vacío, calcula desde la última sesión histórica con `?days=90&type=strength`. Si tampoco hay, di "no hay sesiones registradas".
+
+Update state:
+```bash
+STATE=~/.claude/state/health-alerts-$(date +%Y-%m-%d).json
+mkdir -p ~/.claude/state
+if [[ -f "$STATE" ]]; then
+  jq '.strength_weekly = true' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
+else
+  echo '{"strength_weekly": true}' > "$STATE"
+fi
+```
+
+Formato:
+ALERT
+💪 Llevas {N} sesiones de fuerza esta semana (meta: 3). Última: hace {D} días.
+
+<!-- Test scenario: lunes 8-9am, si <3 sesiones strength en últimos 7 días, alerta una vez. Worker caído, silencio. -->
+EOF
+```
+
+- [ ] **Step 2: Verificar parse**
+
+```bash
+~/.claude/hooks/heartbeat.sh --only health-strength-weekly --dry-run 2>&1 | grep "run health-strength-weekly"
+```
+
+Expected: `run health-strength-weekly`.
+
+- [ ] **Step 3: Sincronizar y commit**
+
+```bash
+cp ~/.claude/heartbeat-tasks/health-strength-weekly.md "/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal/heartbeat-tasks/health-strength-weekly.md"
+cd "/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal"
+git add heartbeat-tasks/health-strength-weekly.md
+git commit -m "feat(heartbeat): check health-strength-weekly (alerta lunes si <3 sesiones de fuerza últ. 7 días)"
+```
+
+---
+
+## Task 8: Check health-bodycomp-weekly.md (medición body comp + trend)
+
+**Files:**
+- Create: `~/.claude/heartbeat-tasks/health-bodycomp-weekly.md`
+- Create: `/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal/heartbeat-tasks/health-bodycomp-weekly.md`
+
+- [ ] **Step 1: Crear el .md**
+
+```bash
+cat > ~/.claude/heartbeat-tasks/health-bodycomp-weekly.md <<'EOF'
+---
+name: health-bodycomp-weekly
+schedule: weekly-monday-am
+priority: low
+---
+
+# Check body composition semanal
+
+State file: `~/.claude/state/health-alerts-$(date +%Y-%m-%d).json`
+
+Si la key `bodycomp_weekly` ya existe en el state file de hoy, responde EXACTAMENTE:
+HEARTBEAT_OK
+
+Si no existe, consulta ambas métricas:
+
+```
+GET https://health.carlos-cb4.workers.dev/trend?metric=body_fat_percentage&days=30&key=$HEALTH_API_KEY
+GET https://health.carlos-cb4.workers.dev/trend?metric=lean_body_mass&days=30&key=$HEALTH_API_KEY
+```
+
+Reglas:
+- Worker caído (cualquiera de las 2 falla) → HEARTBEAT_OK
+- Ambas series sin data → alerta tipo "sin medición"
+- Última fecha de cualquiera de las 2 series > 7 días desde hoy → alerta tipo "sin medición"
+- Última fecha <= 7 días → alerta tipo "trend":
+  - body_fat: último valor vs promedio de los anteriores (excluyendo el último). Delta = último - promedio_previos.
+  - lean_body_mass: igual.
+  - Si solo hay 1 punto, omite delta (di "primera medición").
+
+Update state SIEMPRE que alertes:
+```bash
+STATE=~/.claude/state/health-alerts-$(date +%Y-%m-%d).json
+mkdir -p ~/.claude/state
+if [[ -f "$STATE" ]]; then
+  jq '.bodycomp_weekly = true' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
+else
+  echo '{"bodycomp_weekly": true}' > "$STATE"
+fi
+```
+
+Formato sin data:
+ALERT
+⚖️ Sin medición de body comp en {N} días. Pésate hoy.
+
+Formato con data:
+ALERT
+⚖️ Body fat: {X}% ({±Y}% vs prom). Lean: {Z}kg ({±W}kg).
+
+<!-- Test scenario: lunes 8-9am. Sin data >7 días, alerta "pésate". Con data fresca, alerta trend. Worker caído, silencio. -->
+EOF
+```
+
+- [ ] **Step 2: Verificar parse**
+
+```bash
+~/.claude/hooks/heartbeat.sh --only health-bodycomp-weekly --dry-run 2>&1 | grep "run health-bodycomp-weekly"
+```
+
+Expected: `run health-bodycomp-weekly`.
+
+- [ ] **Step 3: Sincronizar y commit**
+
+```bash
+cp ~/.claude/heartbeat-tasks/health-bodycomp-weekly.md "/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal/heartbeat-tasks/health-bodycomp-weekly.md"
+cd "/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal"
+git add heartbeat-tasks/health-bodycomp-weekly.md
+git commit -m "feat(heartbeat): check health-bodycomp-weekly (recordatorio medir o trend body fat/lean mass)"
+```
+
+---
+
+## Task 9: End-to-end smoke test
 
 **Files:** ninguno modificado en esta task
 
@@ -598,7 +757,7 @@ Nota: si Cal usa el sistema en producción inmediatamente, los checks reales del
 
 ---
 
-## Task 8: Documentar en CLAUDE.md / BACKLOG.md / CHANGELOG.md
+## Task 10: Documentar en CLAUDE.md / BACKLOG.md / CHANGELOG.md
 
 **Files:**
 - Modify: `/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal/CLAUDE.md`
@@ -662,7 +821,7 @@ git commit -m "docs: 4.3 Health alertas reactivas (5 checks heartbeat)"
 
 ---
 
-## Task 9: Notificar a Cal
+## Task 11: Notificar a Cal
 
 **Files:** ninguno
 
