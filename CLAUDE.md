@@ -98,6 +98,14 @@ Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects
 - **Plist:** `com.claude.morning-build` (creado, NO cargado hasta aprobación explícita)
 - **Flujo:** propuesta llega 22:30 → Cal tap ✅ → executor corre en background (max 30min) → notifica resultado con commit hash
 
+## Skill Detector (Fase 5.3)
+- **Detector:** `~/.claude/hooks/skill-detector.sh` — cron domingo 21:30. Escanea transcripts de últimos 7 días del CoS, invoca `claude -p` con `skill-detector-prompt.md`, detecta patrones conductuales con frecuencia ≥3/semana, genera JSON con skill completo (`name`, `titulo`, `skill_body`, `ejemplos_triggers`, `frecuencia_semana`)
+- **Installer:** `~/.claude/hooks/skill-install.sh <id>` — disparado por callback `skill:approve:<id>` (async). Escribe `commands/<name>.md` + `~/.claude/commands/<name>.md`, commit + push. NO pasa por LLM — es mecánico (body ya viene generado en el JSON)
+- **Callbacks:** `skill:approve:<id>` dispara installer; `skill:reject:<id>` archiva a `rejected/`
+- **Plist:** `com.claude.skill-detector` (creado, NO cargado)
+- **Criterio:** solo propone skills con frecuencia ≥3 veces en la semana Y que no dupliquen skills existentes. Si duda → `null`
+- **Gotcha find macOS:** `find -newermt "@epoch"` NO funciona en macOS. Usar `-mtime -7` para rangos, o `touch -t` + `-newer <ref>` para cursor exacto (ver `extract-learnings.sh`)
+
 ## Gotchas del entorno
 - **Bash 3.2 macOS default** — sin associative arrays (`declare -A` falla con `unbound variable` silencioso). Usar parallel arrays: `ARR=("key1|val1" "key2|val2")` + parse con `${entry%%|*}` / `${entry#*|}`
 - **`set -euo pipefail` + `grep -c` sin match** — grep devuelve exit 1, `-e` mata el script silencioso. Usar `set -uo pipefail` en scripts de status/conteo

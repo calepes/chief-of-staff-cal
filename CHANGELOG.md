@@ -2,6 +2,14 @@
 
 ## 2026-04-20
 
+### Fase 5.3 — Skill Detector (auto-instalación de skills)
+- **Feature**: `skill-detector.sh` (cron domingo 21:30) escanea transcripts del CoS últimos 7 días, extrae digest de user+assistant messages con jq (max 500 líneas), pasa a `claude -p` con `skill-detector-prompt.md`. Detecta patrones conductuales con frecuencia ≥3/sem que ameriten skill dedicado. Evita duplicar skills existentes (lista enviada al prompt)
+- **Feature**: `skill-install.sh <id>` — disparado por callback `skill:approve:<id>` async. Mecánico (NO pasa por LLM): lee propuesta JSON (ya incluye skill_body completo), valida name en kebab-case, escribe `commands/<name>.md` + copia a `~/.claude/commands/`, git commit + push, notifica Telegram con commit hash. Con rollback si commit falla
+- **Feature**: Callbacks `skill:approve:<id>` / `skill:reject:<id>` mecánicos en `callback-router.ts`. Approve lanza installer via `spawn` detached
+- **Prompt**: `skill-detector-prompt.md` con criterios explícitos (qué sí, qué no proponer), lista de skills existentes para anti-duplicate, formato JSON estricto con `frecuencia_semana` mínima 3
+- **Plist**: `com.claude.skill-detector` (creado, NO cargado)
+- **Fix colateral**: `extract-learnings.sh` — bug de macOS `find -newermt "@epoch"` no soportado. Cambiado a `touch -t <cursor>` + `-newer <ref>` (cursor exacto) o `-mtime -30` (primer run). Sin este fix, el batch nocturno de learnings tampoco habría encontrado transcripts
+
 ### Fase 5.2 — Morning Builds (scope B: propuesta + ejecución auto-restringida)
 - **Feature**: `morning-build.sh` (cron 22:30) analiza contexto del día (git log, learnings pending, heartbeat log, tareas mañana) e invoca `claude -p` para generar UNA propuesta JSON concreta de mejora. Guarda a `~/.claude/morning-builds/proposals/<id>.json` y envía a Telegram con botones ✅/❌
 - **Feature**: `morning-build-execute.sh <id>` ejecuta propuesta aprobada. Invoca `claude -p` con scope restringido a `commands/*`, `heartbeat-tasks/*`, `hooks/*.sh`, docs (`CLAUDE.md`, `BACKLOG.md`, `CHANGELOG.md`, `docs/**`). Bloquea plugin TS, workers, plists, settings.json. Clasifica output `DONE|ABORT|FAIL`, archiva JSON a implemented/failed/, notifica Telegram con commit hash

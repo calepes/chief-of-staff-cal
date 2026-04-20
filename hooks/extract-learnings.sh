@@ -17,8 +17,17 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >> "$LOG"; }
 CURSOR=$(cat "$CURSOR_FILE" 2>/dev/null || echo "0")
 log "batch start, cursor=$CURSOR"
 
-# Glob transcripts modificados después del cursor
-TRANSCRIPTS=$(find "$HOME/.claude/projects" -name '*.jsonl' -newermt "@$CURSOR" 2>/dev/null || true)
+# Glob transcripts modificados después del cursor.
+# macOS find no acepta -newermt "@epoch" → usar archivo de referencia con mtime=cursor
+REF_FILE=$(mktemp)
+if [[ "$CURSOR" != "0" ]]; then
+  touch -t "$(date -r "$CURSOR" +%Y%m%d%H%M.%S 2>/dev/null)" "$REF_FILE" 2>/dev/null || true
+  TRANSCRIPTS=$(find "$HOME/.claude/projects" -name '*.jsonl' -newer "$REF_FILE" 2>/dev/null || true)
+else
+  # cursor=0 → primer run, procesar todo (últimos 30 días para limitar)
+  TRANSCRIPTS=$(find "$HOME/.claude/projects" -name '*.jsonl' -mtime -30 2>/dev/null || true)
+fi
+rm -f "$REF_FILE"
 
 if [[ -z "$TRANSCRIPTS" ]]; then
   log "no transcripts to process"

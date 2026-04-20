@@ -45,6 +45,8 @@ const PATTERNS = {
   learnDropAll: /^learn:dropall:([0-9a-f]{8})$/,
   buildApprove: /^build:approve:(build-\d{4}-\d{2}-\d{2}-[0-9a-f]{8})$/,
   buildReject:  /^build:reject:(build-\d{4}-\d{2}-\d{2}-[0-9a-f]{8})$/,
+  skillApprove: /^skill:approve:(skill-\d{4}-W\d{2}-[a-z][a-z0-9-]+)$/,
+  skillReject:  /^skill:reject:(skill-\d{4}-W\d{2}-[a-z][a-z0-9-]+)$/,
 };
 
 function runLearningsLib(fn: string, ...args: string[]): { ok: boolean; error?: string } {
@@ -239,6 +241,43 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
         renameSync(proposalFile, join(rejectedDir, `${id}.json`));
       }
       return { editText: `🗑 Morning-build descartado: ${id}`, toast: '🗑 Descartado' };
+    } catch (e: any) {
+      return { editText: `❌ Error archivando: ${e?.message || e}`, toast: 'Error' };
+    }
+  }
+
+  // skill:approve:<id> — dispara skill-install async
+  m = data.match(PATTERNS.skillApprove);
+  if (m) {
+    const id = m[1];
+    const installScript = join(homedir(), '.claude/hooks/skill-install.sh');
+    if (!existsSync(installScript)) {
+      return { editText: `❌ Installer no encontrado: ${installScript}`, toast: 'Error' };
+    }
+    try {
+      const child = spawn('/bin/bash', [installScript, id], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+      return { editText: `🔨 Instalando skill: ${id}\n\nTe aviso cuando termine.`, toast: '🔨 Instalando' };
+    } catch (e: any) {
+      return { editText: `❌ Error lanzando installer: ${e?.message || e}`, toast: 'Error' };
+    }
+  }
+
+  // skill:reject:<id> — archiva la propuesta
+  m = data.match(PATTERNS.skillReject);
+  if (m) {
+    const id = m[1];
+    const proposalFile = join(homedir(), `.claude/skill-proposals/${id}.json`);
+    const rejectedDir = join(homedir(), '.claude/skill-proposals/rejected');
+    try {
+      execFileSync('/bin/mkdir', ['-p', rejectedDir]);
+      if (existsSync(proposalFile)) {
+        renameSync(proposalFile, join(rejectedDir, `${id}.json`));
+      }
+      return { editText: `🗑 Skill descartado: ${id}`, toast: '🗑 Descartado' };
     } catch (e: any) {
       return { editText: `❌ Error archivando: ${e?.message || e}`, toast: 'Error' };
     }
