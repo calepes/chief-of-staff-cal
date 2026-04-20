@@ -2,19 +2,10 @@
 
 ## Pendientes
 
-### Deshacer integración Spotify completa (Mini App + callbacks + workers)
-- **Motivo:** Cal reporta UX lenta en Mini App, y decide remover la integración completa — no solo la TWA
-- **Alcance a remover:**
-  - **Código plugin:** `telegram-plugin/spotify-client.ts`, handlers `spotify:*` en `telegram-plugin/callback-router.ts`, deploy del plugin sin spotify
-  - **Código workers:** carpeta `spotify-miniapp-worker/` y `spotify-auth-worker/` del repo
-  - **Config menú:** quitar botón "🎵 Spotify" de `menu.json`, resetear `setChatMenuButton` (default)
-  - **Secrets .env:** `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_AUTH_WORKER_URL`
-  - **Infra Cloudflare:** desprovisionar workers `spotify-auth.carlos-cb4.workers.dev` + `spotify-miniapp.carlos-cb4.workers.dev` + KV `spotify-auth-SPOTIFY_TOKENS`
-  - **Docs:** secciones "Spotify" y "Spotify Mini App (TWA)" de CLAUDE.md
-- **NO remover:**
-  - Spotify Developer App (console.spotify.com) — mantener la cuenta OAuth, porque eliminar es irreversible
-  - CHANGELOG + specs históricos — mantener para trazabilidad
-- **Status:** Capturado 2026-04-20, alcance ampliado por Cal en la misma sesión — pendiente priorizar
+### ✅ Deshacer integración Spotify completa (2026-04-20)
+- **Removido:** `telegram-plugin/spotify-client.ts`, handlers `spotify:*` en `callback-router.ts`, carpetas `spotify-miniapp-worker/` + `spotify-auth-worker/`, secrets `.env` (`SPOTIFY_AUTH_WORKER_URL`), workers Cloudflare (`spotify-auth` + `spotify-miniapp`), KV `spotify-auth-SPOTIFY_TOKENS`, secciones CLAUDE.md
+- **Mantenido:** Spotify Developer App en console.spotify.com (eliminar es irreversible), CHANGELOG + specs históricos
+- **Pendiente manual Cal:** reset `setChatMenuButton` a default (Telegram API connection reset desde sesión; copy-paste listo en commit)
 
 ### Referencia: Filesystem-based knowledge system (alt RAG) — @soyabraham.ia
 - **Fuente:** Post de Threads — https://www.threads.com/@soyabraham.ia/post/DXUxwD3jVX6

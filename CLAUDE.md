@@ -49,12 +49,6 @@ Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — refere
 - **Instrucciones:** `docs/briefing-pais-instructions.md` (copia del skill para agentes remotos)
 - **Cron local:** 5:00am diario (launchd) — Bolivia, Perú, Colombia secuencialmente via claude CLI
 
-## Spotify — ⚠️ PENDIENTE DE REMOVER
-- **Status:** Cal decidió remover toda la integración (Mini App + callbacks + workers). Ver BACKLOG "Deshacer integración Spotify completa"
-- **NO desarrollar features nuevos aquí.** Mantener Developer App en console.spotify.com (eliminar es irreversible), pero el resto sale.
-- **Funcional mientras tanto:** callbacks `spotify:*`, Mini App en `https://spotify-miniapp.carlos-cb4.workers.dev`, auth worker
-- **Detalles históricos:** CHANGELOG + `docs/superpowers/specs/2026-04-11-spotify-control-*` + `docs/superpowers/specs/2026-04-12-spotify-miniapp-*`
-
 ## Apple Health (consumo)
 Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects/Personal/Agents/Health/health-worker/`. Ver `Health/CLAUDE.md` para detalles completos.
 
@@ -121,16 +115,14 @@ claude --channels plugin:telegram@claude-plugins-official
 
 ### Deploy plugin fork (después de editar telegram-plugin/)
 ```bash
-cp telegram-plugin/{server,notion-client,callback-router,spotify-client}.ts \
-  ~/.claude/plugins/cache/claude-plugins-official/telegram/0.0.6/
+cp telegram-plugin/{server,notion-client,callback-router}.ts \
+  ~/.claude/plugins/cache/claude-plugins-official/telegram/*/
 ```
 
 ### Deploy workers
 ```bash
-cd spotify-auth-worker && npx wrangler deploy
-cd spotify-miniapp-worker && npx wrangler deploy
 # Health worker vive en el agente Health:
-cd ../../Health/health-worker && npx wrangler deploy
+cd ~/Documents/Claude\ Projects/Personal/Agents/Health/health-worker && npx wrangler deploy
 ```
 
 ### Heartbeat recovery (después de "heartbeat caído")

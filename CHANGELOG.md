@@ -2,6 +2,15 @@
 
 ## 2026-04-20
 
+### Cleanup — Remover integración Spotify completa
+- **Removido del plugin:** `telegram-plugin/spotify-client.ts` eliminado, handlers `spotify:play|pause|skip|back|volup|voldown` y función `spotifyNoDeviceResult` / `isNoDeviceError` quitados de `callback-router.ts`. Imports de `spotify-client` removidos. Redesplegado a plugin cache 0.0.5 + 0.0.6
+- **Removido del repo:** carpetas `spotify-miniapp-worker/` y `spotify-auth-worker/` borradas completas
+- **Removido del .env:** `SPOTIFY_AUTH_WORKER_URL` (los CLIENT_ID/SECRET ya vivían como secrets del worker, no en .env local). Backup creado en `.env.backup-before-spotify-cleanup`
+- **Desprovisionado Cloudflare:** `spotify-auth.carlos-cb4.workers.dev` + `spotify-miniapp.carlos-cb4.workers.dev` deleted via `wrangler delete`. KV namespace `spotify-auth-SPOTIFY_TOKENS` (id 48ced040...) deleted
+- **Docs:** secciones "Spotify" y "Spotify Mini App (TWA)" removidas de CLAUDE.md. Comando deploy actualizado (sin spotify-client, wildcard `telegram/*/` cubre 0.0.5+0.0.6)
+- **Conservado:** Spotify Developer App en console.spotify.com (eliminar es irreversible, Cal puede reactivar en el futuro). CHANGELOG + specs históricos quedan intactos por trazabilidad
+- **Pendiente manual:** reset `setChatMenuButton` del bot a `type: commands` — Telegram API daba connection reset desde esta sesión. Comando en BACKLOG
+
 ### Fase 5.3 — Skill Detector (auto-instalación de skills)
 - **Feature**: `skill-detector.sh` (cron domingo 21:30) escanea transcripts del CoS últimos 7 días, extrae digest de user+assistant messages con jq (max 500 líneas), pasa a `claude -p` con `skill-detector-prompt.md`. Detecta patrones conductuales con frecuencia ≥3/sem que ameriten skill dedicado. Evita duplicar skills existentes (lista enviada al prompt)
 - **Feature**: `skill-install.sh <id>` — disparado por callback `skill:approve:<id>` async. Mecánico (NO pasa por LLM): lee propuesta JSON (ya incluye skill_body completo), valida name en kebab-case, escribe `commands/<name>.md` + copia a `~/.claude/commands/`, git commit + push, notifica Telegram con commit hash. Con rollback si commit falla
