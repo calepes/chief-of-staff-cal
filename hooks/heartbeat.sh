@@ -64,11 +64,36 @@ should_run() {
 # returns: 0=ok (alert or quiet), 1=error
 run_check() {
   local file="$1"
-  local prompt output
-  prompt=$(strip_frontmatter "$file")
-  if ! output=$(echo "$prompt" | gtimeout 60s claude -p 2>>"$LOG_FILE"); then
-    return 1
-  fi
+  local type body output
+  type=$(parse_frontmatter "$file" type)
+  [[ -z "$type" ]] && type="prompt"
+  body=$(strip_frontmatter "$file")
+
+  case "$type" in
+    bash)
+      # Ejecutar body como bash script con timeout 30s (queries API directas)
+      # Usar archivo temporal para evitar issues de quoting con heredocs
+      local tmp
+      tmp=$(mktemp)
+      printf '%s' "$body" > "$tmp"
+      if ! output=$(gtimeout 30s bash "$tmp" 2>>"$LOG_FILE"); then
+        rm -f "$tmp"
+        return 1
+      fi
+      rm -f "$tmp"
+      ;;
+    prompt|"")
+      # Default: body es prompt para claude -p, timeout 120s
+      if ! output=$(echo "$body" | gtimeout 120s claude -p 2>>"$LOG_FILE"); then
+        return 1
+      fi
+      ;;
+    *)
+      echo "unknown type: $type" >> "$LOG_FILE"
+      return 1
+      ;;
+  esac
+
   if [[ "$output" == ALERT* ]]; then
     echo "${output#ALERT}" | sed 's/^[[:space:]]*//'
     return 0
