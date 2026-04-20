@@ -12,8 +12,22 @@
 - **Feature**: Sync semanal `sync-learnings.sh` (domingo 21:00, plist NO cargado) — rsync `~/.claude/learnings/cos/` → `docs/learnings/` + commit + push
 - **Library**: `~/.claude/hooks/learnings-lib.sh` — bash 3.2 compat (sin associative arrays). Funciones: `generate_id`, `slug`, `hash_normalize`, `is_duplicate`, `append_entry`, `update_index`, `find_entry_in_index`, `flip_pending`, `move_to_archive`, `tipo_to_filename`
 - **Utilities**: `rebuild-learnings-index.sh` (recovery desde archivos de detalle), `learnings-status.sh` (cursor, pendings, top errores)
-- **Backlog update**: Agregado "Deshacer Spotify Mini App (TWA)" por feedback de Cal — la UX es lenta
 - **Spec/Plan**: `docs/superpowers/specs/2026-04-19-self-improving-learnings-design.md` + `docs/superpowers/plans/2026-04-19-self-improving-learnings.md`
+
+### Fase 5.1 — Activación + verificación end-to-end
+- **Activación**: cargados `com.claude.extract-learnings` (21:55 daily) y `com.claude.sync-learnings` (dom 21:00) con `launchctl bootstrap`
+- **Smoke test**: pipeline completa verificada — `append_entry` → entry en index + detalle, `flip_pending` (keep) → `pending:false, valid:true`, `move_to_archive` (drop) → entry a `archive/YYYY-MM.md` con `rejected_at`, sistema limpio post-test
+- **Canal Telegram reiniciado** por Cal para que el plugin fork recargue callbacks `learn:*`
+
+### Docs — gotchas del entorno agregados a CLAUDE.md
+- **Gotcha**: Bash 3.2 macOS default — sin `declare -A`, usar parallel arrays `("key|val")` + `${entry%%|*}` / `${entry#*|}`
+- **Gotcha**: `set -euo pipefail` + `grep -c` sin match — grep devuelve exit 1, `-e` mata el script silencioso. Usar `set -uo pipefail` en scripts de status/conteo
+- **Gotcha**: Plugin Telegram cache tiene versiones 0.0.5 y 0.0.6 coexistentes — deploy con wildcard `telegram/*/` las cubre
+- **Gotcha**: PostToolUse hook `tool_response` no tiene `exit_code` top-level para Bash
+
+### Backlog — decisiones de Cal
+- **Expandir alcance "Deshacer Spotify"**: Cal confirmó remover TODA la integración Spotify del agente (Mini App + callbacks mecánicos + spotify-client + ambos workers + secrets). Mantener solo el Spotify Developer App en console.spotify.com (eliminar es irreversible). CLAUDE.md marcado con "⚠️ PENDIENTE DE REMOVER"
+- **Convención de sesión**: sesión principal de Cal (Telegram) = temas operativos; sesión terminal = solo setup del agente
 
 ## 2026-04-19 (noche)
 

@@ -2,19 +2,19 @@
 
 ## Pendientes
 
-### Deshacer Spotify Mini App (TWA) y features asociadas
-- **Motivo:** Cal reporta que la Mini App funciona lenta y no le gusta la UX
+### Deshacer integración Spotify completa (Mini App + callbacks + workers)
+- **Motivo:** Cal reporta UX lenta en Mini App, y decide remover la integración completa — no solo la TWA
 - **Alcance a remover:**
-  - Worker `spotify-miniapp.carlos-cb4.workers.dev` (desprovisionar)
-  - Código en `spotify-miniapp-worker/` del repo
-  - Botón "🎵 Abrir" en el menú de Telegram (setChatMenuButton → default)
-  - Entry point "Mini App" en `menu.json` / flujos del bot
-  - Referencias en CLAUDE.md (sección "Spotify Mini App (TWA)")
-  - Mantener: control Spotify por callbacks mecánicos (spotify:play/pause/skip/etc) y búsqueda vía LLM — esos sí gustan
-- **Pendiente decidir:**
-  - ¿Mantener el auth worker (`spotify-auth.carlos-cb4.workers.dev`) para los callbacks mecánicos? (sí — es prerequisito)
-  - ¿Reemplazar con algo o solo simplificar al control por botones?
-- **Status:** Capturado 2026-04-20 — pendiente priorizar
+  - **Código plugin:** `telegram-plugin/spotify-client.ts`, handlers `spotify:*` en `telegram-plugin/callback-router.ts`, deploy del plugin sin spotify
+  - **Código workers:** carpeta `spotify-miniapp-worker/` y `spotify-auth-worker/` del repo
+  - **Config menú:** quitar botón "🎵 Spotify" de `menu.json`, resetear `setChatMenuButton` (default)
+  - **Secrets .env:** `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_AUTH_WORKER_URL`
+  - **Infra Cloudflare:** desprovisionar workers `spotify-auth.carlos-cb4.workers.dev` + `spotify-miniapp.carlos-cb4.workers.dev` + KV `spotify-auth-SPOTIFY_TOKENS`
+  - **Docs:** secciones "Spotify" y "Spotify Mini App (TWA)" de CLAUDE.md
+- **NO remover:**
+  - Spotify Developer App (console.spotify.com) — mantener la cuenta OAuth, porque eliminar es irreversible
+  - CHANGELOG + specs históricos — mantener para trazabilidad
+- **Status:** Capturado 2026-04-20, alcance ampliado por Cal en la misma sesión — pendiente priorizar
 
 ### Referencia: Filesystem-based knowledge system (alt RAG) — @soyabraham.ia
 - **Fuente:** Post de Threads — https://www.threads.com/@soyabraham.ia/post/DXUxwD3jVX6

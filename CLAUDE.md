@@ -15,6 +15,9 @@ Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
 ## Telegram Reference (cross-project)
 Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — referencia consolidada de bot, plugin fork, callbacks, UX patterns, integraciones, workers, y gotchas across all projects.
 
+## Referencias complementarias
+- `~/.claude/CLAUDE.md` (global) — instrucciones globales (idioma, planning, comunicación) + detalles del fork Telegram (source of truth, deploy, callback format)
+
 ## Telegram Bot (@calclaudecode_bot)
 - **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas, /menu, /spotify
 - **Menú interactivo:** Configurable en `~/.claude/channels/telegram/menu.json`. Skill `/menu` lee el JSON y envía botones inline.
@@ -46,22 +49,11 @@ Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — refere
 - **Instrucciones:** `docs/briefing-pais-instructions.md` (copia del skill para agentes remotos)
 - **Cron local:** 5:00am diario (launchd) — Bolivia, Perú, Colombia secuencialmente via claude CLI
 
-## Spotify
-- **Worker OAuth:** `https://spotify-auth.carlos-cb4.workers.dev` (login, callback, token refresh) — **desplegado y autenticado**
-- **Credenciales:** `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` en secrets del Worker; `SPOTIFY_AUTH_WORKER_URL` en `~/.claude/channels/telegram/.env`
-- **KV namespace:** `spotify-auth-SPOTIFY_TOKENS` (access_token + refresh_token)
-- **Client module:** `telegram-plugin/spotify-client.ts` — play, pause, skip, nowPlaying, setVolume
-- **Callbacks mecánicos:** spotify:play, spotify:pause, spotify:skip, spotify:back, spotify:volup, spotify:voldown (procesados directo en el plugin)
-- **Búsqueda y discovery:** pasa por el LLM ("pon algo de Coldplay", "qué suena")
-
-## Spotify Mini App (TWA)
-- **Worker:** `https://spotify-miniapp.carlos-cb4.workers.dev` — **desplegado**
-- **TWA deep link:** `https://t.me/calclaudecode_bot/spotify`
-- **Spec:** `docs/superpowers/specs/2026-04-12-spotify-miniapp-design.md`
-- **Funcionalidad:** Player visual, búsqueda, queue — estilo Glass Immersive (SVG icons)
-- **Auth:** Service Binding `AUTH_SERVICE` al auth worker (Worker-to-Worker requiere binding, no URL)
-- **Polling:** cada 5s (15s cuando pierde foco)
-- **Entry points:** botón "🎵 Spotify" en menú principal (URL directa a TWA)
+## Spotify — ⚠️ PENDIENTE DE REMOVER
+- **Status:** Cal decidió remover toda la integración (Mini App + callbacks + workers). Ver BACKLOG "Deshacer integración Spotify completa"
+- **NO desarrollar features nuevos aquí.** Mantener Developer App en console.spotify.com (eliminar es irreversible), pero el resto sale.
+- **Funcional mientras tanto:** callbacks `spotify:*`, Mini App en `https://spotify-miniapp.carlos-cb4.workers.dev`, auth worker
+- **Detalles históricos:** CHANGELOG + `docs/superpowers/specs/2026-04-11-spotify-control-*` + `docs/superpowers/specs/2026-04-12-spotify-miniapp-*`
 
 ## Apple Health (consumo)
 Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects/Personal/Agents/Health/health-worker/`. Ver `Health/CLAUDE.md` para detalles completos.
@@ -90,12 +82,19 @@ Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects
 ## Learnings históricos
 - **Index:** `~/.claude/learnings/cos/index.md` — consultar antes de tomar decisiones técnicas, cambios estructurales, o cuando Cal mencione un tema con histórico (telegram, notion, heartbeat, claude-md, etc.). El index es chico (~1-2KB), abrir archivo de detalle solo si la línea relevante lo amerita
 - **Captura:** skill `/learn <tipo> "<desc>"` (intencional) + hook `learn-error.sh` (errores automáticos, solo cuando exit_code != 0) + batch nocturno 21:55 `extract-learnings.sh` (red de seguridad + patterns)
+- **Hook feedback loop evitado:** `learn-error.sh` solo dispara en `exit_code != 0`. Antes revisaba "error" en output text y se auto-capturaba al ver "errors.md" en sus propios logs
 - **Review:** integrado en nightly-report 22:00 con botones inline `learn:keep|drop|keepall|dropall` (mecánicos en el plugin fork)
 - **Sync:** domingo 21:00 a `docs/learnings/` del repo (plist creado, no cargado aún — requiere aprobación de Cal)
 - **Status/observabilidad:** `~/.claude/hooks/learnings-status.sh` — cursor, pendings por tipo, top errores, último log
 - **Recovery:** `~/.claude/hooks/rebuild-learnings-index.sh` regenera index desde archivos de detalle
 - **Tipos:** `correction | pattern | error | decision | idea`
 - **Spec/plan:** `docs/superpowers/specs/2026-04-19-self-improving-learnings-design.md` + `docs/superpowers/plans/2026-04-19-self-improving-learnings.md`
+
+## Gotchas del entorno
+- **Bash 3.2 macOS default** — sin associative arrays (`declare -A` falla con `unbound variable` silencioso). Usar parallel arrays: `ARR=("key1|val1" "key2|val2")` + parse con `${entry%%|*}` / `${entry#*|}`
+- **`set -euo pipefail` + `grep -c` sin match** — grep devuelve exit 1, `-e` mata el script silencioso. Usar `set -uo pipefail` en scripts de status/conteo
+- **Plugin Telegram cache tiene 0.0.5 y 0.0.6** — el deploy con wildcard `telegram/*/` las cubre ambas, no quitar versiones viejas hasta confirmar cuál usa el harness
+- **PostToolUse hook `tool_response`** no tiene `exit_code` top-level para Bash — el hook asume 0 por default. Filtrar errores por contenido de output es ruidoso (feedback loops); mejor asumir que el harness pasa solo errores reales
 
 ## Comandos operativos
 
