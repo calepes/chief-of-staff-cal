@@ -60,14 +60,20 @@ should_run() {
   esac
 }
 
-# run_check <file> → echoes ALERT body (sin la palabra ALERT) or empty
+# run_check <file> <name> → echoes ALERT body (sin la palabra ALERT) or empty
 # returns: 0=ok (alert or quiet), 1=error
+# stderr de los checks se captura por separado; cuando el check falla o el output
+# queda vacío, las primeras 5 líneas de stderr se loguean con prefijo [cause]
+# (ver morning-build 2026-04-21 — observabilidad de fallos silenciosos).
 run_check() {
   local file="$1"
-  local type body output
+  local name="$2"
+  local type body output stderr_tmp rc=0
   type=$(parse_frontmatter "$file" type)
   [[ -z "$type" ]] && type="prompt"
   body=$(strip_frontmatter "$file")
+
+  stderr_tmp=$(mktemp)
 
   case "$type" in
     bash)
@@ -76,23 +82,37 @@ run_check() {
       local tmp
       tmp=$(mktemp)
       printf '%s' "$body" > "$tmp"
-      if ! output=$(gtimeout 30s bash "$tmp" 2>>"$LOG_FILE"); then
-        rm -f "$tmp"
-        return 1
+      if ! output=$(timeout 30s bash "$tmp" 2>"$stderr_tmp"); then
+        rc=1
       fi
       rm -f "$tmp"
       ;;
     prompt|"")
-      # Default: body es prompt para claude -p, timeout 120s
-      if ! output=$(echo "$body" | gtimeout 120s claude -p 2>>"$LOG_FILE"); then
-        return 1
+      # Default: body es prompt para claude -p. Claude maneja su propio timeout internamente.
+      if ! output=$(echo "$body" | claude -p 2>"$stderr_tmp"); then
+        rc=1
       fi
       ;;
     *)
       echo "unknown type: $type" >> "$LOG_FILE"
+      rm -f "$stderr_tmp"
       return 1
       ;;
   esac
+
+  # Si el check falló o el output vino vacío, loguear primeras 5 líneas de stderr con [cause]
+  if (( rc != 0 )) || [[ -z "${output:-}" ]]; then
+    if [[ -s "$stderr_tmp" ]]; then
+      while IFS= read -r line; do
+        log "[cause] $name: $line"
+      done < <(head -5 "$stderr_tmp")
+    fi
+  fi
+  # Preservar stderr completo en el log principal para auditoría (comportamiento previo)
+  [[ -s "$stderr_tmp" ]] && cat "$stderr_tmp" >> "$LOG_FILE"
+  rm -f "$stderr_tmp"
+
+  (( rc != 0 )) && return 1
 
   if [[ "$output" == ALERT* ]]; then
     echo "${output#ALERT}" | sed 's/^[[:space:]]*//'
@@ -150,7 +170,7 @@ main() {
     checks_total=$((checks_total + 1))
     log "run $name"
     local body
-    if body=$(run_check "$f"); then
+    if body=$(run_check "$f" "$name"); then
       if [[ -n "$body" ]]; then
         case "$priority" in
           high) high_buf+=("$body") ;;
