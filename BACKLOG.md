@@ -1,5 +1,7 @@
 # Backlog — Chief of Staff Cal
 
+> ⚠️ **DORMANT 2026-04-21** — toda la automatización desmontada pendiente de rediseño del ecosistema de agentes. Los items abajo reflejan el estado previo; no reactivar nada sin confirmar con Cal si el rediseño ya definió qué conservar. Detalle en `CLAUDE.md` → sección "Estado (2026-04-21)".
+
 ## Pendientes
 
 ### ✅ Deshacer integración Spotify completa (2026-04-20)
@@ -153,9 +155,9 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - ~~4.4 Notion changes~~ — descartado (no relevante)
 
 **Fase 5: Auto-mejora continua** (1 día)
-- [x] 5.1 Self-improving (2026-04-20) — sistema captura learnings en `~/.claude/learnings/cos/` (filesystem-RAG indexado), review diario en nightly-report con botones, sync semanal a repo. Tipos: correction/error/decision/idea/pattern. Componentes: skill `/learn`, hook PostToolUse `learn-error.sh`, batch nocturno `extract-learnings.sh`, callbacks `learn:*` mecánicos. Plists `extract-learnings` (21:55) y `sync-learnings` (domingo 21:00) creados pero no cargados — requieren aprobación explícita de Cal. Spec/plan en `docs/superpowers/`
-- [x] 5.2 Morning builds (2026-04-20) — cron 22:30 genera propuesta via `claude -p` con contexto del día (git log, learnings, heartbeat, tareas mañana), manda a Telegram con botones ✅/❌. Al aprobar, executor corre en background con scope estricto (commands/, heartbeat-tasks/, hooks/, docs/, CLAUDE.md, BACKLOG.md, CHANGELOG.md — NO plugin, NO workers, NO plists) y auto-commitea. Callbacks `build:approve|reject:<id>` mecánicos en plugin fork. Plist creado pero no cargado
-- [x] 5.3 Skills auto-instalables (2026-04-20) — cron domingo 21:30 escanea transcripts de la semana (últimos 7 días) buscando patrones conductuales con frecuencia ≥3/sem. Genera propuesta con JSON completo (skill body incluido), envía a Telegram con botones. Al aprobar, installer mecánico escribe `commands/<name>.md` + copia a `~/.claude/commands/` + commit + push. Detecta duplicados contra skills existentes. Callbacks `skill:approve|reject:<id>` mecánicos. Plist creado pero no cargado
+- [x] 5.1 Self-improving (2026-04-20) — sistema captura learnings en `~/.claude/learnings/cos/` (filesystem-RAG indexado), review diario en nightly-report con botones, sync semanal a repo. Tipos: correction/error/decision/idea/pattern. Componentes: skill `/learn`, hook PostToolUse `learn-error.sh`, batch nocturno `extract-learnings.sh`, callbacks `learn:*` mecánicos. Plist `sync-learnings` cargado 2026-04-20 (domingo 21:00). Plist `extract-learnings` (21:55) creado pero no cargado aún. Spec/plan en `docs/superpowers/`
+- [x] 5.2 Morning builds (2026-04-20) — cron 22:30 genera propuesta via `claude -p` con contexto del día (git log, learnings, heartbeat, tareas mañana), manda a Telegram con botones ✅/❌. Al aprobar, executor corre en background con scope estricto (commands/, heartbeat-tasks/, hooks/, docs/, CLAUDE.md, BACKLOG.md, CHANGELOG.md — NO plugin, NO workers, NO plists) y auto-commitea. Callbacks `build:approve|reject:<id>` mecánicos en plugin fork. Plist cargado 2026-04-20
+- [x] 5.3 Skills auto-instalables (2026-04-20) — cron domingo 21:30 escanea transcripts de la semana (últimos 7 días) buscando patrones conductuales con frecuencia ≥3/sem. Genera propuesta con JSON completo (skill body incluido), envía a Telegram con botones. Al aprobar, installer mecánico escribe `commands/<name>.md` + copia a `~/.claude/commands/` + commit + push. Detecta duplicados contra skills existentes. Callbacks `skill:approve|reject:<id>` mecánicos. Plist cargado 2026-04-20
 
 **Fase 6: Multi-agente** (1 día)
 - [ ] 6.1 Agentes especializados → `notion-agent`, `research-agent`, `spotify-agent` con sesión aislada. Ref: proyecto `openclaw-agents` instala 9 agentes especializados con un comando + routing por grupo Telegram. Performance: 4 subagentes paralelos = 5min vs 20min secuencial.
@@ -186,6 +188,9 @@ Notas:
 - **Familiar** — Coordinación Cal+Noe, calendarios, conflictos horarios
 
 ### Futuro
+- [ ] **Rediseño del ecosistema de agentes** (2026-04-21) → Cal decide arquitectura nueva tras desmontar v1. Reemplaza Fase 1-5 completa. Tomar en cuenta: evaluación VPS (item en este mismo backlog), gotchas documentados en CLAUDE.md, learnings en `~/.claude/learnings/cos/`. Brainstorm antes de tocar código
+- [ ] **Channel conflict guard: cubrir interactiva↔interactiva** (2026-04-21) → el hook actual solo previene colisión launchd↔interactiva. Dos `claude --channels` con el mismo bot token también compiten por `getUpdates` → conflict 409 → mensajes aleatorios. Detectado durante diagnóstico Telegram 2026-04-21. Decisión de implementar depende del rediseño
 - [ ] Migrar secrets a 1Password CLI (`op`)
 - [ ] Webhook Cloudflare Worker para procesar callback_query server-side (alternativa si el fork del plugin da problemas de mantenimiento)
 - [ ] **Google Maps API — distancias y tiempos** → integrar API de Google Maps (Distance Matrix / Directions) para calcular tiempos de traslado entre reuniones, sugerir hora de salida, alertar cuando hay reuniones consecutivas en ubicaciones distintas. Útil para /today y briefings con agenda presencial.
+- [ ] **Evaluar VPS para correr Claude Code** (agregado 2026-04-21) → alternativa a Mac local + launchd para correr cos-agent y family-agent 24/7. Motivación: problemas recurrentes con health-checks + zombies MCP + dependencia de red local (SNI filtering tumba polling Telegram). Evaluar: costo mensual vs estabilidad, migración del fork del plugin + workers + ambientes, latencia desde/hacia Telegram, y si conviene VPS completo o solo ejecutores remotos. Referencias: spec de watchdog (`docs/references/2026-04-21-agent-launchd-fix.pdf`) — si el VPS resuelve el problema raíz, el rediseño de health-check se vuelve innecesario

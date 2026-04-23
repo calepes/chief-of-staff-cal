@@ -3,6 +3,14 @@
 ## Qué es
 Chief of Staff digital para Cal — claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento.
 
+## Estado (2026-04-21)
+**DORMANT pendiente de rediseño.** Cal desmontó toda la automatización tras problemas recurrentes. Antes de reactivar nada, confirmar con Cal si el rediseño ya sucedió.
+- Launchd plists: movidos a `~/Library/LaunchAgents/disabled-2026-04-21/` (18 archivos entre CoS + Family)
+- Hooks `settings.json` (global + proyecto + Family): bloque `hooks` vaciado, backup en `*.bak-2026-04-21`
+- Procesos: cero `bun server.ts`, cero `claude --channels`, cero `claude -p` headless
+- Bot Telegram mudo hasta reactivación manual
+- Recovery: `mv ~/Library/LaunchAgents/disabled-2026-04-21/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
+
 ## Referencia clave
 El diseño de este CoS se basa en el framework de Tal Raviv ("Build your personal AI copilot"):
 - **Arquitectura:** `docs/ARCHITECTURE.md` — mapa de componentes (launchd, hooks, flujos, invariantes)
@@ -90,7 +98,7 @@ Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects
 - **Executor:** `~/.claude/hooks/morning-build-execute.sh <id>` — disparado por callback `build:approve:<id>` (async via `spawn` detached). Lee propuesta, corre `claude -p` con `morning-build-exec-prompt.md` (scope restringido), clasifica output `DONE|ABORT|FAIL`, mueve a `implemented/failed/`, notifica Telegram
 - **Scope de ejecución permitido (estricto):** `commands/*`, `heartbeat-tasks/*`, `hooks/*.sh`, `CLAUDE.md`, `BACKLOG.md`, `CHANGELOG.md`, `docs/**/*.md`. NO plugin TS, NO workers, NO plists, NO settings.json
 - **Callbacks:** `build:approve:<id>` dispara exec async; `build:reject:<id>` archiva a `rejected/`
-- **Plist:** `com.claude.morning-build` (creado, NO cargado hasta aprobación explícita)
+- **Plist:** `com.claude.morning-build` (cargado 2026-04-20, schedule diario 22:30)
 - **Flujo:** propuesta llega 22:30 → Cal tap ✅ → executor corre en background (max 30min) → notifica resultado con commit hash
 
 ## Skill Detector (Fase 5.3)

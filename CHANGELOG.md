@@ -1,5 +1,26 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-21
+
+### Pausa operativa — desactivación total pendiente de rediseño
+- **Decisión**: Cal desmonta toda la automatización del CoS + Family tras problemas recurrentes. Ambos agentes quedan DORMANT hasta rediseño del ecosistema
+- **Launchd**: 18 plists movidos a `~/Library/LaunchAgents/disabled-2026-04-21/` (10 `com.claude.*` de CoS/sistema + 6 `com.cal.family-*` + 2 `com.cal.cos-*`). Ningún plist cargado, ningún job disparándose
+- **Hooks `settings.json`** (3 archivos con backup `.bak-2026-04-21`):
+  - `~/.claude/settings.json` (global): quitado bloque `hooks` completo (SessionStart context, Stop telegram-notify, PreCompact snapshot, PostToolUse notion-audit + learn-error). Preservado: permissions, statusline, enabledPlugins
+  - `Chief of Staff Cal/.claude/settings.json`: vaciado a `{}`
+  - `Family/.claude/settings.json`: quitado bloque `hooks` (UserPromptSubmit datetime, SessionStart family-context, SessionEnd bootstrap, Stop notify). Preservado: model, permissions
+- **Procesos**: cero `bun server.ts`, cero `claude --channels`, cero `claude -p` headless
+- **Recovery**: reversible. Mover plist de `disabled-2026-04-21/` a `~/Library/LaunchAgents/` + `launchctl bootstrap gui/$(id -u) <plist>`. Restaurar `.bak-2026-04-21` para recuperar hooks
+
+### Diagnóstico — Telegram CoS mudo
+- **Root cause**: red bloquea `api.telegram.org` via SNI filtering (`curl (35) Recv failure: Connection reset by peer` durante TLS handshake; `google.com` funciona). Gotcha ya documentado en CLAUDE.md
+- **Problema secundario**: dos sesiones interactivas con `--channels` del mismo bot → conflict 409. El channel conflict guard actual solo cubre launchd↔interactiva, no interactiva↔interactiva
+- **Fix aplicado**: ninguno — el diagnóstico motivó la decisión de desactivar todo
+
+### Docs
+- `CLAUDE.md` CoS: nueva sección "Estado (2026-04-21): DORMANT" con recovery instructions
+- `Family/CLAUDE.md`: sección "Estado" reescrita (era "v1 operativo 24/7"). Limpieza de afirmaciones stale "corre 24/7" en "Qué es" y warning DORMANT en "Comando de arranque"
+
 ## 2026-04-20
 
 ### Telegram — Channel conflict guard (cos-agent + family-agent)
