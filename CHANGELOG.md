@@ -1,5 +1,16 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-24
+
+### Reactivación parcial — daemon CoS vivo 24/7
+- **Fix**: `com.cal.cos-agent` cargado en launchd. Plist intacto en `~/Library/LaunchAgents/` (nunca se movió a `disabled-2026-04-21/`). Bot `@calclaudecode_bot` polleando; verificado con `409 Conflict` via getUpdates
+- **Cleanup**: zombie `bun server.ts` (PID 56593) huérfano de sesión previa killeado antes del bootstrap para evitar conflict
+- **Family agent**: sin cambios — ya estaba vivo, plist también intacto. El entry del 2026-04-21 afirmaba "18 plists movidos a disabled" — en realidad son 16; los 2 daemons principales nunca fueron movidos
+
+### Docs
+- **CLAUDE.md**: sección "Estado" reescrita (2026-04-21 → 2026-04-24). "DORMANT" → "PARCIALMENTE ACTIVO". Lista explícita de 16 crons pausados vs 2 daemons activos. Aclaración de conflict 409 al abrir sesión interactiva (hooks bootout/bootstrap siguen vaciados)
+- **Global `~/.claude/CLAUDE.md`**: path "Agentes AI personales" corregido a `~/Claude Projects/Personal/Agents/` (estaba apuntando a `~/Documents/...` desactualizado — los agentes 24/7 están fuera de `~/Documents/` por TCC de launchd)
+
 ## 2026-04-21
 
 ### Pausa operativa — desactivación total pendiente de rediseño

@@ -3,13 +3,13 @@
 ## Qué es
 Chief of Staff digital para Cal — claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento.
 
-## Estado (2026-04-21)
-**DORMANT pendiente de rediseño.** Cal desmontó toda la automatización tras problemas recurrentes. Antes de reactivar nada, confirmar con Cal si el rediseño ya sucedió.
-- Launchd plists: movidos a `~/Library/LaunchAgents/disabled-2026-04-21/` (18 archivos entre CoS + Family)
-- Hooks `settings.json` (global + proyecto + Family): bloque `hooks` vaciado, backup en `*.bak-2026-04-21`
-- Procesos: cero `bun server.ts`, cero `claude --channels`, cero `claude -p` headless
-- Bot Telegram mudo hasta reactivación manual
-- Recovery: `mv ~/Library/LaunchAgents/disabled-2026-04-21/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
+## Estado (2026-04-24)
+**PARCIALMENTE ACTIVO** — daemons Telegram corriendo 24/7; automatización secundaria sigue pausada pendiente de rediseño.
+- **Activos:** `com.cal.cos-agent` + `com.cal.family-agent` (ambos KeepAlive, plists intactos en `~/Library/LaunchAgents/`)
+- **Pausados (16 plists en `disabled-2026-04-21/`):** heartbeat, briefings, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas, outlook-cache, extract-learnings, sync-learnings, cos-health-check, family-briefings AM/PM, family-check-recordatorios, family-extrae-aprendizajes, family-health-check
+- **Hooks `settings.json` (global + CoS + Family):** sigue vaciados, backup en `*.bak-2026-04-21`. Implica que al abrir sesión interactiva con `--channels` hay conflict 409 con el daemon — mitigar con `launchctl bootout gui/$(id -u)/com.cal.<agent>` manual antes, o usar `claude` sin `--channels`
+- Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-21/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
+- Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
 ## Referencia clave
 El diseño de este CoS se basa en el framework de Tal Raviv ("Build your personal AI copilot"):

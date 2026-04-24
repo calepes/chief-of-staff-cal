@@ -1,8 +1,13 @@
 # Backlog — Chief of Staff Cal
 
-> ⚠️ **DORMANT 2026-04-21** — toda la automatización desmontada pendiente de rediseño del ecosistema de agentes. Los items abajo reflejan el estado previo; no reactivar nada sin confirmar con Cal si el rediseño ya definió qué conservar. Detalle en `CLAUDE.md` → sección "Estado (2026-04-21)".
+> ⚠️ **Estado 2026-04-24: PARCIALMENTE ACTIVO** — daemons Telegram (cos-agent + family-agent) corriendo 24/7; 16 crons secundarios siguen pausados en `disabled-2026-04-21/` pendientes de rediseño. Los items abajo reflejan el estado pre-pausa; no reactivar crons sin confirmar con Cal. Detalle en `CLAUDE.md` → sección "Estado (2026-04-24)".
 
 ## Pendientes
+
+### Decidir sobre hooks conflict guard (vaciados 2026-04-21)
+- **Estado:** Hooks `cos-channel-bootout.sh` y `cos-channel-bootstrap.sh` siguen vaciados. Backup en `~/.claude/settings.json.bak-2026-04-21` + `.claude/settings.json.bak-2026-04-21` del proyecto
+- **Implicación actual:** abrir sesión interactiva `claude --channels plugin:telegram@claude-plugins-official` genera conflict 409 con el daemon vivo. Workaround manual: `launchctl bootout gui/$(id -u)/com.cal.cos-agent` antes y `launchctl bootstrap` al cerrar
+- **Decisión pendiente:** restaurar desde backup (quality-of-life para dev con `--channels`) vs mantener vaciado (cero magic, bootout manual explícito)
 
 ### ✅ Deshacer integración Spotify completa (2026-04-20)
 - **Removido:** `telegram-plugin/spotify-client.ts`, handlers `spotify:*` en `callback-router.ts`, carpetas `spotify-miniapp-worker/` + `spotify-auth-worker/`, secrets `.env` (`SPOTIFY_AUTH_WORKER_URL`), workers Cloudflare (`spotify-auth` + `spotify-miniapp`), KV `spotify-auth-SPOTIFY_TOKENS`, secciones CLAUDE.md
