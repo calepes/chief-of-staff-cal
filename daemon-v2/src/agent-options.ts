@@ -89,4 +89,7 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__notion__notion-get-users",
   // YouTube — transcripción de audio via whisper local (no depende de captions)
   "mcp__youtube-transcribe__transcribeYoutube",
+  // Tipo de cambio Bolivia — oficial (BCB) y paralelo (Binance P2P USDT/BOB)
+  "mcp__exchange-rate-bolivia__getBcbRate",
+  "mcp__exchange-rate-bolivia__getBinanceP2PRate",
 ];

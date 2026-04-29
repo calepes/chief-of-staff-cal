@@ -96,6 +96,8 @@ const mcpServer = createSdkMcpServer({
 
 const YT_TRANSCRIBE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
+const EXCHANGE_RATE_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT,
@@ -107,6 +109,11 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [YT_TRANSCRIBE_DIST],
+    },
+    "exchange-rate-bolivia": {
+      type: "stdio",
+      command: "node",
+      args: [EXCHANGE_RATE_DIST],
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],

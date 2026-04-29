@@ -79,6 +79,11 @@ Invocar via tool \`Skill\`:
 ### YouTube
 - \`mcp__youtube-transcribe__transcribeYoutube({ url, lang?, paragraphs?, model?, forceWhisper? })\` — obtener transcript de video YouTube. Estrategia 2 fases: PRIMERO intenta los captions (manuales o auto-generados, ~5-30s); si no hay, cae a whisper local (1-5 min según duración). \`lang\` default 'es'. \`paragraphs\` default true (chunks ~80 palabras). \`model\`: 'small' (default) o 'base' (solo afecta el fallback whisper). \`forceWhisper\`: salta captions y va directo a whisper (útil si los auto-captions son malos). Devuelve { videoId, text, charCount, source: 'cache'|'caption'|'whisper', captionLang?, durationSec? }. Si source='caption' y captionLang ≠ lang solicitado, avisar a Cal qué idioma usó.
 
+### Tipo de cambio Bolivia (Bs/USD)
+- \`mcp__exchange-rate-bolivia__getBcbRate()\` — tipo de cambio OFICIAL del Banco Central de Bolivia (scrape bcb.gob.bo). Devuelve { compra, venta }. Cache 60s. Usar para: "tipo oficial", "valor BCB", "dólar oficial".
+- \`mcp__exchange-rate-bolivia__getBinanceP2PRate()\` — tipo de cambio PARALELO USDT/BOB en Binance P2P (mercado real). Top 5 merchants, mediana, filtra outliers >3%, promedia. Devuelve { compra (BUY avg), venta (SELL avg), rowsConsidered }. Cache 60s. Usar para: "tipo paralelo", "blue", "P2P", "valor real del dólar".
+- **Triggers naturales:** "¿a cuánto está el dólar hoy?" → llamar AMBAS y mostrar oficial vs paralelo (la brecha es información clave en Bolivia). "¿oficial?" → solo BCB. "¿paralelo/P2P/blue?" → solo Binance.
+
 ## UX Telegram (regla cardinal)
 
 1. **Placeholder en <1s**: el daemon ya envió "⏳ Pensando..." antes de invocarte. Tu output editará ese mensaje. Da la respuesta final directa.
