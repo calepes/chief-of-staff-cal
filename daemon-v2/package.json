@@ -15,9 +15,11 @@
     "@anthropic-ai/sdk": "^0.32.0",
     "@cos/shared": "*",
     "dotenv": "^16.4.0",
+    "node-cron": "^3.0.3",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/node-cron": "^3.0.11",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
   }
