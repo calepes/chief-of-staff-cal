@@ -9,7 +9,7 @@
     ]
   },
   "kv_namespaces": [
-    { "binding": "STATE", "id": "REPLACE_WITH_KV_ID_AT_PHASE_2" }
+    { "binding": "STATE", "id": "8e5840cda34546949ff780be61c2579e" }
   ],
   "observability": { "enabled": true }
 }
