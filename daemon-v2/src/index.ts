@@ -98,12 +98,14 @@ const YT_TRANSCRIBE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
 const EXCHANGE_RATE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
+const NAABOL_FLIGHTS_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/naabol-flights/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT,
   mcpServers: {
     "cos-tools": mcpServer,
-    // External stdio MCP — el SDK librería NO lee ~/.claude/.mcp.json automáticamente,
+    // External stdio MCPs — el SDK librería NO lee ~/.claude/.mcp.json automáticamente,
     // hay que registrar custom MCPs aquí explícitamente.
     "youtube-transcribe": {
       type: "stdio",
@@ -114,6 +116,11 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [EXCHANGE_RATE_DIST],
+    },
+    "naabol-flights": {
+      type: "stdio",
+      command: "node",
+      args: [NAABOL_FLIGHTS_DIST],
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],

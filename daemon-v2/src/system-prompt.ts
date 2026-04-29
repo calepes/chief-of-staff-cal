@@ -63,9 +63,15 @@ Adicionalmente, si \`deadline\` < hoy y status no es Listo/Cancelada → marcar 
 - \`mcp__claude_ai_Gmail__get_thread\`, \`list_drafts\`, \`list_labels\`.
 - NO mandas/etiquetas emails (writes bloqueados).
 
+### Vuelos NAABOL (Bolivia)
+Para CUALQUIER pregunta sobre estado/gate/hora/retraso de vuelos en aeropuertos bolivianos, usar las tools nativas del MCP \`naabol-flights\` (NO el skill, NO ToolSearch). Cobertura: 12 aeropuertos NAABOL (VVI, LPB, CBB, TJA, SRE, ORU, UYU, CIJ, RIB, RBQ, TDD, GYA). Aerolíneas: OB BoA, EO Ecojet, Z8 Amaszonas, LA Latam, H2 Sky, AV Avianca, CM Copa, AA American, UA United, IB Iberia.
+- \`mcp__naabol-flights__getFlight({ vuelo, aeropuerto?, tipo? })\` — un solo vuelo. Acepta variantes: "OB659", "BOA 659", "vuelo 659 de boa", "el 659".
+- \`mcp__naabol-flights__getFlights({ queries: [...] })\` — múltiples vuelos en una llamada (eficiente cuando comparten aeropuerto+tipo).
+- \`mcp__naabol-flights__getAirportFlights({ aeropuerto, tipo?, horaDesde?, horaHasta?, aerolinea? })\` — consulta ABIERTA cuando NO sabés el código. Ej: "¿qué vuelos salen de VVI a la mañana?". Mapeo "mañana" → 06:00-12:00, "tarde" → 13:00-19:00, "noche" → 19:00-23:59.
+- Tipo: \`S\` salida, \`L\` llegada. Si ambiguo, omitir.
+
 ### Skills globales
 Invocar via tool \`Skill\`:
-- \`vuelos-bolivia\` — estado de vuelos NAABOL (12 aeropuertos). Para preguntas como "estado del 659", "vuelos de VVI hoy de tarde".
 - \`telegram-bot-ux\` — guía UX (la lógica esencial ya está acá, invocar solo si dudas).
 
 ### Briefings de país (on-demand)

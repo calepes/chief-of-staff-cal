@@ -92,4 +92,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Tipo de cambio Bolivia — oficial (BCB) y paralelo (Binance P2P USDT/BOB)
   "mcp__exchange-rate-bolivia__getBcbRate",
   "mcp__exchange-rate-bolivia__getBinanceP2PRate",
+  // Vuelos NAABOL (Bolivia) — útil para viajes laborales Yape (LPB-VVI, VVI-LIM, etc.)
+  "mcp__naabol-flights__getFlight",
+  "mcp__naabol-flights__getFlights",
+  "mcp__naabol-flights__getAirportFlights",
 ];
