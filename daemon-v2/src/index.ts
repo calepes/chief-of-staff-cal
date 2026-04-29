@@ -63,8 +63,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function escapeMarkdownV2Local(s: string): string {
-  return s.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 const kv = new CfKv({
@@ -74,11 +74,19 @@ const kv = new CfKv({
 });
 const state = new ConversationState(kv);
 
+// chatId del turno actual — los tools que necesitan saber a qué chat responder
+// (ej. runBriefing, que dispara un subprocess que después manda follow-up) lo
+// leen via getCurrentChatId(). Se setea al inicio de cada processMessage.
+// Safe porque el daemon procesa mensajes serialmente (1 worker en queue).
+let currentChatId = 0;
+
 const sdkTools = buildSdkTools({
   notionToken: env.NOTION_TOKEN,
   tareasDbId: env.NOTION_TAREAS_DB_ID,
   peopleDbId: env.NOTION_PEOPLE_DB_ID,
   healthApiKey: env.HEALTH_API_KEY,
+  botToken: env.COS_TELEGRAM_BOT_TOKEN,
+  getCurrentChatId: () => currentChatId,
 });
 const mcpServer = createSdkMcpServer({
   name: "cos-tools",
@@ -177,6 +185,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
   const m = payload.message!;
   const chatId = m.chat.id;
   const chatType = m.chat.type;
+  currentChatId = chatId;
 
   let text = m.text;
   const caption = m.caption;
@@ -226,8 +235,8 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
           env.COS_TELEGRAM_BOT_TOKEN,
           chatId,
           placeholderMsgId,
-          "⚠️ *No pude transcribir el audio*\nReintenta o escríbelo, por favor\\.",
-          "MarkdownV2",
+          "⚠️ <b>No pude transcribir el audio</b>\nReintenta o escríbelo, por favor.",
+          "HTML",
         );
         return;
       }
@@ -237,8 +246,8 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
         env.COS_TELEGRAM_BOT_TOKEN,
         chatId,
         placeholderMsgId,
-        `🎤 _"${escapeMarkdownV2Local(transcript)}"_\n\n⏳ Procesando\\.\\.\\.`,
-        "MarkdownV2",
+        `🎤 <i>"${escapeHtml(transcript)}"</i>\n\n⏳ Procesando...`,
+        "HTML",
       );
     } else if (photo) {
       const analysis = await processPhoto(env.COS_TELEGRAM_BOT_TOKEN, photo.file_id, caption, env.ANTHROPIC_API_KEY);
@@ -247,8 +256,8 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
           env.COS_TELEGRAM_BOT_TOKEN,
           chatId,
           placeholderMsgId,
-          "⚠️ *No pude leer la foto*\nReenvíala, por favor\\.",
-          "MarkdownV2",
+          "⚠️ <b>No pude leer la foto</b>\nReenvíala, por favor.",
+          "HTML",
         );
         return;
       }
@@ -288,10 +297,11 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
 
       const t3 = Date.now();
       try {
-        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, "MarkdownV2");
+        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, "HTML");
       } catch (parseErr) {
-        log({ msg: "markdownv2_parse_failed", err: String(parseErr) });
-        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply);
+        log({ msg: "html_parse_failed", err: String(parseErr) });
+        // Fallback: plain text (sin parse_mode) para garantizar entrega aunque se pierda formato
+        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, null);
       }
       const sendMs = Date.now() - t3;
 
@@ -312,8 +322,8 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
         env.COS_TELEGRAM_BOT_TOKEN,
         chatId,
         placeholderMsgId,
-        "⚠️ *No pude procesar tu mensaje*\nHubo un error interno\\. Intenta de nuevo o usa `/reset`\\.",
-        "MarkdownV2",
+        "⚠️ <b>No pude procesar tu mensaje</b>\nHubo un error interno. Intenta de nuevo o usa <code>/reset</code>.",
+        "HTML",
       );
     }
   } finally {

@@ -83,4 +83,6 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__notion__notion-update-page",
   "mcp__notion__notion-query-database-view",
   "mcp__notion__notion-get-users",
+  // YouTube — transcripción de audio via whisper local (no depende de captions)
+  "mcp__youtube-transcribe__transcribeYoutube",
 ];

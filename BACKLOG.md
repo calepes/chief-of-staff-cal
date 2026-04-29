@@ -1,13 +1,33 @@
 # Backlog — Chief of Staff Cal
 
-> ⚠️ **Estado 2026-04-24: PARCIALMENTE ACTIVO** — daemons Telegram (cos-agent + family-agent) corriendo 24/7; 16 crons secundarios siguen pausados en `disabled-2026-04-21/` pendientes de rediseño. Los items abajo reflejan el estado pre-pausa; no reactivar crons sin confirmar con Cal. Detalle en `CLAUDE.md` → sección "Estado (2026-04-24)".
+> ✅ **Estado 2026-04-29: CoS v2 ACTIVO** — daemon Node + Agent SDK librería + webhook + CF Queue. Daemon viejo `com.cal.cos-agent` movido a `disabled-2026-04-29/`. Hooks SessionStart/End adaptados (deleteWebhook gracioso, bootstrap restaura webhook). 16 crons secundarios siguen pausados en `disabled-2026-04-21/` pendientes de rediseño. Detalle en `CLAUDE.md` → sección "Estado (2026-04-29)".
 
 ## Pendientes
 
-### Decidir sobre hooks conflict guard (vaciados 2026-04-21)
-- **Estado:** Hooks `cos-channel-bootout.sh` y `cos-channel-bootstrap.sh` siguen vaciados. Backup en `~/.claude/settings.json.bak-2026-04-21` + `.claude/settings.json.bak-2026-04-21` del proyecto
-- **Implicación actual:** abrir sesión interactiva `claude --channels plugin:telegram@claude-plugins-official` genera conflict 409 con el daemon vivo. Workaround manual: `launchctl bootout gui/$(id -u)/com.cal.cos-agent` antes y `launchctl bootstrap` al cerrar
-- **Decisión pendiente:** restaurar desde backup (quality-of-life para dev con `--channels`) vs mantener vaciado (cero magic, bootout manual explícito)
+### ✅ Migración CoS v2 (2026-04-29)
+- **Hecho:** daemon `com.cal.cos-agent-v2`, worker CF, callback router edge, 9 tools custom, hooks adaptados, cutover completo. Spec/plan en `docs/superpowers/{specs,plans}/2026-04-28-cos-agent-v2-*`.
+
+### Spotify control con lenguaje natural (post-cutover)
+- **Pedido Cal 2026-04-29:** integrar Spotify pero NO con callbacks dedicados — el agent interpreta "pausa", "skip", "qué suena" y llama una tool `spotifyControl` con lenguaje natural.
+- **Infra existente:** worker `spotify-auth.carlos-cb4.workers.dev` (OAuth flow). Pendiente: endpoint exacto para access token + crear `daemon-v2/src/tools/spotify.ts` con args `{ action, query? }`.
+
+### Migrar crons secundarios al daemon v2 (iteración futura)
+- 16 plists pausados en `disabled-2026-04-21/`. Candidatos a embeber con `node-cron` en daemon v2: briefings país, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas.
+- Alternativa: dejar como `claude -p` programado independiente (asume riesgo TCC reset en updates del binario).
+- **Briefings país (post 2026-04-29):** ya no es bloqueante el cron — el bot CoS puede generar on-demand via tool `runBriefing`. Re-habilitar `com.claude.daily-briefings` (mover de `disabled-2026-04-29/` a `~/Library/LaunchAgents/`) si se quiere briefing automático cada 5am como antes.
+
+### Migrar Family/Vesta de MarkdownV2 a HTML (Fase 3 - 2026-04-29)
+- **Bug compartido con CoS pre-fix:** Family/Vesta system-prompt instruye MarkdownV2 al LLM, pero el `shared-v2/src/telegram.ts` ya tiene default `HTML`. Resultado: LLM genera `*texto*`, `\.`, `\!` y al mandar como HTML → Cal/Noe ven los caracteres literales (asteriscos, backslashes en puntos).
+- **Cambios necesarios** (espejo del fix en CoS aplicado 2026-04-29):
+  - `Family/shared-v2/src/telegram.ts`: agregar soporte `parseMode: null` (texto plano) + helper `escapeHtml()`.
+  - `Family/daemon-v2/src/index.ts`: reemplazar `escapeMarkdownV2()` por `escapeHtml()`, todos los `editMessage` con `"HTML"`, fallback con `null` parse para garantizar entrega, templates de error con `<b>` en vez de `*`.
+  - `Family/daemon-v2/src/system-prompt.ts`: reescribir bloque "Formato MarkdownV2" → HTML, plantillas en HTML.
+  - `Family/daemon-v2/src/cron-tasks.ts`: prompts de briefings instruyen MarkdownV2 — cambiar a HTML.
+- **Build + restart:** `npm -w @family/shared run build && npm -w @family/daemon run build && launchctl bootout/bootstrap com.cal.family-agent-v2`.
+- **Validación:** mandar mensaje al grupo Family que típicamente tendría caracteres reservados (números, guiones, paréntesis); confirmar que llega con formato HTML correcto.
+
+### ✅ Hooks conflict guard (resueltos 2026-04-29 con cutover v2)
+- Hooks `cos-channel-bootout.sh` + `cos-channel-bootstrap.sh` ahora coordinan webhook (deleteWebhook gracioso al abrir sesión, setWebhook restore al cerrar última).
 
 ### ✅ Deshacer integración Spotify completa (2026-04-20)
 - **Removido:** `telegram-plugin/spotify-client.ts`, handlers `spotify:*` en `callback-router.ts`, carpetas `spotify-miniapp-worker/` + `spotify-auth-worker/`, secrets `.env` (`SPOTIFY_AUTH_WORKER_URL`), workers Cloudflare (`spotify-auth` + `spotify-miniapp`), KV `spotify-auth-SPOTIFY_TOKENS`, secciones CLAUDE.md
@@ -47,7 +67,7 @@
   - Context window limit workaround: prompt para resumir y migrar thread preservando 90% del valor
 - **Prompts reutilizables:** hiring prompt, onboarding prompt, initiative kickoff, automation brainstorm (todos en el artículo)
 - **Aplicar a:** Diseñar el CoS como copilot con context de Yape (equipo, estrategia, OKRs, stakeholders)
-- **Doc completo:** `/Users/calepes/Documents/Claude Projects/Claude Code Setup/docs/articulos/01kcy4pypx-tal-raviv-personal-ai-copilot.md`
+- **Doc completo:** `/Users/calepes/Claude Projects/Claude Code Setup/docs/articulos/01kcy4pypx-tal-raviv-personal-ai-copilot.md`
 
 ### Callback Optimization — Implementado (2026-04-11)
 - [x] Fork del plugin de Telegram con handler de callback_query
@@ -125,7 +145,7 @@
 - [x] **Health check end-to-end** — `scripts/health-check.sh` detecta long-poll colgado (200+empty vs 409 Conflict) y fuerza relanzamiento del LaunchAgent (2026-04-19)
 
 ### Documentación Telegram
-- [x] **telegram-reference.md** — referencia cross-project consolidada en `~/Documents/Claude Projects/telegram-reference.md`. Cubre: bot, plugin fork, callbacks, UX patterns, integraciones (CoS, Presupuesto, MCP), workers, hooks, gotchas (2026-04-12)
+- [x] **telegram-reference.md** — referencia cross-project consolidada en `~/Claude Projects/telegram-reference.md`. Cubre: bot, plugin fork, callbacks, UX patterns, integraciones (CoS, Presupuesto, MCP), workers, hooks, gotchas (2026-04-12)
 
 ### CoS Proactivo — Plan inspirado en OpenClaw (2026-04-12)
 Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), guía completa
@@ -177,12 +197,12 @@ Cada agente tiene su propia carpeta, CLAUDE.md y BACKLOG.md. Desde aquí se pued
 
 | Agente | Ruta | Estado | Bot Telegram |
 |--------|------|--------|-------------|
-| **Inversiones** | `~/Documents/Claude Projects/Personal/Agents/Inversiones/` | MVP activo | pendiente |
-| **Gestión Presupuesto** | `~/Documents/Claude Projects/Personal/Agents/Presupuesto/` | Producción (5+ meses) | integrado en PFM |
-| **Familiar (Cal + Noe)** | `~/Documents/Claude Projects/Personal/Agents/Family/` | Planificación | pendiente |
-| **Learning** | `~/Documents/Claude Projects/Personal/Agents/Learning/` | Planificación | pendiente |
-| **Health & Fitness** | `~/Documents/Claude Projects/Personal/Agents/Health/` | Planificación | pendiente |
-| **Escolar (Antonia + Catalina)** | `~/Documents/Claude Projects/Personal/Agents/School/` | Planificación | pendiente |
+| **Inversiones** | `~/Claude Projects/Personal/Agents/Inversiones/` | MVP activo | pendiente |
+| **Gestión Presupuesto** | `~/Claude Projects/Personal/Agents/Presupuesto/` | Producción (5+ meses) | integrado en PFM |
+| **Familiar (Cal + Noe)** | `~/Claude Projects/Personal/Agents/Family/` | Planificación | pendiente |
+| **Learning** | `~/Claude Projects/Personal/Agents/Learning/` | Planificación | pendiente |
+| **Health & Fitness** | `~/Claude Projects/Personal/Agents/Health/` | Planificación | pendiente |
+| **Escolar (Antonia + Catalina)** | `~/Claude Projects/Personal/Agents/School/` | Planificación | pendiente |
 
 Notas:
 - **Inversiones** — MVP lanzado 2026-04-06. Portfolio, análisis fundamental, screening. Airtable + Kubera MCP + yfinance. 30 tests

@@ -3,26 +3,124 @@
 ## Qué es
 Chief of Staff digital para Cal — claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento.
 
-## Estado (2026-04-24)
-**PARCIALMENTE ACTIVO** — daemons Telegram corriendo 24/7; automatización secundaria sigue pausada pendiente de rediseño.
-- **Activos:** `com.cal.cos-agent` + `com.cal.family-agent` (ambos KeepAlive, plists intactos en `~/Library/LaunchAgents/`)
-- **Pausados (16 plists en `disabled-2026-04-21/`):** heartbeat, briefings, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas, outlook-cache, extract-learnings, sync-learnings, cos-health-check, family-briefings AM/PM, family-check-recordatorios, family-extrae-aprendizajes, family-health-check
-- **Hooks `settings.json` (global + CoS + Family):** sigue vaciados, backup en `*.bak-2026-04-21`. Implica que al abrir sesión interactiva con `--channels` hay conflict 409 con el daemon — mitigar con `launchctl bootout gui/$(id -u)/com.cal.<agent>` manual antes, o usar `claude` sin `--channels`
-- Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-21/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
+## Estado (2026-04-29)
+**ACTIVO — CoS v2** (Node + Agent SDK librería + webhook + CF Queue).
+- **Daemon activo:** `com.cal.cos-agent-v2` (Node 22, KeepAlive, plist en `~/Library/LaunchAgents/`). Bot `@calclaudecode_bot` ahora opera vía webhook → `cos-agent-worker.carlos-cb4.workers.dev` → CF Queue `cos-events` → daemon Node polea cola.
+- **Activo (Family):** `com.cal.family-agent-v2` (mismo patrón). Bot `@antocatanoecal_bot`. Ver `Family/CLAUDE.md`.
+- **Plists viejos (`disabled-2026-04-29/`):** `com.cal.cos-agent` (plugin Telegram polling, sufría TCC reset y conflict 409).
+- **Plists viejos Family (`disabled-2026-04-28/`):** `com.cal.family-agent`, `com.cal.family-check-recordatorios`.
+- **Pausados (`disabled-2026-04-21/`):** 16 plists secundarios pendientes de rediseño (heartbeat, briefings, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas, outlook-cache, extract-learnings, sync-learnings, cos-health-check, family-briefings AM/PM, family-extrae-aprendizajes, family-health-check).
+- **Hooks `settings.json` global ACTIVOS:** SessionStart `cos-channel-bootout.sh` + `family-channel-bootout.sh`; SessionEnd `*-bootstrap.sh`. Ahora ambos bots usan webhook — abrir `claude --channels` con bot default va a borrar el webhook (grammY `bot.start()`). El bootstrap hook lo restaura al cerrar la sesión; el watchdog del daemon también lo restaura cada 1 min como defensa.
+- Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
+
+## Arquitectura v2
+
+```
+Telegram → CF Worker /telegram/webhook
+              ├─ light callback (menu/t:d/t:c/t:s/t:sd/nav)? → callback-router edge (~300ms)
+              └─ heavy / message → CF Queue cos-events
+                                       ↓
+                                 Mac daemon Node (Agent SDK + OAuth Max)
+                                       ↓
+                                 9 tools custom + MCPs heredados → Telegram API
+```
+
+- **Daemon Node:** `daemon-v2/src/index.ts` (Node 22, `@anthropic-ai/claude-agent-sdk` lib, OAuth Max creds en `~/.claude/.credentials.json`). Multimodal: voice (whisper-cli) + photo (Anthropic Vision Sonnet 4.6).
+- **Worker CF:** `worker-v2/src/index.ts` (Hono, valida `X-Telegram-Bot-Api-Secret-Token`). Callback router edge resuelve callbacks mecánicos sin LLM (~300ms latencia).
+- **Shared:** `shared-v2/src/` (types `TelegramUpdate`, `QueueMessage`; helpers `sendMessage`/`editMessage`/`escapeMarkdownV2`/`answerCallbackQuery`).
+- **Workspaces npm:** `package.json` define `daemon-v2`, `worker-v2`, `shared-v2`. Build con `npm -w @cos/shared run build && npm -w @cos/daemon run build`.
+
+## Comandos operativos v2
+
+```bash
+# Restart daemon
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
+
+# Build (REQUERIDO antes de restart si tocaste shared/ o daemon/)
+cd "/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal"
+npm -w @cos/shared run build && npm -w @cos/daemon run build
+
+# Logs
+tail -f ~/Library/Logs/cos-agent-v2.{out,err}.log
+
+# Estado del proceso
+launchctl print gui/$(id -u)/com.cal.cos-agent-v2 | grep -E "state|pid"
+
+# Deploy worker CF (después de cambiar worker-v2/)
+cd worker-v2 && npx wrangler deploy
+
+# Verificar webhook
+TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' ~/.claude/channels/telegram/.env | cut -d= -f2-)
+curl -s "https://api.telegram.org/bot${TOKEN}/getWebhookInfo" | python3 -m json.tool
+
+# Re-set webhook (raro — el watchdog lo hace solo cada 1 min)
+SECRET=$(cat ~/.cos-agent/webhook-secret.txt)
+curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\",\"edited_message\"]}"
+```
+
+## Tools registradas en CoS
+
+**Custom (MCP `cos-tools`, en `daemon-v2/src/agent-tools.ts`):**
+- `listTasks`, `createTask`, `setTaskStatus`, `setTaskFecha`, `setTaskDeadline` — DB Tareas Notion (`tools/notion-tasks.ts`). Property names reales: `Nombre de tarea`, `Asignado a` (relation), `Estado` status (`Listo` no `Done`), `Fecha`, `Deadline`, `Prioridad CAL`.
+- `getPersonas` — mapping cache 1h con fallback hardcoded de 7 personas Yape (`tools/personas.ts`).
+- `getOutlookEvents` — lee cache pre-procesado por cron `com.claude.outlook-cache` (`tools/outlook.ts`).
+- `getHealthSummary`, `getHealthTrend` — HTTP a `health.carlos-cb4.workers.dev` (`tools/health.ts`).
+- `runBriefing` (agregado 2026-04-29) — async wrapper para generar briefings on-demand (Bolivia/Peru/Colombia). Spawn detached de `claude -p` con mismo prompt que el cron de las 5am, lock por país en `~/.cos-agent/briefing-locks/`, child process notifica a Cal cuando termina via Telegram. Ver `tools/briefing.ts`. Patrón "tool wrapper" para sortear `DISALLOWED_BUILTINS` (Bash/Write bloqueados en el daemon, pero el subprocess los tiene).
+
+**Built-ins permitidas:** `Skill` (vuelos-bolivia, telegram-bot-ux), `WebFetch`, `WebSearch`. **Removido `briefing-pais`** del Skill — el daemon no puede ejecutarlo (necesita Bash/Write); para briefings on-demand usar `runBriefing` en su lugar.
+
+**MCPs heredados (OAuth Max claude.ai):**
+- Google Calendar (8 tools incl. create/update/delete event)
+- Notion (search, fetch, create-pages, update-page, query-database-view, get-users)
+- Gmail (lecturas: search_threads, get_thread, list_drafts, list_labels)
+
+**MCPs custom registrados global (`~/.claude/.mcp.json`):**
+- `youtube-transcribe` — tool `transcribeYoutube({url, lang?, paragraphs?, model?, forceWhisper?})` con fast-path captions de YouTube + fallback whisper local. Server stdio en `~/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/`. Ver `mcp-servers/servers/youtube-transcribe/README.md`.
+
+**Bloqueadas (`agent-options.ts` `DISALLOWED_BUILTINS`):** Bash, Read, Write, Edit, Glob, Grep, Task, Agent, TodoWrite, Task*, MCP discovery, ScheduleWakeup, CronCreate, EnterWorktree, Airtable writes, Gmail writes, Drive writes.
+
+## Formato de respuestas Telegram (HTML)
+- **Parse mode:** `HTML` (cambio 2026-04-29; antes usaba MarkdownV2 pero el LLM se equivocaba con escapes — `+`, `~~` no escapados → Telegram rechazaba el parse → fallback "No pude procesar tu mensaje").
+- **Tags soportados:** `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<a href>`. NO usar MarkdownV2 (`*x*`, `_x_`).
+- **Escape:** solo `< > &` (en `escapeHtml()` de `shared-v2/src/telegram.ts` y `daemon-v2/src/index.ts`).
+- **Fallback robusto:** si HTML falla en el `editMessage`, `daemon-v2/src/index.ts:294` reintenta con `parseMode=null` (texto plano sin formato) — garantiza entrega aunque se pierda formato. El placeholder genérico "⚠️ No pude procesar tu mensaje" solo aparece si TODO falla.
+- **Family/Vesta sigue en MarkdownV2** (mismo bug pendiente). Migración a HTML quedó en BACKLOG como Fase 3.
+
+## Callback router edge (worker)
+
+Light callbacks resueltos en CF Worker sin LLM (~300ms):
+- `menu:<section>` — render estático desde `worker-v2/src/menu.ts`.
+- `nav:<section>` — alias de menu.
+- `t:d:<pageId32>` — mark task done (status="Listo").
+- `t:c:<pageId32>` — complete (alias de done).
+- `t:s:<pageId32>` — skip (no-op, solo ack).
+- `t:sd:<pageId32>` — set fecha=hoy.
+
+Heavy callbacks (requieren LLM): `task:date:<pageId>` (parse "el viernes"), `task:change:<pageId>`, `build:approve:<id>` — caen al daemon vía queue como mensaje sintético `[callback] data`.
+
+Spotify callbacks (`spotify:*`) descartados por el worker (out of scope v2). Pendiente: agregar tool `spotifyControl` con lenguaje natural post-cutover.
+
+## .env file daemon
+- `~/.cos-agent/.env` (chmod 600). Vars: `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN`, `NOTION_TAREAS_DB_ID`, `NOTION_PEOPLE_DB_ID`, `HEALTH_API_KEY`, `ANTHROPIC_API_KEY`, `COS_WEBHOOK_URL`, `COS_WEBHOOK_SECRET`.
+- Webhook secret backup: `~/.cos-agent/webhook-secret.txt` (one-way en wrangler).
+- Heartbeat: `~/.cos-agent/heartbeat`.
 
 ## Referencia clave
 El diseño de este CoS se basa en el framework de Tal Raviv ("Build your personal AI copilot"):
 - **Arquitectura:** `docs/ARCHITECTURE.md` — mapa de componentes (launchd, hooks, flujos, invariantes)
 - **Guía de implementación:** `guia-implementacion-copilot.md` — checklist detallado paso a paso
 - **Backlog:** `BACKLOG.md`
-- **Artículo procesado:** `/Users/calepes/Documents/Claude Projects/Claude Code Setup/docs/articulos/01kcy4phpx-tal-raviv-personal-ai-copilot.md`
+- **Artículo procesado:** `/Users/calepes/Claude Projects/Claude Code Setup/docs/articulos/01kcy4phpx-tal-raviv-personal-ai-copilot.md`
 
 ## Contexto de Yape
-Ver: `/Users/calepes/Documents/Claude Projects/Yape/CLAUDE.md`
+Ver: `/Users/calepes/Claude Projects/Yape/CLAUDE.md`
 
 ## Telegram Reference (cross-project)
-Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — referencia consolidada de bot, plugin fork, callbacks, UX patterns, integraciones, workers, y gotchas across all projects.
+Ver: `/Users/calepes/Claude Projects/telegram-reference.md` — referencia consolidada de bot, plugin fork, callbacks, UX patterns, integraciones, workers, y gotchas across all projects.
 
 ## Referencias complementarias
 - `~/.claude/CLAUDE.md` (global) — instrucciones globales (idioma, planning, comunicación) + detalles del fork Telegram (source of truth, deploy, callback format)
@@ -49,7 +147,7 @@ Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — refere
 
 ## Notion
 - **Integración:** "Claude CoS" — conectada a DB de Tareas y People
-- **Referencia:** `~/Documents/Claude Projects/notion-reference.md` (cross-project, cargar bajo demanda)
+- **Referencia:** `~/Claude Projects/notion-reference.md` (cross-project, cargar bajo demanda)
 
 ## Briefings
 - **Skill:** /briefing-pais — genera HTML Liquid Glass, publica en GitHub Pages, notifica por Telegram
@@ -59,7 +157,7 @@ Ver: `/Users/calepes/Documents/Claude Projects/telegram-reference.md` — refere
 - **Cron local:** 5:00am diario (launchd) — Bolivia, Perú, Colombia secuencialmente via claude CLI
 
 ## Apple Health (consumo)
-Worker e infraestructura viven en el agente Health: `~/Documents/Claude Projects/Personal/Agents/Health/health-worker/`. Ver `Health/CLAUDE.md` para detalles completos.
+Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/Agents/Health/health-worker/`. Ver `Health/CLAUDE.md` para detalles completos.
 
 **Endpoints (quick ref para consumir desde CoS):**
 - `GET https://health.carlos-cb4.workers.dev/summary?date=YYYY-MM-DD&key=$HEALTH_API_KEY` — resumen del día
@@ -156,6 +254,7 @@ echo 0 > ~/.claude/state/heartbeat-failures
 - **Channel conflict guard (SessionStart/SessionEnd):** `.claude/settings.json` del proyecto registra dos hooks:
   - `cos-channel-bootout.sh` (SessionStart): si la sesión interactiva usa `--channels plugin:telegram` con el bot default, descarga el launchd agent `com.cal.cos-agent` para que no compitan por `getUpdates` (Telegram long-poll solo permite UN consumidor por bot → conflict 409 reparte mensajes aleatoriamente)
   - `cos-channel-bootstrap.sh` (SessionEnd): cuando cierras la última sesión interactiva del CoS, recarga el cos-agent para que retome escucha en background
+  - `family-channel-bootout.sh` / `family-channel-bootstrap.sh` (SessionStart/End): equivalentes para sesiones con `TELEGRAM_STATE_DIR=...telegram-family`. Family v2 ya usa webhook (no polling), pero los hooks siguen siendo defensivos para evitar que una sesión `--channels` accidental tumbe el webhook (grammY `bot.start()` llama `deleteWebhook` automático).
   - **Invariante:** nunca corren simultáneo agent launchd + sesión interactiva del mismo bot. Siempre hay exactamente un consumidor activo
   - Ignora sesiones con `TELEGRAM_STATE_DIR=` custom (ej. family-agent usa otro bot)
   - **Anti self-sabotage:** el plist del cos-agent tiene `COS_AGENT_BG=1` en env — los hooks lo chequean y exit 0 si corren dentro del propio agent (sin esto, el SessionStart del agent haría bootout de su propio launchd → KeepAlive respawn → loop spawneando bun zombies). Misma lógica en Family con `FAMILY_AGENT_BG=1`

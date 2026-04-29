@@ -1,5 +1,95 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-29
+
+### Migración mayor: daemon CoS v2 (Node + Agent SDK librería + webhook + CF Queue)
+
+**Razón**: el daemon viejo `claude --channels` sufría TCC reset en cada update del binario `claude` y conflict 409 con sesiones interactivas. Mismo patrón que ya migró Vesta v2 / Pecunia v2.
+
+**Arquitectura nueva**:
+- Telegram → CF Worker `cos-agent-worker.carlos-cb4.workers.dev` (Hono webhook + callback router edge)
+- Light callbacks (menu/t:d/t:c/t:s/t:sd/nav) resueltos en edge (~300ms, sin LLM)
+- Heavy → CF Queue `cos-events` → daemon Node `com.cal.cos-agent-v2` (Node 22 + `@anthropic-ai/claude-agent-sdk` lib + OAuth Max)
+
+**Phases ejecutadas**:
+- **Phase 1 — Scaffolding**: npm workspaces (`shared-v2`, `daemon-v2`, `worker-v2`), tsconfig.base, types y telegram helpers compartidos.
+- **Phase 2 — Worker CF**: queue `cos-events` (HTTP pull mode), KV `cos-state` (id `8e5840cda34546949ff780be61c2579e`), secrets (`COS_WEBHOOK_SECRET`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN`), callback router edge con status valor real `Listo` (no `Done`).
+- **Phase 3 — Daemon Node**: 9 tools custom (notion-tasks con property names reales `Nombre de tarea`/`Asignado a` relation/`Fecha`/`Deadline`/`Prioridad CAL`, personas con cache 1h + fallback hardcoded de 7 personas Yape, outlook cache reader, health worker tools, multimodal voice/photo). Fresh `startup()` per turn (warm pool stale gotcha). Watchdog webhook cada 1 min. Circuit breaker con alerta a Cal tras 3 errores consecutivos.
+- **Phase 4 — Standby test**: plist `com.cal.cos-agent-v2` con `/usr/local/bin/node`, `.env` con 12 vars, daemon corriendo en background con webhook deshabilitado para no chocar con daemon viejo.
+- **Phase 5 — Hooks adaptados**: `cos-channel-bootout.sh` y `cos-channel-bootstrap.sh` reescritos. Bootout deja que grammY `bot.start()` borre webhook (esperado). Bootstrap restaura webhook al worker v2 inmediatamente al cerrar la última sesión interactiva.
+- **Phase 6 — Cutover**: `setWebhook` al worker v2, daemon viejo `com.cal.cos-agent` movido a `disabled-2026-04-29/`, smoke test pendiente con Cal.
+
+**Tools custom** (MCP `cos-tools`, 9 total):
+1. `listTasks({status?, assigneePageId?, fromDate?, toDate?, limit?})` — query DB Tareas
+2. `createTask({title, status?, assigneePageId?, fechaIso?, deadlineIso?, prioridad?})`
+3. `setTaskStatus({pageId, status})` — usar `Listo` para "done"
+4. `setTaskFecha({pageId, fechaIso})`
+5. `setTaskDeadline({pageId, deadlineIso})`
+6. `getPersonas()` — mapping cache
+7. `getOutlookEvents({when?})` — cache pre-procesado
+8. `getHealthSummary({date?})`
+9. `getHealthTrend({metric, days})`
+
+**Worker callback router edge** (`worker-v2/src/callback-router.ts`):
+- `menu:<section>` y `nav:<section>` — render estático (solo `root` por ahora)
+- `t:d:<pageId32>` — mark done (status="Listo")
+- `t:c:<pageId32>` — complete (alias)
+- `t:s:<pageId32>` — skip
+- `t:sd:<pageId32>` — set fecha=hoy
+- `spotify:*` — descartados (out of scope v2)
+
+**Estado post-cutover**:
+- ✅ Bot @calclaudecode_bot responde via webhook
+- ✅ Sin TCC reset (Node + SDK lib, sin binario `claude`)
+- ✅ Sin conflict 409 (webhook reemplaza polling)
+- ✅ Watchdog auto-recupera webhook si algún proceso lo borra
+- ✅ Sesiones interactivas coordinadas via hooks (deleteWebhook gracioso)
+- ⏸️ Spotify control con lenguaje natural — pendiente post-cutover (Cal pidió agregarlo después)
+
+**Spec/plan**: `docs/superpowers/specs/2026-04-28-cos-agent-v2-design.md` + `docs/superpowers/plans/2026-04-28-cos-agent-v2-implementation.md`.
+
+### Telegram UX — Migración MarkdownV2 → HTML
+
+**Bug detectado**: el bot respondía con "⚠️ No pude procesar tu mensaje. Hubo un error interno" cada vez que el LLM generaba un reply con caracteres MarkdownV2 reservados sin escapar (`+`, `~~`, `=`, etc.). Telegram rechazaba el parse, y el "fallback" en `daemon-v2/src/index.ts:294` reintentaba sin pasar `parseMode` — pero el default en `shared-v2/src/telegram.ts:35` también era `MarkdownV2`, así que el fallback fallaba igual y caía al placeholder genérico.
+
+**Fix**:
+- `shared-v2/src/telegram.ts`: default `editMessage` ahora es `HTML`. Tipo `parseMode` extendido a `"HTML" | "MarkdownV2" | null`. Si `null`, no se incluye `parse_mode` en el body (texto plano). Agregado export `escapeHtml(s)` que escapa solo `< > &`.
+- `daemon-v2/src/index.ts`: helper local `escapeHtml`, todos los `editMessage` con `"HTML"`. Fallback ahora usa `parseMode=null` → garantiza entrega aunque se pierda formato. Templates de error en HTML.
+- `daemon-v2/src/system-prompt.ts`: instrucciones reescritas — el LLM ahora genera `<b>`, `<i>`, `<code>`, `<a href>` en vez de `*x*`, `_x_`. Plantillas de output (tarea, lista, briefing) en HTML.
+
+**Resultado**: bot responde sin "No pude procesar" — verificado con mensaje real (replyLen 274 chars con bold + bullets, sendMs 457ms, sin `html_parse_failed` en log).
+
+**Impacto en otros bots**: Family/Vesta tiene el mismo bug (su `shared-v2/telegram.ts` default = `HTML` ya, pero el prompt instruye MarkdownV2 — los users ven `\*texto\*` literal). Migración análoga queda en BACKLOG. Pecunia usa HTML hardcoded — no afectado.
+
+### Briefings on-demand — tool `runBriefing`
+
+**Problema**: el bot CoS no podía generar briefings on-demand porque `Bash`, `Write`, `Read`, `Edit` están en `DISALLOWED_BUILTINS` (allowlist estricta). Cuando Cal pedía "genera el briefing Bolivia", el LLM intentaba `Skill briefing-pais` y se frustraba porque el skill necesita Bash/curl/git/Write y no los tiene. Solo el cron `com.claude.daily-briefings` (sesión claude regular con tools completos) podía generar briefings — pero el cron quedó deshabilitado en `disabled-2026-04-29/` y los briefings llevaban 11 días sin generarse cuando llegó el pedido de Cal.
+
+**Solución — patrón "tool wrapper"**: tool custom `mcp__cos-tools__runBriefing({pais, fecha?})` en `daemon-v2/src/tools/briefing.ts`:
+- Async: spawn detached de `claude -p` con el mismo comando que usaba el cron (`gtimeout 900 claude -p --dangerously-skip-permissions --allowedTools "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Skill" -d <PROJECT_DIR> "<prompt>"`). Tool retorna inmediatamente con `status: "started"`.
+- Lock: `~/.cos-agent/briefing-locks/<pais>.lock` con PID + chatId + timestamp. Bloquea ejecución concurrente del mismo país (diferentes países pueden correr en paralelo). Detecta locks stale (PID muerto).
+- Notificación: el child process mismo manda al chat de Cal (chat_id pasado en el prompt) con top 3 titulares + URL cuando termina. Si el child falla (timeout 15min o exit≠0), el daemon manda aviso de error al chat.
+- ChatId del turno actual: `daemon-v2/src/index.ts` mantiene `currentChatId` global mutable, seteado al inicio de cada `processMessage`. `agent-tools.ts` usa `getCurrentChatId()` callback. Safe porque el daemon procesa serialmente (1 worker en queue).
+
+**system-prompt actualizado**: removida mención del Skill `briefing-pais` (no funciona desde el daemon), agregada sección "Briefings de país (on-demand)" con la nueva tool.
+
+**Flujo nuevo**: Cal pide *"genera el briefing Bolivia de hoy"* → LLM invoca `runBriefing({pais: "Bolivia"})` → bot responde "Briefing arrancado para Bolivia 2026-04-29. Te aviso cuando termine" → en background el subprocess corre 5-15 min → manda mensaje nuevo a Cal con top 3 + URL.
+
+### YouTube transcripts — MCP custom + integración CoS
+
+**Motivación**: el MCP global `youtube-transcript` (3rd party) solo lee captions cuando existen — falla con videos sin captions. Cal mandaba videos al bot CoS para resumir y el bot decía "no tengo permiso" o "el video no tiene captions".
+
+**MCP nuevo**: `youtube-transcribe` (Node 22 + TS + `@modelcontextprotocol/sdk` stdio) en `~/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/`. Tool único `transcribeYoutube({url, lang?, paragraphs?, model?, forceWhisper?})` con estrategia 2 fases:
+1. **Caption fast-path** (~5-30s): `yt-dlp --skip-download --write-subs --write-auto-subs --sub-langs <lang>,*  --convert-subs srt`. Parsea SRT, devuelve texto. `source: "caption"`, `captionLang` indica el idioma real usado.
+2. **Whisper fallback** (1-5 min según duración): `yt-dlp -x --audio-format wav --postprocessor-args "ffmpeg:-ar 16000 -ac 1"` + `whisper-cli -m ggml-small.bin -l <lang> -nt`. `source: "whisper"`.
+- Cache por `videoId+lang+model` en `/tmp/yt-transcribe-cache/<id>-<lang>-<model>.txt`. Subsecuentes hits → `source: "cache"`.
+- `paragraphs: true` (default) parte el texto en chunks ~80 palabras separados por `\n\n`.
+- `forceWhisper: true` salta el caption fast-path (útil si auto-captions son malos).
+
+**Registro global**: `~/.claude/.mcp.json` agregado server `youtube-transcribe` (stdio, command=node, args=[dist path]). Disponible en TODAS las sesiones interactivas + daemons que hereden MCPs.
+
+**CoS allowlist**: `mcp__youtube-transcribe__transcribeYoutube` agregado a `CLAUDE_AI_COS_TOOLS` en `agent-options.ts`. Removido el viejo `mcp__youtube-transcript__get_transcripts` para que el LLM use solo el nuevo. system-prompt actualizado con nueva sección "YouTube" describiendo las 2 fases y opciones.
+
 ## 2026-04-24
 
 ### Reactivación parcial — daemon CoS vivo 24/7
@@ -165,7 +255,7 @@
 - **Update**: `Health/CLAUDE.md` enriquecido con especificación completa del worker (endpoints, ingesta, métricas, dedup, deploy, ejemplos curl)
 
 ### Notion (cross-project)
-- **Feature**: Creado `~/Documents/Claude Projects/notion-reference.md` — referencia global cargada bajo demanda: mapeo personas (pageId ↔ nombre) para 7 miembros del equipo Yape, schema DB Tareas (32 props), patterns jq para outputs grandes (70KB+), gotchas (users vs pages en API)
+- **Feature**: Creado `~/Claude Projects/notion-reference.md` — referencia global cargada bajo demanda: mapeo personas (pageId ↔ nombre) para 7 miembros del equipo Yape, schema DB Tareas (32 props), patterns jq para outputs grandes (70KB+), gotchas (users vs pages en API)
 - **Update**: `Claude Projects/CLAUDE.md` referencia `notion-reference.md` junto a telegram-reference.md
 - **Update**: `CoS/CLAUDE.md` sección Notion reducida a pointer al archivo cross-project
 
