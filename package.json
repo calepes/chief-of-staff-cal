@@ -1,0 +1,17 @@
+{
+  "name": "cos-agent",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.0.0" },
+  "workspaces": ["worker-v2", "daemon-v2", "shared-v2"],
+  "scripts": {
+    "build": "npm -w @cos/shared run build && npm -w @cos/daemon run build",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "test": "npm run test -ws --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

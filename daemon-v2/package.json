@@ -1,0 +1,24 @@
+{
+  "name": "@cos/daemon",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.119",
+    "@anthropic-ai/sdk": "^0.32.0",
+    "@cos/shared": "*",
+    "dotenv": "^16.4.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -2,3 +2,7 @@ node_modules/
 *.html
 bun.lock
 .env
+
+# Node workspaces v2
+dist/
+*.tsbuildinfo

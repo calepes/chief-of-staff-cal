@@ -1,0 +1,15 @@
+{
+  "name": "cos-agent-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "queues": {
+    "producers": [
+      { "binding": "INBOX", "queue": "cos-events" }
+    ]
+  },
+  "kv_namespaces": [
+    { "binding": "STATE", "id": "REPLACE_WITH_KV_ID_AT_PHASE_2" }
+  ],
+  "observability": { "enabled": true }
+}
