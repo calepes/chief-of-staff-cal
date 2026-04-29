@@ -94,9 +94,21 @@ const mcpServer = createSdkMcpServer({
   tools: sdkTools,
 });
 
+const YT_TRANSCRIBE_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
+
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT,
-  mcpServers: { "cos-tools": mcpServer },
+  mcpServers: {
+    "cos-tools": mcpServer,
+    // External stdio MCP — el SDK librería NO lee ~/.claude/.mcp.json automáticamente,
+    // hay que registrar custom MCPs aquí explícitamente.
+    "youtube-transcribe": {
+      type: "stdio",
+      command: "node",
+      args: [YT_TRANSCRIBE_DIST],
+    },
+  },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
   disallowedTools: DISALLOWED_BUILTINS,
   maxTurns: 12,

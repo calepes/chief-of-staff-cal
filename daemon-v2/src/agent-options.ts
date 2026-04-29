@@ -53,6 +53,10 @@ export const DISALLOWED_BUILTINS: string[] = [
   "mcp__claude_ai_Gmail__unlabel_thread",
   // Drive writes — CoS no crea archivos en Drive
   "mcp__claude_ai_Google_Drive__create_file",
+  // 3rd party YouTube transcript MCP heredado de OAuth Max — usamos el custom
+  // mcp__youtube-transcribe en su lugar (caption fast-path + whisper fallback).
+  // El viejo solo lee captions y rompe con videos sin captions.
+  "mcp__youtube-transcript__get_transcripts",
 ];
 
 // MCPs heredados que SÍ usa CoS. allowedTools es allowlist estricto.
