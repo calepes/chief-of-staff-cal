@@ -78,8 +78,12 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - Notion (search, fetch, create-pages, update-page, query-database-view, get-users)
 - Gmail (lecturas: search_threads, get_thread, list_drafts, list_labels)
 
-**MCPs custom registrados global (`~/.claude/.mcp.json`):**
-- `youtube-transcribe` — tool `transcribeYoutube({url, lang?, paragraphs?, model?, forceWhisper?})` con fast-path captions de YouTube + fallback whisper local. Server stdio en `~/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/`. Ver `mcp-servers/servers/youtube-transcribe/README.md`.
+**MCPs custom registrados global (`~/.claude/.mcp.json` + wired en `BASE_OPTIONS.mcpServers` del daemon):**
+- `youtube-transcribe` — tool `transcribeYoutube({url, lang?, paragraphs?, model?, forceWhisper?})` con fast-path captions + fallback whisper local. Server stdio en `mcp-servers/servers/youtube-transcribe/`.
+- `exchange-rate-bolivia` (agregado 2026-04-29) — `getBcbRate` (oficial BCB scrape) y `getBinanceP2PRate` (paralelo USDT/BOB merchant median + outlier filter). Cache 60s in-memory. Server en `mcp-servers/servers/exchange-rate-bolivia/`.
+- `naabol-flights` (agregado 2026-04-29, antes era tool local de Vesta) — `getFlight`, `getFlights`, `getAirportFlights` para los 12 aeropuertos NAABOL. Wraps el CLI `~/Claude Projects/Personal/Apps/Aeropuertos Bolivia/cli/consultar-vuelo.mjs`. Server en `mcp-servers/servers/naabol-flights/`.
+
+**Gotcha SDK librería:** el archivo `~/.claude/.mcp.json` solo lo lee el CLI de Claude Code. El daemon Node con `@anthropic-ai/claude-agent-sdk` librería NO lo lee — hay que registrar custom MCPs en `BASE_OPTIONS.mcpServers` (ver `daemon-v2/src/index.ts`). Confirmado bug 2026-04-29: el LLM intentaba llamar `mcp__youtube-transcribe__*` y recibía "permissions not granted" hasta que se agregó al BASE_OPTIONS.
 
 **Bloqueadas (`agent-options.ts` `DISALLOWED_BUILTINS`):** Bash, Read, Write, Edit, Glob, Grep, Task, Agent, TodoWrite, Task*, MCP discovery, ScheduleWakeup, CronCreate, EnterWorktree, Airtable writes, Gmail writes, Drive writes.
 

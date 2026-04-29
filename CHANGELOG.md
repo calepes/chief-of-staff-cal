@@ -90,6 +90,47 @@
 
 **CoS allowlist**: `mcp__youtube-transcribe__transcribeYoutube` agregado a `CLAUDE_AI_COS_TOOLS` en `agent-options.ts`. Removido el viejo `mcp__youtube-transcript__get_transcripts` para que el LLM use solo el nuevo. system-prompt actualizado con nueva sección "YouTube" describiendo las 2 fases y opciones.
 
+### MCP wiring fix — SDK librería no lee `.mcp.json`
+
+**Bug detectado** durante prueba inicial de youtube-transcribe en CoS y Vesta: el LLM intentaba llamar al tool nuevo pero fallaba con `"Claude requested permissions to use mcp__youtube-transcribe__*, but you haven't granted it yet"`. Investigación: el archivo `~/.claude/.mcp.json` solo lo lee el binario Claude Code CLI. Los daemons que usan `@anthropic-ai/claude-agent-sdk` como librería Node NO leen ese archivo — hay que registrar custom MCPs en `Options.mcpServers` al hacer `startup()`.
+
+**Fix**:
+- `daemon-v2/src/index.ts`: `BASE_OPTIONS.mcpServers` ahora incluye objetos stdio para todos los MCPs externos (youtube-transcribe, exchange-rate-bolivia, naabol-flights). Formato: `{ type: "stdio", command: "node", args: ["/abs/path/dist/index.js"] }`.
+- `agent-options.ts`: agregado `mcp__youtube-transcript__get_transcripts` (3rd party legacy heredado de OAuth Max claude.ai) a `DISALLOWED_BUILTINS` para que el LLM no caiga en él por accidente.
+
+Mismo fix aplicado a Family/Vesta y Pecunia.
+
+### Exchange-rate-bolivia MCP (BCB oficial + Binance P2P paralelo)
+
+**Motivación**: en Bolivia hay brecha grande entre el dólar oficial (BCB ~9.79 venta) y el paralelo (Binance P2P ~13+). Tener ambas fuentes accesibles desde el bot facilita decisiones de gasto en USD.
+
+**Server nuevo**: `mcp-servers/servers/exchange-rate-bolivia/` (Node + TS + stdio + sdk MCP). Dos tools read-only:
+- `getBcbRate()` — scrape de bcb.gob.bo (regex sobre el bloque "Valor referencial del dólar estadounidense"). Cache 60s. Replica la lógica del Scriptable widget en repo `tipo-de-cambio-Bolivia`.
+- `getBinanceP2PRate()` — POST al endpoint público C2C de Binance para USDT/BOB. Top 5 BUY + top 5 SELL merchants, mediana, filtro outliers >3%, promedio. Cache 60s.
+
+Registrado global + wired en CoS, Vesta y Pecunia. system-prompt de CoS actualizado con triggers naturales ("¿a cuánto está el dólar?" → llamar las 2 y mostrar oficial vs paralelo).
+
+**Repo `tipo-de-cambio-Bolivia` actualizado**: default branch arreglado a `main` (estaba en `claude/create-exchange-folders-0JRtW`). Agregado widget Scriptable Binance P2P (`tipo cambio Binance/binanceP2P.js` + `loader.js`).
+
+### Naabol-flights MCP (promovido de tool local a global)
+
+**Motivación**: las tools de vuelos NAABOL existían solo como tools custom dentro de Vesta (`Family/daemon-v2/src/tools/flights.ts`). CoS y Pecunia no podían consultar vuelos sin pasar por el skill global `vuelos-bolivia` que requiere Bash (bloqueado en daemons). Promovido a MCP global single-source-of-truth.
+
+**Server nuevo**: `mcp-servers/servers/naabol-flights/`. Wraps el CLI `~/Claude Projects/Personal/Apps/Aeropuertos Bolivia/cli/consultar-vuelo.mjs`. Tres tools:
+- `getFlight({vuelo, aeropuerto?, tipo?})` — un solo vuelo. Acepta variantes: "OB659", "BOA 659", "el 659".
+- `getFlights({queries: [...]})` — múltiples vuelos en una llamada (eficiente cuando comparten aeropuerto+tipo).
+- `getAirportFlights({aeropuerto, tipo?, horaDesde?, horaHasta?, aerolinea?})` — consulta abierta cuando NO se conoce el código. 12 aeropuertos NAABOL.
+
+Wired en los 3 daemons. Vesta perdió `tools/flights.ts` (delete de 113 líneas) y las 3 entradas en `agent-tools.ts` — el namespace cambia de `mcp__vesta-tools__getFlight` → `mcp__naabol-flights__getFlight`. system-prompt de Vesta + CoS actualizados con prefijos nuevos. Skill global `vuelos-bolivia` se mantiene para sesiones interactivas/CLI (no se deprecó).
+
+**Bug del CLI corregido en mismo día**: `categorizeStatus()` no reconocía estado "CONFIRMADO"/"CONFIRMED" del endpoint NAABOL → todos los vuelos volvían como `estadoCategoria: "other"` (Cal vio todos los emojis como ⚪ blanco). Fix aplicado: agregado caso CONFIRMED en el clasificador + nueva función `adjustForDelay()` que recategoriza a `delayed` cuando `horaReal - horaProgramada > 15 min`. CLI vive en repo Aeropuertos-Bolivia local sin commitear (carpeta `cli/` untracked).
+
+### Pecunia system-prompt fix
+
+**Bug**: Pecunia tenía `exchange-rate-bolivia` y `naabol-flights` correctamente wired (BASE_OPTIONS + allowlist), pero el `system-prompt.ts` no mencionaba ninguno de los tools nuevos. Cal preguntó "Dame el tipo de cambio del BCP y de Binance" y el LLM respondió sin invocar tools (`turn_summary toolCalls: []` confirmado en `daemon.out.log`).
+
+**Fix**: agregadas 2 secciones nuevas en `pecunia-agent/daemon/src/system-prompt.ts` después del bloque de Airtable: "Tipo de cambio Bolivia" con triggers naturales y "Vuelos NAABOL" como referencia para queries laterales en planning de gastos por viajes.
+
 ## 2026-04-24
 
 ### Reactivación parcial — daemon CoS vivo 24/7

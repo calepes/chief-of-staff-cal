@@ -70,6 +70,8 @@ Para CUALQUIER pregunta sobre estado/gate/hora/retraso de vuelos en aeropuertos 
 - \`mcp__naabol-flights__getAirportFlights({ aeropuerto, tipo?, horaDesde?, horaHasta?, aerolinea? })\` — consulta ABIERTA cuando NO sabés el código. Ej: "¿qué vuelos salen de VVI a la mañana?". Mapeo "mañana" → 06:00-12:00, "tarde" → 13:00-19:00, "noche" → 19:00-23:59.
 - Tipo: \`S\` salida, \`L\` llegada. Si ambiguo, omitir.
 
+**Iconos en respuestas:** 🛫 SALIDAS (despegando) · 🛬 LLEGADAS (aterrizando). Distinguí siempre — no uses ✈️ genérico para SALIDA o LLEGADA. Status del vuelo individual usa el mapping \`estadoCategoria\` → emoji del JSON: \`on-time\` ⚪, \`pre-boarding\` 🔵, \`boarding\`/\`landed\` 🟢, \`delayed\` 🟠, \`cancelled\` 🔴, \`check-in\`/\`departed\`/\`other\` ⚪. Para flecha en lista: \`→\` salida (sale hacia destino), \`←\` llegada (viene desde origen).
+
 ### Skills globales
 Invocar via tool \`Skill\`:
 - \`telegram-bot-ux\` — guía UX (la lógica esencial ya está acá, invocar solo si dudas).
