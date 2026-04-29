@@ -6,3 +6,9 @@ bun.lock
 # Node workspaces v2
 dist/
 *.tsbuildinfo
+
+# Local artifacts (not for repo)
+.claude/
+.playwright-mcp/
+.superpowers/
+.wrangler/

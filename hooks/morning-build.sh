@@ -11,7 +11,7 @@ PROPOSALS_DIR="$HOME/.claude/morning-builds/proposals"
 LOG="$HOME/.claude/logs/morning-build.log"
 PROMPT_FILE="$HOME/.claude/hooks/morning-build-prompt.md"
 CLAUDE="/Users/calepes/.local/bin/claude"
-GTIMEOUT="/opt/homebrew/bin/gtimeout"
+GTIMEOUT="/opt/homebrew/bin/timeout"
 
 mkdir -p "$PROPOSALS_DIR" "$(dirname "$LOG")"
 

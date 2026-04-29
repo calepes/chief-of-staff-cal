@@ -10,7 +10,7 @@ LOG="$LOGDIR/nightly-$(date +%Y%m%d).log"
 CLAUDE="/Users/calepes/.local/bin/claude"
 PROJECT_DIR="/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal"
 TIMEOUT=600
-GTIMEOUT="/opt/homebrew/bin/gtimeout"
+GTIMEOUT="/opt/homebrew/bin/timeout"
 TELEGRAM_BOT_TOKEN=$(grep TELEGRAM_BOT_TOKEN "$HOME/.claude/channels/telegram/.env" | cut -d= -f2)
 TELEGRAM_CHAT_ID="94137698"
 

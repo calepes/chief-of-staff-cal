@@ -11,7 +11,7 @@ TRANSCRIPTS_DIR="$HOME/.claude/projects/-Users-calepes-Claude-Projects-Personal-
 LOG="$HOME/.claude/logs/skill-detector.log"
 PROMPT_FILE="$HOME/.claude/hooks/skill-detector-prompt.md"
 CLAUDE="/Users/calepes/.local/bin/claude"
-GTIMEOUT="/opt/homebrew/bin/gtimeout"
+GTIMEOUT="/opt/homebrew/bin/timeout"
 
 mkdir -p "$PROPOSALS_DIR" "$(dirname "$LOG")"
 

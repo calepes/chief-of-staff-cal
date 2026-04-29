@@ -86,12 +86,12 @@ for f in $TRANSCRIPTS; do
 
   FULL_INPUT=$(printf '%s\n\n---\n\n%s' "$(cat "$PROMPT_FILE")" "$CHUNK")
 
-  RAW_OUTPUT=$(echo "$FULL_INPUT" | gtimeout 90s claude -p 2>>"$LOG" || echo "")
+  RAW_OUTPUT=$(echo "$FULL_INPUT" | timeout 90s claude -p 2>>"$LOG" || echo "")
 
   if [[ -z "$RAW_OUTPUT" ]]; then
     log "retry for $f"
     sleep 5
-    RAW_OUTPUT=$(echo "$FULL_INPUT" | gtimeout 90s claude -p 2>>"$LOG" || echo "")
+    RAW_OUTPUT=$(echo "$FULL_INPUT" | timeout 90s claude -p 2>>"$LOG" || echo "")
     if [[ -z "$RAW_OUTPUT" ]]; then
       log "skip $f after retry"
       continue

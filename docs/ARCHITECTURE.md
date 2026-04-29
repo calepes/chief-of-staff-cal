@@ -232,5 +232,5 @@ Cal tap ✅:
 - `BACKLOG.md` — pendientes
 - `docs/superpowers/specs/` y `docs/superpowers/plans/` — diseños implementados
 - `~/.claude/CLAUDE.md` — instrucciones globales
-- `~/Documents/Claude Projects/telegram-reference.md` — referencia cross-project Telegram
-- `~/Documents/Claude Projects/Yape/CLAUDE.md` — contexto Yape
+- `~/Claude Projects/telegram-reference.md` — referencia cross-project Telegram
+- `~/Claude Projects/Yape/CLAUDE.md` — contexto Yape

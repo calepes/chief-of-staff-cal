@@ -1045,6 +1045,24 @@ bot.on('message:sticker', async ctx => {
   })
 })
 
+bot.on('message:location', async ctx => {
+  const loc = ctx.message.location
+  const url = `https://maps.google.com/?q=${loc.latitude},${loc.longitude}`
+  const text = `(location pin: ${loc.latitude},${loc.longitude} — ${url})`
+  await handleInbound(ctx, text, undefined)
+})
+
+bot.on('message:venue', async ctx => {
+  const venue = ctx.message.venue
+  const loc = venue.location
+  const url = `https://maps.google.com/?q=${loc.latitude},${loc.longitude}`
+  const safeTitle = safeName(venue.title) ?? 'venue'
+  const safeAddress = safeName(venue.address)
+  const addrPart = safeAddress ? ` — ${safeAddress}` : ''
+  const text = `(venue: ${safeTitle}${addrPart} | ${loc.latitude},${loc.longitude} | ${url})`
+  await handleInbound(ctx, text, undefined)
+})
+
 type AttachmentMeta = {
   kind: string
   file_id: string

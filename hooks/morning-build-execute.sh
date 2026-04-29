@@ -16,7 +16,7 @@ FAILED_DIR="$HOME/.claude/morning-builds/failed"
 LOG="$HOME/.claude/logs/morning-build.log"
 EXEC_PROMPT="$HOME/.claude/hooks/morning-build-exec-prompt.md"
 CLAUDE="/Users/calepes/.local/bin/claude"
-GTIMEOUT="/opt/homebrew/bin/gtimeout"
+GTIMEOUT="/opt/homebrew/bin/timeout"
 
 mkdir -p "$APPROVED_DIR" "$IMPLEMENTED_DIR" "$FAILED_DIR" "$(dirname "$LOG")"
 

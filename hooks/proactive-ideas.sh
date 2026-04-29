@@ -160,7 +160,7 @@ main() {
   fi
 
   log "calling claude"
-  if ! response=$(echo "$prompt" | gtimeout 90s claude -p 2>>"$LOG_FILE"); then
+  if ! response=$(echo "$prompt" | timeout 90s claude -p 2>>"$LOG_FILE"); then
     log "claude call failed"
     exit 1
   fi

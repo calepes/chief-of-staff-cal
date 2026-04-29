@@ -24,7 +24,7 @@ Usuario toca botón inline
 ### 1. Fork del Plugin
 
 **Origen:** `~/.claude/plugins/cache/claude-plugins-official/telegram/0.0.5/`
-**Destino:** `~/Documents/Claude Projects/Personal/Agents/Chief of Staff Cal/telegram-plugin/`
+**Destino:** `~/Claude Projects/Personal/Agents/Chief of Staff Cal/telegram-plugin/`
 
 **Cambio en `server.ts`:** Extender el handler `bot.on('callback_query:data', ...)` para que, antes del check de `perm:*`, detecte callbacks custom y los reenvíe como mensaje de texto al channel.
 
@@ -115,7 +115,7 @@ Agregar sección en `~/.claude/CLAUDE.md`:
 
 ```
 ## Telegram Plugin Fork
-- Fork local del plugin en: ~/Documents/Claude Projects/Personal/Agents/Chief of Staff Cal/telegram-plugin/
+- Fork local del plugin en: ~/Claude Projects/Personal/Agents/Chief of Staff Cal/telegram-plugin/
 - Original: ~/.claude/plugins/cache/claude-plugins-official/telegram/
 - Cambio: callback_query handler extendido para botones inline interactivos
 - Mantenimiento: cuando el plugin oficial se actualice, comparar server.ts del cache vs fork y mergear cambios nuevos preservando el handler custom
