@@ -1,5 +1,12 @@
 # CHANGELOG — Chief of Staff Cal
 
+## 2026-04-30
+
+### Migración de bot + PDF/DOCX
+
+- **Bot migrado a @cal_jano_bot**: token actualizado en `~/.cos-agent/.env` y `~/.claude/channels/telegram/.env`. Bot viejo silenciado.
+- **PDF/DOCX en Telegram**: `processDocument()` en `daemon-v2/src/index.ts` — extrae texto de PDFs y Word, pasa al agent como contexto. Fix: pdf-parse v2 API (`new PDFParse({ data }).getText()`) + `createRequire` CJS/ESM interop + dependencias instaladas en workspace root.
+
 ## 2026-04-29
 
 ### Migración mayor: daemon CoS v2 (Node + Agent SDK librería + webhook + CF Queue)

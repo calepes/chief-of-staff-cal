@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { config as loadEnv } from "dotenv";
 import cron from "node-cron";
 import { createSdkMcpServer, startup, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
@@ -33,6 +34,8 @@ const env = {
   NOTION_TAREAS_DB_ID: requireEnv("NOTION_TAREAS_DB_ID"),
   NOTION_PEOPLE_DB_ID: requireEnv("NOTION_PEOPLE_DB_ID"),
   HEALTH_API_KEY: process.env.HEALTH_API_KEY ?? "",
+  FEEDBIN_USERNAME: process.env.FEEDBIN_USERNAME ?? "",
+  FEEDBIN_PASSWORD: process.env.FEEDBIN_PASSWORD ?? "",
   ANTHROPIC_API_KEY: requireEnv("ANTHROPIC_API_KEY"),
   COS_WEBHOOK_URL: process.env.COS_WEBHOOK_URL ?? "https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook",
   COS_WEBHOOK_SECRET: process.env.COS_WEBHOOK_SECRET ?? "",
@@ -100,6 +103,8 @@ const EXCHANGE_RATE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
 const NAABOL_FLIGHTS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/naabol-flights/dist/index.js";
+const FEEDBIN_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/feedbin/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT,
@@ -121,6 +126,15 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [NAABOL_FLIGHTS_DIST],
+    },
+    "feedbin": {
+      type: "stdio",
+      command: "node",
+      args: [FEEDBIN_DIST],
+      env: {
+        FEEDBIN_USERNAME: env.FEEDBIN_USERNAME,
+        FEEDBIN_PASSWORD: env.FEEDBIN_PASSWORD,
+      },
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
@@ -179,6 +193,55 @@ async function processPhoto(
   }
 }
 
+async function processDocument(
+  token: string,
+  doc: { file_id: string; file_name?: string; mime_type?: string; file_size?: number },
+  caption: string | undefined,
+): Promise<string | null> {
+  try {
+    const file = await downloadTelegramFile(token, doc.file_id);
+    const mime = doc.mime_type ?? file.mimeType ?? "";
+    const name = (doc.file_name ?? "").toLowerCase();
+
+    let text: string | null = null;
+
+    if (mime.includes("pdf") || name.endsWith(".pdf")) {
+      const require = createRequire(import.meta.url);
+      const { PDFParse } = require("pdf-parse") as { PDFParse: new (opts: { data: Uint8Array }) => { getText(): Promise<{ text: string }> } };
+      const { readFile } = await import("node:fs/promises");
+      const buf = await readFile(file.path);
+      const parser = new PDFParse({ data: new Uint8Array(buf) });
+      const data = await parser.getText();
+      text = data.text;
+    } else if (
+      mime.includes("wordprocessingml") ||
+      mime.includes("msword") ||
+      name.endsWith(".docx") ||
+      name.endsWith(".doc")
+    ) {
+      const mammoth = await import("mammoth");
+      const result = await mammoth.extractRawText({ path: file.path });
+      text = result.value;
+    }
+
+    // Clean up temp file
+    const { unlink } = await import("node:fs/promises");
+    await unlink(file.path).catch(() => {});
+
+    if (!text?.trim()) return null;
+
+    const MAX = 50_000;
+    if (text.length > MAX) {
+      text = text.slice(0, MAX) + "\n\n[... documento truncado a 50.000 caracteres ...]";
+    }
+    log({ msg: "document_extracted", chars: text.length, mime, fileName: doc.file_name });
+    return text.trim();
+  } catch (err) {
+    log({ msg: "document_process_error", err: String(err) });
+    return null;
+  }
+}
+
 async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Promise<void> {
   if (!payload.message && !payload.callback_query) {
     log({ msg: "skip_unsupported_update", update_id: payload.update_id });
@@ -217,8 +280,9 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
   const caption = m.caption;
   const voice = m.voice;
   const photo = m.photo && m.photo.length > 0 ? m.photo[m.photo.length - 1] : undefined;
+  const document = m.document;
 
-  if (!text && !voice && !photo) {
+  if (!text && !voice && !photo && !document) {
     log({ msg: "skip_message", reason: "unsupported kind", update_id: payload.update_id });
     return;
   }
@@ -234,7 +298,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
   }
 
   // Typing indicator + placeholder en <1s
-  const initialAction: ChatAction = voice ? "typing" : photo ? "upload_photo" : "typing";
+  const initialAction: ChatAction = voice ? "typing" : photo ? "upload_photo" : document ? "upload_document" : "typing";
   void sendChatAction(env.COS_TELEGRAM_BOT_TOKEN, chatId, initialAction);
   const typingInterval = setInterval(() => {
     void sendChatAction(env.COS_TELEGRAM_BOT_TOKEN, chatId, "typing");
@@ -244,7 +308,9 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
     ? "🎤 Transcribiendo audio..."
     : photo
       ? "📸 Mirando foto..."
-      : "⏳ Pensando...";
+      : document
+        ? "📄 Leyendo documento..."
+        : "⏳ Pensando...";
   const placeholder = await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
     chatId,
     text: initialPlaceholder,
@@ -289,6 +355,23 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
       }
       text = caption ? `${caption}\n\n[Foto adjunta — análisis: ${analysis}]` : `[Foto adjunta — análisis: ${analysis}]`;
       contextHeader = `(Foto recibida — análisis ya hecho) chat_type=${chatType}`;
+    } else if (document) {
+      const docText = await processDocument(env.COS_TELEGRAM_BOT_TOKEN, document, caption);
+      if (!docText) {
+        await editMessage(
+          env.COS_TELEGRAM_BOT_TOKEN,
+          chatId,
+          placeholderMsgId,
+          "⚠️ <b>No pude leer el documento</b>\nFormato no soportado o archivo corrupto.",
+          "HTML",
+        );
+        return;
+      }
+      const label = document.file_name ?? "documento";
+      text = caption
+        ? `${caption}\n\n[Documento adjunto: ${label}]\n\n${docText}`
+        : `[Documento adjunto: ${label}]\n\n${docText}`;
+      contextHeader = `(Documento adjunto leído — texto ya extraído) chat_type=${chatType}`;
     } else {
       contextHeader = `chat_type=${chatType}`;
     }

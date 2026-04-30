@@ -212,6 +212,7 @@ Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/
 - **Gotcha find macOS:** `find -newermt "@epoch"` NO funciona en macOS. Usar `-mtime -7` para rangos, o `touch -t` + `-newer <ref>` para cursor exacto (ver `extract-learnings.sh`)
 
 ## Gotchas del entorno
+- **PDF/DOCX en Telegram (2026-04-30):** soporte de documentos en `daemon-v2/src/index.ts` (`processDocument()`). Descarga via `downloadTelegramFile`, extrae texto con `pdf-parse` (PDF) o `mammoth` (DOCX/DOC), trunca a 50K chars. Dependencias instaladas en root del workspace (hoisted por npm). API de `pdf-parse` v2: `new PDFParse({ data: new Uint8Array(buf) }).getText()` — ya NO es la función directa `pdfParse(buffer)` de v1. Interop CJS/ESM via `createRequire(import.meta.url)('pdf-parse')`.
 - **Bash 3.2 macOS default** — sin associative arrays (`declare -A` falla con `unbound variable` silencioso). Usar parallel arrays: `ARR=("key1|val1" "key2|val2")` + parse con `${entry%%|*}` / `${entry#*|}`
 - **`set -euo pipefail` + `grep -c` sin match** — grep devuelve exit 1, `-e` mata el script silencioso. Usar `set -uo pipefail` en scripts de status/conteo
 - **Plugin Telegram cache tiene 0.0.5 y 0.0.6** — el deploy con wildcard `telegram/*/` las cubre ambas, no quitar versiones viejas hasta confirmar cuál usa el harness
