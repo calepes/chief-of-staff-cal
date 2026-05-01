@@ -8,6 +8,7 @@ import { buildSdkTools } from "./agent-tools.js";
 import { CLAUDE_AI_COS_TOOLS, DISALLOWED_BUILTINS } from "./agent-options.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { buildLearningsSection } from "./learnings.js";
+import { compactHistory } from "./compact.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
@@ -79,7 +80,7 @@ const kv = new CfKv({
   namespaceId: env.CF_KV_NAMESPACE_ID,
   apiToken: env.CF_API_TOKEN,
 });
-const state = new ConversationState(kv);
+const state = new ConversationState(kv, compactHistory);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
 // (ej. runBriefing, que dispara un subprocess que después manda follow-up) lo
@@ -165,6 +166,7 @@ const BASE_OPTIONS: Options = {
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
   disallowedTools: DISALLOWED_BUILTINS,
   maxTurns: 12,
+  model: "claude-sonnet-4-6",
 };
 
 // NOT using a warm pool. Pecunia v2 / Vesta v2 documented "Warm pool stale rompe
