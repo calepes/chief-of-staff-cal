@@ -14,13 +14,17 @@ export interface AgentResult {
 }
 
 export async function runAgent(userMessage: string, deps: AgentDeps): Promise<AgentResult> {
-  const historyBlock = deps.history.length
-    ? deps.history.map((m) => `${m.role === "user" ? "Cal" : "CoS"}: ${m.content}`).join("\n")
+  const summaryMsg = deps.history.find((m) => m.role === "summary");
+  const recentMsgs = deps.history.filter((m) => m.role !== "summary");
+
+  const recentBlock = recentMsgs.length
+    ? recentMsgs.map((m) => `${m.role === "user" ? "Cal" : "CoS"}: ${m.content}`).join("\n")
     : "";
 
   const prompt = [
     deps.contextHeader && deps.contextHeader,
-    historyBlock && `Historial reciente:\n${historyBlock}`,
+    summaryMsg && `Contexto anterior:\n${summaryMsg.content}`,
+    recentBlock && `Historial reciente:\n${recentBlock}`,
     `Mensaje: ${userMessage}`,
   ]
     .filter(Boolean)
