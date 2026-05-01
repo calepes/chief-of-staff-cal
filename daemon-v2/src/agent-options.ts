@@ -125,4 +125,6 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__apple-reminders__editReminder",
   "mcp__apple-reminders__completeReminder",
   "mcp__apple-reminders__deleteReminder",
+  // Learning system — MCP externo (evita warm pool stale del in-process cos-tools)
+  "mcp__agent-learnings__addLearning",
 ];

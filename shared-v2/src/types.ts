@@ -19,6 +19,7 @@ export interface TelegramMessage {
   text?: string;
   voice?: { file_id: string; duration: number; mime_type?: string };
   photo?: Array<{ file_id: string; width: number; height: number; file_size?: number }>;
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   caption?: string;
   reply_to_message?: TelegramMessage;
 }

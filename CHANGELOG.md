@@ -1,4 +1,13 @@
-# CHANGELOG — Chief of Staff Cal
+# CHANGELOG — Jano
+
+## 2026-05-01
+
+### Capacidades de Salud + Renames
+
+- **Health coaching → Jano**: capacidades de salud migradas del agente Health a Jano. Sección `## Salud` en `system-prompt.ts` con las 3 tools health + coaching activo (interpreta, no enumera, proactivo con patrones).
+- **Notion DB "Metas Salud"**: creada (`f929198356f14b148d205e4e6723646f`) bajo página CAL. Campos: Meta, Valor Actual, Target, Unidad (pasos/hrs/kg/sesiones/bpm/ms/%), Fecha Inicio, Estado, Notas.
+- **Métricas composición corporal**: `body_fat_percentage`, `lean_body_mass`, `body_mass_index` confirmadas en D1. `weight`/`body_mass` no está — pendiente configurar en Health Auto Export.
+- **Rename**: repo `Chief of Staff Cal` → `Jano`. Plist y CLAUDE.md actualizados.
 
 ## 2026-04-30
 

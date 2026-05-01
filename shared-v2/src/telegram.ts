@@ -97,6 +97,33 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+export async function sendVoice(
+  token: string,
+  chatId: number | string,
+  audio: Buffer,
+  caption?: string,
+): Promise<{ message_id: number }> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("voice", new Blob([audio.buffer as ArrayBuffer], { type: "audio/ogg" }), "voice.ogg");
+  if (caption) {
+    form.append("caption", caption.slice(0, 1024));
+    form.append("parse_mode", "HTML");
+  }
+  const res = await fetch(`${TG_API}/bot${token}/sendVoice`, { method: "POST", body: form });
+  const data = (await res.json()) as { ok: boolean; result?: { message_id: number }; description?: string };
+  if (!data.ok || !data.result) throw new Error(`sendVoice failed: ${data.description ?? "unknown"}`);
+  return { message_id: data.result.message_id };
+}
+
+export async function deleteMessage(token: string, chatId: number | string, messageId: number): Promise<void> {
+  await fetch(`${TG_API}/bot${token}/deleteMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+  });
+}
+
 export function verifySecret(headerValue: string | null, expected: string): boolean {
   return headerValue === expected;
 }

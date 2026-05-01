@@ -14,8 +14,11 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.119",
     "@anthropic-ai/sdk": "^0.32.0",
     "@cos/shared": "*",
+    "@types/pdf-parse": "^1.1.5",
     "dotenv": "^16.4.0",
+    "mammoth": "^1.12.0",
     "node-cron": "^3.0.3",
+    "pdf-parse": "^2.4.5",
     "zod": "^4.0.0"
   },
   "devDependencies": {

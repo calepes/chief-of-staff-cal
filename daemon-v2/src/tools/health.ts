@@ -18,3 +18,11 @@ export async function getHealthTrend(deps: HealthDeps, metric: string, days: num
   if (!res.ok) throw new Error(`health trend failed: ${res.status}`);
   return await res.json();
 }
+
+export async function getWorkouts(deps: HealthDeps, days = 7, category?: string): Promise<unknown> {
+  let url = `${HEALTH_BASE}/workouts/summary?days=${days}&key=${encodeURIComponent(deps.apiKey)}`;
+  if (category) url += `&type=${encodeURIComponent(category)}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`health workouts failed: ${res.status}`);
+  return await res.json();
+}

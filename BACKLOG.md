@@ -1,8 +1,12 @@
-# Backlog — Chief of Staff Cal
+# Backlog — Jano
 
 > ✅ **Estado 2026-04-29: CoS v2 ACTIVO** — daemon Node + Agent SDK librería + webhook + CF Queue. Daemon viejo `com.cal.cos-agent` movido a `disabled-2026-04-29/`. Hooks SessionStart/End adaptados (deleteWebhook gracioso, bootstrap restaura webhook). 16 crons secundarios siguen pausados en `disabled-2026-04-21/` pendientes de rediseño. Detalle en `CLAUDE.md` → sección "Estado (2026-04-29)".
 
 ## Pendientes
+
+### Salud (2026-05-01)
+- [ ] **Definir metas de Cal en "Metas Salud"** — poblar Notion DB con targets concretos: pasos diarios, hrs sueño, HRV target, body fat % objetivo, sesiones strength/semana.
+- [ ] **Configurar `weight`/`body_mass` en Health Auto Export (iOS)** — habilitar "Body Mass" en la app para que el D1 la ingeste. Actualmente solo hay `body_fat_percentage`, `lean_body_mass`, `body_mass_index`.
 
 ### ✅ Migración CoS v2 (2026-04-29)
 - **Hecho:** daemon `com.cal.cos-agent-v2`, worker CF, callback router edge, 9 tools custom, hooks adaptados, cutover completo. Spec/plan en `docs/superpowers/{specs,plans}/2026-04-28-cos-agent-v2-*`.

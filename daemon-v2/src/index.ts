@@ -7,6 +7,7 @@ import { runAgent } from "./agent.js";
 import { buildSdkTools } from "./agent-tools.js";
 import { CLAUDE_AI_COS_TOOLS, DISALLOWED_BUILTINS } from "./agent-options.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
+import { buildLearningsSection } from "./learnings.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
@@ -48,6 +49,7 @@ const env = {
 delete process.env.ANTHROPIC_API_KEY;
 
 const HEARTBEAT_PATH = `${process.env.HOME}/.cos-agent/heartbeat`;
+const LEARNINGS_PATH = `${process.env.HOME}/.cos-agent/learnings.md`;
 const ALERT_CHAT_ID = 94137698;
 const ALERT_THRESHOLD = 3;
 const BACKOFF_MAX_MS = 120_000;
@@ -110,9 +112,11 @@ const HEALTH_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
 const APPLE_REMINDERS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/apple-reminders/dist/index.js";
+const AGENT_LEARNINGS_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/agent-learnings/dist/index.js";
 
 const BASE_OPTIONS: Options = {
-  systemPrompt: SYSTEM_PROMPT,
+  systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
   mcpServers: {
     "cos-tools": mcpServer,
     // External stdio MCPs — el SDK librería NO lee ~/.claude/.mcp.json automáticamente,
@@ -151,6 +155,11 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [APPLE_REMINDERS_DIST],
+    },
+    "agent-learnings": {
+      type: "stdio",
+      command: "node",
+      args: [AGENT_LEARNINGS_DIST],
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],

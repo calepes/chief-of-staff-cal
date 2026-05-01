@@ -1,4 +1,4 @@
-# Chief of Staff Cal — Jano
+# Jano
 
 ## Qué es
 **Jano** — Chief of Staff digital para Cal. Claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento. Se presenta como "Jano" (no "CoS").
@@ -6,7 +6,7 @@
 ## Estado (2026-04-29)
 **ACTIVO — CoS v2** (Node + Agent SDK librería + webhook + CF Queue).
 - **Daemon activo:** `com.cal.cos-agent-v2` (Node 22, KeepAlive, plist en `~/Library/LaunchAgents/`). Bot `@calclaudecode_bot` ahora opera vía webhook → `cos-agent-worker.carlos-cb4.workers.dev` → CF Queue `cos-events` → daemon Node polea cola.
-- **Activo (Family):** `com.cal.family-agent-v2` (mismo patrón). Bot `@antocatanoecal_bot`. Ver `Family/CLAUDE.md`.
+- **Activo (Vesta):** `com.cal.family-agent-v2` (mismo patrón). Bot `@antocatanoecal_bot`. Ver `Vesta/CLAUDE.md`.
 - **Plists viejos (`disabled-2026-04-29/`):** `com.cal.cos-agent` (plugin Telegram polling, sufría TCC reset y conflict 409).
 - **Plists viejos Family (`disabled-2026-04-28/`):** `com.cal.family-agent`, `com.cal.family-check-recordatorios`.
 - **Pausados (`disabled-2026-04-21/`):** 16 plists secundarios pendientes de rediseño (heartbeat, briefings, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas, outlook-cache, extract-learnings, sync-learnings, cos-health-check, family-briefings AM/PM, family-extrae-aprendizajes, family-health-check).
@@ -39,7 +39,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
 
 # Build (REQUERIDO antes de restart si tocaste shared/ o daemon/)
-cd "/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal"
+cd "/Users/calepes/Claude Projects/Personal/Agents/Jano"
 npm -w @cos/shared run build && npm -w @cos/daemon run build
 
 # Logs
@@ -164,6 +164,9 @@ Ver: `/Users/calepes/Claude Projects/telegram-reference.md` — referencia conso
 ## Apple Health (consumo)
 Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/Agents/Health/health-worker/`. Ver `Health/CLAUDE.md` para detalles completos.
 
+**Metas Salud:** Notion DB `f929198356f14b148d205e4e6723646f` — metas de Cal (pasos, sueño, HRV, composición corporal). Leer antes de coaching personalizado via `mcp__notion__notion-query-database-view`.
+**Métricas composición corporal en D1:** `body_fat_percentage`, `lean_body_mass`, `body_mass_index`. `weight`/`body_mass` NO está en D1 (no configurado en Health Auto Export).
+
 **Endpoints (quick ref para consumir desde CoS):**
 - `GET https://health.carlos-cb4.workers.dev/summary?date=YYYY-MM-DD&key=$HEALTH_API_KEY` — resumen del día
 - `GET https://health.carlos-cb4.workers.dev/trend?metric=X&days=N&key=$HEALTH_API_KEY` — tendencia
@@ -238,7 +241,7 @@ cp telegram-plugin/{server,notion-client,callback-router}.ts \
 ### Deploy workers
 ```bash
 # Health worker vive en el agente Health:
-cd ~/Documents/Claude\ Projects/Personal/Agents/Health/health-worker && npx wrangler deploy
+cd ~/Claude\ Projects/Personal/Agents/Health/health-worker && npx wrangler deploy
 ```
 
 ### Heartbeat recovery (después de "heartbeat caído")

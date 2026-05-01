@@ -110,5 +110,7 @@ export function buildSdkTools(deps: ToolDeps) {
       },
       async (args) => asText(await runBriefing(briefingDeps, deps.getCurrentChatId(), args)),
     ),
+    // addLearning migrada al MCP global agent-learnings (evita warm pool stale).
+    // Disponible como mcp__agent-learnings__addLearning({ agent: "jano", text }).
   ];
 }

@@ -45,6 +45,8 @@ function inferMime(path: string): string | undefined {
     webp: "image/webp",
     gif: "image/gif",
     pdf: "application/pdf",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    doc: "application/msword",
     oga: "audio/ogg",
     ogg: "audio/ogg",
     mp3: "audio/mpeg",
