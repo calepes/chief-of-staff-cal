@@ -10,7 +10,7 @@ import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
-import { sendMessage, editMessage, sendChatAction, type ChatAction } from "@cos/shared";
+import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage } from "@cos/shared";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
@@ -39,6 +39,8 @@ const env = {
   ANTHROPIC_API_KEY: requireEnv("ANTHROPIC_API_KEY"),
   COS_WEBHOOK_URL: process.env.COS_WEBHOOK_URL ?? "https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook",
   COS_WEBHOOK_SECRET: process.env.COS_WEBHOOK_SECRET ?? "",
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ?? "",
+  ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID ?? "",
 };
 
 // Force SDK to use OAuth Max instead of API key (Tier 1 rate limited).
@@ -87,7 +89,6 @@ const sdkTools = buildSdkTools({
   notionToken: env.NOTION_TOKEN,
   tareasDbId: env.NOTION_TAREAS_DB_ID,
   peopleDbId: env.NOTION_PEOPLE_DB_ID,
-  healthApiKey: env.HEALTH_API_KEY,
   botToken: env.COS_TELEGRAM_BOT_TOKEN,
   getCurrentChatId: () => currentChatId,
 });
@@ -105,6 +106,10 @@ const NAABOL_FLIGHTS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/naabol-flights/dist/index.js";
 const FEEDBIN_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/feedbin/dist/index.js";
+const HEALTH_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
+const APPLE_REMINDERS_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/apple-reminders/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT,
@@ -136,6 +141,17 @@ const BASE_OPTIONS: Options = {
         FEEDBIN_PASSWORD: env.FEEDBIN_PASSWORD,
       },
     },
+    "health": {
+      type: "stdio",
+      command: "node",
+      args: [HEALTH_DIST],
+      env: { HEALTH_API_KEY: env.HEALTH_API_KEY },
+    },
+    "apple-reminders": {
+      type: "stdio",
+      command: "node",
+      args: [APPLE_REMINDERS_DIST],
+    },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
   disallowedTools: DISALLOWED_BUILTINS,
@@ -161,8 +177,8 @@ async function takeWarm(): Promise<WarmQuery> {
 async function processVoice(token: string, fileId: string): Promise<string | null> {
   try {
     const file = await downloadTelegramFile(token, fileId);
-    const text = await transcribeAudio(file.path, "es");
-    log({ msg: "voice_transcribed", chars: text.length, preview: text.slice(0, 80) });
+    const text = await transcribeAudio(file.path, "es", env.ELEVENLABS_API_KEY || undefined);
+    log({ msg: "voice_transcribed", stt: env.ELEVENLABS_API_KEY ? "elevenlabs" : "whisper", chars: text.length, preview: text.slice(0, 80) });
     return text;
   } catch (err) {
     log({ msg: "voice_transcribe_error", err: String(err) });
@@ -317,6 +333,8 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
   });
   const placeholderMsgId = placeholder.message_id;
 
+  let voiceTranscript: string | undefined;
+
   try {
     // Multimodal preprocessing
     let contextHeader: string | undefined;
@@ -333,6 +351,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
         return;
       }
       text = transcript;
+      voiceTranscript = transcript;
       contextHeader = `(Audio transcrito) chat_type=${chatType}`;
       await editMessage(
         env.COS_TELEGRAM_BOT_TOKEN,
@@ -381,6 +400,22 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
       return;
     }
 
+    // Keyword-triggered TTS: prefijo 🎤 o "en audio"/"en voz" en el texto
+    let wantsVoice = false;
+    if (env.ELEVENLABS_API_KEY && env.ELEVENLABS_VOICE_ID) {
+      if (text.trimStart().startsWith("🎤")) {
+        wantsVoice = true;
+        text = text.replace(/^\s*🎤\s*/, "").trim();
+      } else if (/\ben (audio|voz)\b/i.test(text)) {
+        wantsVoice = true;
+        text = text.replace(/\s*\ben (audio|voz)\b\s*/gi, " ").trim();
+      }
+    }
+    if (wantsVoice) {
+      contextHeader = (contextHeader ?? "") +
+        "\n[MODO AUDIO: responde en estilo conversacional hablado. Usa horas naturales (di '8 de la mañana', no '08:00'). Sin bullets, sin asteriscos, sin formato visual. Frases cortas y fluidas, máx 4 oraciones. Habla como si estuvieras conversando, con la personalidad de Jano.]";
+    }
+
     const t0 = Date.now();
     const history = await state.load(chatId);
     const kvLoadMs = Date.now() - t0;
@@ -405,12 +440,26 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
       const totalAgentMs = Date.now() - t2;
 
       const t3 = Date.now();
-      try {
-        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, "HTML");
-      } catch (parseErr) {
-        log({ msg: "html_parse_failed", err: String(parseErr) });
-        // Fallback: plain text (sin parse_mode) para garantizar entrega aunque se pierda formato
-        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, null);
+      if (wantsVoice) {
+        try {
+          const { textToVoiceOgg } = await import("./tools/tts.js");
+          const ogg = await textToVoiceOgg(reply, env.ELEVENLABS_API_KEY, env.ELEVENLABS_VOICE_ID);
+          await deleteMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId).catch(() => {});
+          await sendVoice(env.COS_TELEGRAM_BOT_TOKEN, chatId, ogg);
+          log({ msg: "tts_sent", chatId, replyLen: reply.length });
+        } catch (ttsErr) {
+          log({ msg: "tts_error", chatId, err: String(ttsErr) });
+          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, "HTML").catch(() =>
+            editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, null),
+          );
+        }
+      } else {
+        try {
+          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, "HTML");
+        } catch (parseErr) {
+          log({ msg: "html_parse_failed", err: String(parseErr) });
+          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, null);
+        }
       }
       const sendMs = Date.now() - t3;
 

@@ -10,8 +10,9 @@ import {
 } from "./tools/notion-tasks.js";
 import { getPersonas } from "./tools/personas.js";
 import { getOutlookEvents } from "./tools/outlook.js";
-import { getHealthSummary, getHealthTrend } from "./tools/health.js";
 import { runBriefing } from "./tools/briefing.js";
+// getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
+// (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
 
@@ -23,7 +24,6 @@ export interface ToolDeps {
   notionToken: string;
   tareasDbId: string;
   peopleDbId: string;
-  healthApiKey: string;
   botToken: string;
   getCurrentChatId: () => number;
 }
@@ -99,20 +99,6 @@ export function buildSdkTools(deps: ToolDeps) {
       "Lee cache pre-procesado de eventos de Outlook (calendario laboral). Args: { when?: 'today'|'tomorrow'|'both' (default today) }. Cache se refresca por cron com.claude.outlook-cache cada 4h. Devuelve [{when, startTime?, title, location?}].",
       { when: z.enum(["today", "tomorrow", "both"]).optional() },
       async ({ when }) => asText(await getOutlookEvents(when)),
-      READ_ONLY,
-    ),
-    tool(
-      "getHealthSummary",
-      "Resumen Apple Health del día (sleep, steps, HR, calories, etc.). Args: { date? (YYYY-MM-DD, default hoy) }.",
-      { date: z.string().optional() },
-      async ({ date }) => asText(await getHealthSummary({ apiKey: deps.healthApiKey }, date)),
-      READ_ONLY,
-    ),
-    tool(
-      "getHealthTrend",
-      "Tendencia de una métrica de Apple Health. Args: { metric (steps|sleep|hr|...), days (int) }.",
-      { metric: z.string(), days: z.coerce.number().int() },
-      async ({ metric, days }) => asText(await getHealthTrend({ apiKey: deps.healthApiKey }, metric, days)),
       READ_ONLY,
     ),
     tool(

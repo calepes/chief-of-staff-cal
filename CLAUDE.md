@@ -1,7 +1,7 @@
-# Chief of Staff Cal
+# Chief of Staff Cal — Jano
 
 ## Qué es
-Chief of Staff digital para Cal — claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento.
+**Jano** — Chief of Staff digital para Cal. Claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento. Se presenta como "Jano" (no "CoS").
 
 ## Estado (2026-04-29)
 **ACTIVO — CoS v2** (Node + Agent SDK librería + webhook + CF Queue).
@@ -68,7 +68,6 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - `listTasks`, `createTask`, `setTaskStatus`, `setTaskFecha`, `setTaskDeadline` — DB Tareas Notion (`tools/notion-tasks.ts`). Property names reales: `Nombre de tarea`, `Asignado a` (relation), `Estado` status (`Listo` no `Done`), `Fecha`, `Deadline`, `Prioridad CAL`.
 - `getPersonas` — mapping cache 1h con fallback hardcoded de 7 personas Yape (`tools/personas.ts`).
 - `getOutlookEvents` — lee cache pre-procesado por cron `com.claude.outlook-cache` (`tools/outlook.ts`).
-- `getHealthSummary`, `getHealthTrend` — HTTP a `health.carlos-cb4.workers.dev` (`tools/health.ts`).
 - `runBriefing` (agregado 2026-04-29) — async wrapper para generar briefings on-demand (Bolivia/Peru/Colombia). Spawn detached de `claude -p` con mismo prompt que el cron de las 5am, lock por país en `~/.cos-agent/briefing-locks/`, child process notifica a Cal cuando termina via Telegram. Ver `tools/briefing.ts`. Patrón "tool wrapper" para sortear `DISALLOWED_BUILTINS` (Bash/Write bloqueados en el daemon, pero el subprocess los tiene).
 
 **Built-ins permitidas:** `Skill` (vuelos-bolivia, telegram-bot-ux), `WebFetch`, `WebSearch`. **Removido `briefing-pais`** del Skill — el daemon no puede ejecutarlo (necesita Bash/Write); para briefings on-demand usar `runBriefing` en su lugar.
@@ -82,6 +81,8 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - `youtube-transcribe` — tool `transcribeYoutube({url, lang?, paragraphs?, model?, forceWhisper?})` con fast-path captions + fallback whisper local. Server stdio en `mcp-servers/servers/youtube-transcribe/`.
 - `exchange-rate-bolivia` (agregado 2026-04-29) — `getBcbRate` (oficial BCB scrape) y `getBinanceP2PRate` (paralelo USDT/BOB merchant median + outlier filter). Cache 60s in-memory. Server en `mcp-servers/servers/exchange-rate-bolivia/`.
 - `naabol-flights` (agregado 2026-04-29, antes era tool local de Vesta) — `getFlight`, `getFlights`, `getAirportFlights` para los 12 aeropuertos NAABOL. Wraps el CLI `~/Claude Projects/Personal/Apps/Aeropuertos Bolivia/cli/consultar-vuelo.mjs`. Server en `mcp-servers/servers/naabol-flights/`.
+- `health` (agregado 2026-04-30) — `getHealthSummary`, `getHealthTrend`, `getWorkouts`. Migrado de custom tools (`tools/health.ts`) a MCP global. Requiere `HEALTH_API_KEY` en env. Server en `mcp-servers/servers/health/`.
+- `apple-reminders` (agregado 2026-04-30) — `listReminderLists`, `listReminders`, `addReminder`, `editReminder`, `completeReminder`, `deleteReminder`. iOS Reminders personales de Cal vía `reminders-cli`. Server en `mcp-servers/servers/apple-reminders/`.
 
 **Gotcha SDK librería:** el archivo `~/.claude/.mcp.json` solo lo lee el CLI de Claude Code. El daemon Node con `@anthropic-ai/claude-agent-sdk` librería NO lo lee — hay que registrar custom MCPs en `BASE_OPTIONS.mcpServers` (ver `daemon-v2/src/index.ts`). Confirmado bug 2026-04-29: el LLM intentaba llamar `mcp__youtube-transcribe__*` y recibía "permissions not granted" hasta que se agregó al BASE_OPTIONS.
 

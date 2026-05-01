@@ -96,4 +96,33 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__naabol-flights__getFlight",
   "mcp__naabol-flights__getFlights",
   "mcp__naabol-flights__getAirportFlights",
+  // Feedbin — RSS reader: no leídos, contenido completo, marcar leídos, buscar
+  "mcp__feedbin__getUnreadCount",
+  "mcp__feedbin__getUnreadEntries",
+  "mcp__feedbin__getEntryContent",
+  "mcp__feedbin__markRead",
+  "mcp__feedbin__markUnread",
+  "mcp__feedbin__getSubscriptions",
+  "mcp__feedbin__searchEntries",
+  // Readwise Reader — artículos guardados: listar, buscar, mover, tags, highlights
+  "mcp__readwise__reader_list_documents",
+  "mcp__readwise__reader_get_document_details",
+  "mcp__readwise__reader_search_documents",
+  "mcp__readwise__reader_move_documents",
+  "mcp__readwise__reader_add_tags_to_document",
+  "mcp__readwise__reader_remove_tags_from_document",
+  "mcp__readwise__reader_get_document_highlights",
+  "mcp__readwise__reader_create_document",
+  "mcp__readwise__reader_bulk_edit_document_metadata",
+  // Apple Health — métricas diarias, tendencias, workouts (migrado de custom tools a MCP)
+  "mcp__health__getHealthSummary",
+  "mcp__health__getHealthTrend",
+  "mcp__health__getWorkouts",
+  // iOS Reminders — listas personales de Cal (Mercado, Tareas Familia, etc.)
+  "mcp__apple-reminders__listReminderLists",
+  "mcp__apple-reminders__listReminders",
+  "mcp__apple-reminders__addReminder",
+  "mcp__apple-reminders__editReminder",
+  "mcp__apple-reminders__completeReminder",
+  "mcp__apple-reminders__deleteReminder",
 ];

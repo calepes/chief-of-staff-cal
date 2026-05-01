@@ -2,6 +2,12 @@
 
 ## 2026-04-30
 
+### Health + Reminders como MCPs globales
+
+- **Health migrado a MCP**: `getHealthSummary`, `getHealthTrend`, `getWorkouts` removidos de `cos-tools` custom y migrados al MCP global `health` (`mcp-servers/servers/health/`). Wired en `BASE_OPTIONS.mcpServers` con `HEALTH_API_KEY`.
+- **Apple Reminders MCP**: nuevo server `mcp-servers/servers/apple-reminders/` — 6 tools: `listReminderLists`, `listReminders`, `addReminder`, `editReminder`, `completeReminder`, `deleteReminder`. Wraps `reminders-cli` Swift. Jano puede leer y gestionar los Reminders personales de Cal.
+- **Fix reminders-cli**: versiones nuevas devuelven UUIDs en `externalId` pero `complete`/`delete` solo aceptan índice entero — `listItems()` ahora usa `String(idx)`.
+
 ### Migración de bot + PDF/DOCX
 
 - **Bot migrado a @cal_jano_bot**: token actualizado en `~/.cos-agent/.env` y `~/.claude/channels/telegram/.env`. Bot viejo silenciado.
