@@ -1,5 +1,14 @@
 # CHANGELOG — Jano
 
+## 2026-05-02
+
+### Diagnóstico y fix de webhook drift de Jano
+
+- **Diagnóstico caída de red**: bots (Jano, Vesta, Pecunia) cayeron simultáneamente 8:31–8:43 AM por corte de internet (`TypeError: fetch failed`, 6 errores consecutivos con backoff). Recuperación automática. Segundo corte breve a las 9:00 AM.
+- **Fix webhook drift constante**: `telegram@claude-plugins-official: true` + `channelsEnabled: true` en `~/.claude/settings.json` hacía que el plugin Telegram arrancara en toda sesión de Claude Code (incluyendo VS Code), llamando `deleteWebhook()` del bot de Jano al inicio. Fix: puesto en `false` — el plugin sigue disponible vía `--channels` explícito.
+- **Webhook restaurado**: `setWebhook` manual a `cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook`.
+- **Docs**: gotcha documentado en `~/.claude/CLAUDE.md` y `Jano/CLAUDE.md`.
+
 ## 2026-05-01
 
 ### Capacidades de Salud + Renames
