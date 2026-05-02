@@ -2,6 +2,12 @@
 
 ## 2026-05-02
 
+### Pendientes: Notion → Apple Reminders
+
+- **Refactor**: quitadas tools de Notion DB Tareas (`listTasks`, `createTask`, `setTaskStatus`, `setTaskFecha`, `setTaskDeadline`, `getPersonas`). Pendientes personales de Cal ahora en Apple Reminders — lista "Personal" (tareas) y "Vibe Projects" (ideas/backlog).
+- **System-prompt**: sección Notion DB Tareas reemplazada por Apple Reminders con triggers, plantilla y reglas actualizadas.
+- **Yapito/CLAUDE.md**: sección Notion DB Tareas documentada lista para cuando se implemente el daemon de Yapito.
+
 ### Diagnóstico y fix de webhook drift de Jano
 
 - **Diagnóstico caída de red**: bots (Jano, Vesta, Pecunia) cayeron simultáneamente 8:31–8:43 AM por corte de internet (`TypeError: fetch failed`, 6 errores consecutivos con backoff). Recuperación automática. Segundo corte breve a las 9:00 AM.

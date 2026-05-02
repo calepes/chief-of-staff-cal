@@ -89,9 +89,6 @@ const state = new ConversationState(kv, compactHistory);
 let currentChatId = 0;
 
 const sdkTools = buildSdkTools({
-  notionToken: env.NOTION_TOKEN,
-  tareasDbId: env.NOTION_TAREAS_DB_ID,
-  peopleDbId: env.NOTION_PEOPLE_DB_ID,
   botToken: env.COS_TELEGRAM_BOT_TOKEN,
   getCurrentChatId: () => currentChatId,
 });

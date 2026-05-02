@@ -4,6 +4,9 @@
 
 ## Pendientes
 
+### Cierre OpenClaw — Fase 6 (multi-agente)
+- [ ] **Revisar y cerrar el plan OpenClaw** — Fases 1-5 implementadas. Fase 6 (multi-agent) es la única pendiente. Decidir si se implementa, se archiva como "out of scope por ahora", o se reformula. Consolidar learnings en `docs/superpowers/`.
+
 ### Salud (2026-05-01)
 - [ ] **Definir metas de Cal en "Metas Salud"** — poblar Notion DB con targets concretos: pasos diarios, hrs sueño, HRV target, body fat % objetivo, sesiones strength/semana.
 - [ ] **Configurar `weight`/`body_mass` en Health Auto Export (iOS)** — habilitar "Body Mass" en la app para que el D1 la ingeste. Actualmente solo hay `body_fat_percentage`, `lean_body_mass`, `body_mass_index`.
@@ -217,9 +220,7 @@ Notas:
 - **Familiar** — Coordinación Cal+Noe, calendarios, conflictos horarios
 
 ### Futuro
-- [ ] **Rediseño del ecosistema de agentes** (2026-04-21) → Cal decide arquitectura nueva tras desmontar v1. Reemplaza Fase 1-5 completa. Tomar en cuenta: evaluación VPS (item en este mismo backlog), gotchas documentados en CLAUDE.md, learnings en `~/.claude/learnings/cos/`. Brainstorm antes de tocar código
-- [ ] **Channel conflict guard: cubrir interactiva↔interactiva** (2026-04-21) → el hook actual solo previene colisión launchd↔interactiva. Dos `claude --channels` con el mismo bot token también compiten por `getUpdates` → conflict 409 → mensajes aleatorios. Detectado durante diagnóstico Telegram 2026-04-21. Decisión de implementar depende del rediseño
 - [ ] Migrar secrets a 1Password CLI (`op`)
-- [ ] Webhook Cloudflare Worker para procesar callback_query server-side (alternativa si el fork del plugin da problemas de mantenimiento)
 - [ ] **Google Maps API — distancias y tiempos** → integrar API de Google Maps (Distance Matrix / Directions) para calcular tiempos de traslado entre reuniones, sugerir hora de salida, alertar cuando hay reuniones consecutivas en ubicaciones distintas. Útil para /today y briefings con agenda presencial.
+- [ ] **Aprendizaje de largo plazo (Paweł model)** (2026-05-01) → sistema de knowledge tiers en `~/.claude/learnings/jano/` (facts→hypotheses→rules). Al cerrar sesión, el summary compactado pasa por extracción de patrones. Dependencia: conversation memory operativa primero. Ver diseño en `~/.claude/docs/superpowers/specs/2026-05-01-conversation-memory-design.md`
 - [ ] **Evaluar VPS para correr Claude Code** (agregado 2026-04-21) → alternativa a Mac local + launchd para correr cos-agent y family-agent 24/7. Motivación: problemas recurrentes con health-checks + zombies MCP + dependencia de red local (SNI filtering tumba polling Telegram). Evaluar: costo mensual vs estabilidad, migración del fork del plugin + workers + ambientes, latencia desde/hacia Telegram, y si conviene VPS completo o solo ejecutores remotos. Referencias: spec de watchdog (`docs/references/2026-04-21-agent-launchd-fix.pdf`) — si el VPS resuelve el problema raíz, el rediseño de health-check se vuelve innecesario

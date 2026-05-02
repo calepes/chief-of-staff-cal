@@ -1,18 +1,12 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import {
-  listTasks,
-  createTask,
-  setTaskStatus,
-  setTaskFecha,
-  setTaskDeadline,
-  type ListTasksFilters,
-} from "./tools/notion-tasks.js";
-import { getPersonas } from "./tools/personas.js";
 import { getOutlookEvents } from "./tools/outlook.js";
 import { runBriefing } from "./tools/briefing.js";
+import { manageLearning } from "./tools/learnings.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
+// listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
+// removidas 2026-05-02 — pendientes en Apple Reminders (Personal / Vibe Projects), no Notion.
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
 
@@ -21,79 +15,14 @@ function asText(result: unknown) {
 }
 
 export interface ToolDeps {
-  notionToken: string;
-  tareasDbId: string;
-  peopleDbId: string;
   botToken: string;
   getCurrentChatId: () => number;
 }
 
 export function buildSdkTools(deps: ToolDeps) {
-  const notionDeps = { notionToken: deps.notionToken, tareasDbId: deps.tareasDbId };
-  const personasDeps = { notionToken: deps.notionToken, peopleDbId: deps.peopleDbId };
   const briefingDeps = { botToken: deps.botToken };
 
   return [
-    tool(
-      "listTasks",
-      "Query Notion DB Tareas. Args: { status?: 'Backlog'|'Sin empezar'|'En curso'|'Focus'|'Waiting for'|'Cancelada'|'Listo', assigneePageId? (32 hex sin guiones — usar getPersonas para resolver nombre→pageId), fromDate? (YYYY-MM-DD), toDate? (YYYY-MM-DD), limit? }. fromDate/toDate filtran por Fecha O Deadline. Devuelve [{pageId, title, status, assigneePageIds, fecha?, deadline?, prioridad?, url}].",
-      {
-        status: z.string().optional(),
-        assigneePageId: z.string().optional(),
-        fromDate: z.string().optional(),
-        toDate: z.string().optional(),
-        limit: z.coerce.number().int().optional(),
-      },
-      async (args) => asText(await listTasks(notionDeps, args as ListTasksFilters)),
-      READ_ONLY,
-    ),
-    tool(
-      "createTask",
-      "Crear tarea en Notion DB Tareas. Args: { title, status?, assigneePageId?, fechaIso? (YYYY-MM-DD), deadlineIso?, prioridad? ('P1'|'P2'|'P3'|'P4') }. Devuelve { pageId, url }.",
-      {
-        title: z.string(),
-        status: z.string().optional(),
-        assigneePageId: z.string().optional(),
-        fechaIso: z.string().optional(),
-        deadlineIso: z.string().optional(),
-        prioridad: z.string().optional(),
-      },
-      async (args) => asText(await createTask(notionDeps, args)),
-    ),
-    tool(
-      "setTaskStatus",
-      "Cambiar status de tarea. Status válidos: 'Backlog', 'Sin empezar', 'En curso', 'Focus', 'Waiting for', 'Cancelada', 'Listo'. Para marcar como done usar 'Listo'.",
-      { pageId: z.string(), status: z.string() },
-      async ({ pageId, status }) => {
-        await setTaskStatus(notionDeps, pageId, status);
-        return asText({ ok: true });
-      },
-    ),
-    tool(
-      "setTaskFecha",
-      "Cambiar la fecha (campo 'Fecha' — fecha en la que se trabaja la tarea). Args: { pageId, fechaIso (YYYY-MM-DD) }.",
-      { pageId: z.string(), fechaIso: z.string() },
-      async ({ pageId, fechaIso }) => {
-        await setTaskFecha(notionDeps, pageId, fechaIso);
-        return asText({ ok: true });
-      },
-    ),
-    tool(
-      "setTaskDeadline",
-      "Cambiar el deadline (fecha límite real). Args: { pageId, deadlineIso (YYYY-MM-DD) }.",
-      { pageId: z.string(), deadlineIso: z.string() },
-      async ({ pageId, deadlineIso }) => {
-        await setTaskDeadline(notionDeps, pageId, deadlineIso);
-        return asText({ ok: true });
-      },
-    ),
-    tool(
-      "getPersonas",
-      "Devuelve mapping de personas (pageId, pageIdUuid, name, rol?) de la DB People. Cacheado in-memory TTL 1h. Personas conocidas: Cal, Lorena Velasco (Comercial), Mauricio Rojas (Marketing/Growth), Matias Papini (Producto), Ivan Contreras (Tech Lead), Adrian Montaño, Yalile Uriarte (Data). Usar pageId (32 hex sin guiones) en filtros de listTasks.assigneePageId.",
-      {},
-      async () => asText(await getPersonas(personasDeps)),
-      READ_ONLY,
-    ),
     tool(
       "getOutlookEvents",
       "Lee cache pre-procesado de eventos de Outlook (calendario laboral). Args: { when?: 'today'|'tomorrow'|'both' (default today) }. Cache se refresca por cron com.claude.outlook-cache cada 4h. Devuelve [{when, startTime?, title, location?}].",
@@ -112,5 +41,14 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     // addLearning migrada al MCP global agent-learnings (evita warm pool stale).
     // Disponible como mcp__agent-learnings__addLearning({ agent: "jano", text }).
+    tool(
+      "manageLearnEntry",
+      "Gestiona un learning del CoS: keep (marcar válido), drop (marcar inválido), promote (válido + promover tier), keepall (batch), dropall (batch). Para keep/drop/promote: id = ID del learning (ej: err-2026-04-28-002). Para keepall/dropall: id = batch_id del archivo ~/.claude/state/learn-batches/<batch_id>. Llamar cuando llegue un [callback] learn:keep|drop|promote|keepall|dropall:<id>.",
+      {
+        action: z.enum(["keep", "drop", "promote", "keepall", "dropall"]),
+        id: z.string().describe("ID del learning o batch_id"),
+      },
+      async ({ action, id }) => asText(await manageLearning(action, id)),
+    ),
   ];
 }

@@ -14,6 +14,11 @@
 - Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
+## Separación de herramientas por scope
+- **Jano (personal):** pendientes en Apple Reminders — lista "Personal" (tareas) y "Vibe Projects" (ideas/backlog). NO usar Notion para tareas.
+- **Yapito (trabajo):** pendientes en Notion DB Tareas con tools custom (listTasks, createTask, etc.). Ver `Yapito/CLAUDE.md`.
+- Notion sí aplica en Jano para: búsquedas/memoria, Metas Salud, otras DBs — nunca para tareas.
+
 ## Arquitectura v2
 
 ```
