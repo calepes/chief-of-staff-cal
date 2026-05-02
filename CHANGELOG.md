@@ -2,6 +2,15 @@
 
 ## 2026-05-02
 
+### Hooks, bots y refactor de tokens
+
+- **Bots inventariados**: @cal_jano_bot (Jano), @yapito_cal_bot (Yapito), @Vesta_cal_bot (Vesta), @cal_pecunia_bot (Pecunia), @cal_codex_bot (Codex). Bot de Jano renombrado de @calclaudecode_bot → @cal_jano_bot.
+- **Bot de notificaciones (@ClaudeCalbot)**: nuevo canal genérico para notificaciones del sistema Claude Code. Token en `~/.claude/notifications/.env:NOTIF_BOT_TOKEN`. MCP `notifications` creado con tools `sendNotification` y `sendNotificationWithEmoji`.
+- **Hooks registrados en settings.json global**: `session-start-context.sh` (SessionStart — inyecta fecha + Apple Reminders + GCal) y `learn-error.sh` (PostToolUse — captura errores de tools).
+- **Refactor tokens Jano**: 10 scripts de crons/hooks (`heartbeat`, `nightly-report`, `daily-briefing`, `morning-build`, `morning-build-execute`, `skill-install`, `skill-detector`, `eisenhower-weekly`, `proactive-ideas`, `pre-compact-snapshot`) migrados de `~/.claude/channels/telegram/.env:TELEGRAM_BOT_TOKEN` → `~/.cos-agent/.env:COS_TELEGRAM_BOT_TOKEN`.
+- **stop-telegram-notify.sh**: actualizado para usar @ClaudeCalbot. Mantenido fuera del settings.json — dispara en toda sesión CLI incluyendo crons, demasiado ruidoso.
+- **Docs**: referencias obsoletas limpiadas en CLAUDE.md (listTasks/getPersonas removidas, NOTION_TAREAS_DB_ID, channels/telegram/.env).
+
 ### Pendientes: Notion → Apple Reminders
 
 - **Refactor**: quitadas tools de Notion DB Tareas (`listTasks`, `createTask`, `setTaskStatus`, `setTaskFecha`, `setTaskDeadline`, `getPersonas`). Pendientes personales de Cal ahora en Apple Reminders — lista "Personal" (tareas) y "Vibe Projects" (ideas/backlog).

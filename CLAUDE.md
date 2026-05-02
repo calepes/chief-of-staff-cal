@@ -5,7 +5,7 @@
 
 ## Estado (2026-04-29)
 **ACTIVO — CoS v2** (Node + Agent SDK librería + webhook + CF Queue).
-- **Daemon activo:** `com.cal.cos-agent-v2` (Node 22, KeepAlive, plist en `~/Library/LaunchAgents/`). Bot `@calclaudecode_bot` ahora opera vía webhook → `cos-agent-worker.carlos-cb4.workers.dev` → CF Queue `cos-events` → daemon Node polea cola.
+- **Daemon activo:** `com.cal.cos-agent-v2` (Node 22, KeepAlive, plist en `~/Library/LaunchAgents/`). Bot `@cal_jano_bot` ahora opera vía webhook → `cos-agent-worker.carlos-cb4.workers.dev` → CF Queue `cos-events` → daemon Node polea cola.
 - **Activo (Vesta):** `com.cal.family-agent-v2` (mismo patrón). Bot `@antocatanoecal_bot`. Ver `Vesta/CLAUDE.md`.
 - **Plists viejos (`disabled-2026-04-29/`):** `com.cal.cos-agent` (plugin Telegram polling, sufría TCC reset y conflict 409).
 - **Plists viejos Family (`disabled-2026-04-28/`):** `com.cal.family-agent`, `com.cal.family-check-recordatorios`.
@@ -57,7 +57,7 @@ launchctl print gui/$(id -u)/com.cal.cos-agent-v2 | grep -E "state|pid"
 cd worker-v2 && npx wrangler deploy
 
 # Verificar webhook
-TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' ~/.claude/channels/telegram/.env | cut -d= -f2-)
+TOKEN=$(grep '^COS_TELEGRAM_BOT_TOKEN=' ~/.cos-agent/.env | cut -d= -f2-)
 curl -s "https://api.telegram.org/bot${TOKEN}/getWebhookInfo" | python3 -m json.tool
 
 # Re-set webhook (raro — el watchdog lo hace solo cada 1 min)
@@ -70,8 +70,7 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 ## Tools registradas en CoS
 
 **Custom (MCP `cos-tools`, en `daemon-v2/src/agent-tools.ts`):**
-- `listTasks`, `createTask`, `setTaskStatus`, `setTaskFecha`, `setTaskDeadline` — DB Tareas Notion (`tools/notion-tasks.ts`). Property names reales: `Nombre de tarea`, `Asignado a` (relation), `Estado` status (`Listo` no `Done`), `Fecha`, `Deadline`, `Prioridad CAL`.
-- `getPersonas` — mapping cache 1h con fallback hardcoded de 7 personas Yape (`tools/personas.ts`).
+- ~~Notion tasks removidas 2026-05-02~~ — Jano usa Apple Reminders vía MCP `apple-reminders`. Ver sección "Separación de herramientas por scope".
 - `getOutlookEvents` — lee cache pre-procesado por cron `com.claude.outlook-cache` (`tools/outlook.ts`).
 - `runBriefing` (agregado 2026-04-29) — async wrapper para generar briefings on-demand (Bolivia/Peru/Colombia). Spawn detached de `claude -p` con mismo prompt que el cron de las 5am, lock por país en `~/.cos-agent/briefing-locks/`, child process notifica a Cal cuando termina via Telegram. Ver `tools/briefing.ts`. Patrón "tool wrapper" para sortear `DISALLOWED_BUILTINS` (Bash/Write bloqueados en el daemon, pero el subprocess los tiene).
 
@@ -115,7 +114,7 @@ Heavy callbacks (requieren LLM): `task:date:<pageId>` (parse "el viernes"), `tas
 Spotify callbacks (`spotify:*`) descartados por el worker (out of scope v2). Pendiente: agregar tool `spotifyControl` con lenguaje natural post-cutover.
 
 ## .env file daemon
-- `~/.cos-agent/.env` (chmod 600). Vars: `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN`, `NOTION_TAREAS_DB_ID`, `NOTION_PEOPLE_DB_ID`, `HEALTH_API_KEY`, `ANTHROPIC_API_KEY`, `COS_WEBHOOK_URL`, `COS_WEBHOOK_SECRET`.
+- `~/.cos-agent/.env` (chmod 600). Vars: `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN`, `HEALTH_API_KEY`, `ANTHROPIC_API_KEY`, `COS_WEBHOOK_URL`, `COS_WEBHOOK_SECRET`.
 - Webhook secret backup: `~/.cos-agent/webhook-secret.txt` (one-way en wrangler).
 - Heartbeat: `~/.cos-agent/heartbeat`.
 
@@ -135,7 +134,7 @@ Ver: `/Users/calepes/Claude Projects/telegram-reference.md` — referencia conso
 ## Referencias complementarias
 - `~/.claude/CLAUDE.md` (global) — instrucciones globales (idioma, planning, comunicación) + detalles del fork Telegram (source of truth, deploy, callback format)
 
-## Telegram Bot (@calclaudecode_bot)
+## Telegram Bot (@cal_jano_bot)
 - **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas, /menu, /spotify
 - **Menú interactivo:** Configurable en `~/.claude/channels/telegram/menu.json`. Skill `/menu` lee el JSON y envía botones inline.
 - **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
@@ -144,9 +143,9 @@ Ver: `/Users/calepes/Claude Projects/telegram-reference.md` — referencia conso
 - **Callback optimization:** Prefijos mecánicos (t:d, t:c, t:s, t:sd, spotify:*) se procesan directo en el plugin (~200ms). Módulos: `callback-router.ts`, `notion-client.ts`
 - **Navegación de menú:** Callbacks `menu:*` hacen edit mecánico instantáneo ("⏳ Cargando...") en el plugin, luego el LLM envía el contenido como **reply nuevo** (NO edit_message) sin botones callback, y restaura el menú original arriba. No usar edit para contenido porque el plugin destruye el mensaje al hacer edit mecánico
 - **MAX_KEYBOARD_ROWS:** 4 filas máximo en inline keyboards (reply y edit_message) para evitar stutter en iOS
-- **Notion token:** en `~/.claude/channels/telegram/.env` como `NOTION_TOKEN`
+- **Notion token:** en `~/.cos-agent/.env` como `NOTION_TOKEN`
 - **Progreso en tareas largas:** Enviar mensajes nuevos (no editar) para que cada update genere push notification
-- **Fallback outbound si MCP desconectado:** `source ~/.claude/channels/telegram/.env && curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d "chat_id=94137698" --data-urlencode "text=..."` — funciona sin el plugin (solo outbound, no recibe mensajes entrantes)
+- **Fallback outbound si MCP desconectado:** `TOKEN=$(grep COS_TELEGRAM_BOT_TOKEN ~/.cos-agent/.env | cut -d= -f2-) && curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" -d "chat_id=94137698" --data-urlencode "text=..."` — funciona sin el plugin (solo outbound, no recibe mensajes entrantes)
 
 ### Flujos de revisión de tareas
 - **<10 tareas:** Botones inline uno por uno con estado, asignado, deadline, emojis
@@ -175,7 +174,7 @@ Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/
 **Endpoints (quick ref para consumir desde CoS):**
 - `GET https://health.carlos-cb4.workers.dev/summary?date=YYYY-MM-DD&key=$HEALTH_API_KEY` — resumen del día
 - `GET https://health.carlos-cb4.workers.dev/trend?metric=X&days=N&key=$HEALTH_API_KEY` — tendencia
-- API Key: `~/.claude/channels/telegram/.env` como `HEALTH_API_KEY`
+- API Key: `~/.cos-agent/.env` como `HEALTH_API_KEY`
 
 **Uso en /today:** sección 🏥 Salud si hay data disponible.
 **Triggers naturales:** "cómo dormí", "pasos hoy", "salud semana", "peso".
@@ -265,7 +264,7 @@ echo 0 > ~/.claude/state/heartbeat-failures
 ```
 
 ## Hooks & Automatización
-- **SessionStart hook:** `~/.claude/hooks/session-start-context.sh` — inyecta fecha/hora + tareas vencidas de Notion (API directa) + eventos Outlook hoy/mañana (cache) + instrucciones para Google Calendar (MCP)
+- **SessionStart hook:** `~/.claude/hooks/session-start-context.sh` — inyecta fecha/hora + recordatorios Apple + instrucción GCal. **Registrado** en `~/.claude/settings.json` (activo 2026-05-02)
 - **Channel conflict guard (SessionStart/SessionEnd):** `.claude/settings.json` del proyecto registra dos hooks:
   - `cos-channel-bootout.sh` (SessionStart): si la sesión interactiva usa `--channels plugin:telegram` con el bot default, descarga el launchd agent `com.cal.cos-agent` para que no compitan por `getUpdates` (Telegram long-poll solo permite UN consumidor por bot → conflict 409 reparte mensajes aleatoriamente)
   - `cos-channel-bootstrap.sh` (SessionEnd): cuando cierras la última sesión interactiva del CoS, recarga el cos-agent para que retome escucha en background
@@ -274,7 +273,8 @@ echo 0 > ~/.claude/state/heartbeat-failures
   - Ignora sesiones con `TELEGRAM_STATE_DIR=` custom (ej. family-agent usa otro bot)
   - **Anti self-sabotage:** el plist del cos-agent tiene `COS_AGENT_BG=1` en env — los hooks lo chequean y exit 0 si corren dentro del propio agent (sin esto, el SessionStart del agent haría bootout de su propio launchd → KeepAlive respawn → loop spawneando bun zombies). Misma lógica en Family con `FAMILY_AGENT_BG=1`
   - Si abres múltiples sesiones interactivas, el bootstrap espera hasta cerrar la última
-- **Stop hook:** `~/.claude/hooks/stop-telegram-notify.sh` — push notification a Telegram cuando Claude termina (solo en `end_turn`)
+- **Stop hook:** `~/.claude/hooks/stop-telegram-notify.sh` — notifica vía @ClaudeCalbot en `end_turn`. **NO registrado** — dispara en toda sesión CLI incluyendo crons (demasiado ruidoso). Usa `~/.claude/notifications/.env:NOTIF_BOT_TOKEN`.
+- **PostToolUse hook:** `~/.claude/hooks/learn-error.sh` — captura errores de tools. **Registrado** en `~/.claude/settings.json` (activo 2026-05-02)
 - **PreCompact hook:** `~/.claude/hooks/pre-compact-snapshot.sh` — copia transcript a `~/.claude/compact-snapshots/` antes de compactar (últimos 20). Notifica Telegram si trigger=manual
 - **PostToolUse hook (Notion):** `~/.claude/hooks/notion-audit.sh` — filtrado a `mcp__notion__.*` (solo writes). Loguea a `~/.claude/logs/notion-audit.log` con rotación a 5MB
 - **Outlook cache:** `~/.claude/hooks/refresh-outlook-cache.sh` — descarga ICS, extrae hoy/mañana, guarda en `~/.claude/hooks/cache/outlook-events.txt`
@@ -291,7 +291,7 @@ echo 0 > ~/.claude/state/heartbeat-failures
   - **Anti-spam:** state file `~/.claude/state/health-alerts-YYYY-MM-DD.json` con 1 alerta/día por tipo. Cleanup automático >7 días al inicio de cada heartbeat run
   - **Spec/plan:** `docs/superpowers/specs/2026-04-19-health-alerts-design.md` + `docs/superpowers/plans/2026-04-19-health-alerts.md`
   - **Agregar nuevo check:** Crear `~/.claude/heartbeat-tasks/<name>.md` con frontmatter `name`, `schedule`, `priority`. Body = prompt para `claude -p`. Output esperado: `ALERT\n<msg>` o `HEARTBEAT_OK`. Copiar también a repo `heartbeat-tasks/`. Sin reload — engine lee dinámicamente
-- **Proactive ideas:** launchd `com.claude.proactive-ideas` — 9am/14:00/19:00. `~/.claude/hooks/proactive-ideas.sh` lee posts X+Threads últimas 24h + tareas Notion → idea JSON → escribe a Notion DB "Ideas Proactivas (CoS)" (id `59e0439d7fe0483ab735575b9e0c1007`) + Telegram. Slots: foco 🎯, tactical ⚡, lookahead 🔮. Plist creado pero NO cargado: requiere `X_BEARER_TOKEN`, `X_USER_ID`, `THREADS_TOKEN`, `THREADS_USER_ID`, `NOTION_TASKS_DB_ID`, `NOTION_IDEAS_DB_ID` en `~/.claude/channels/telegram/.env` + DB compartida con integración. Cargar con: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claude.proactive-ideas.plist`
+- **Proactive ideas:** launchd `com.claude.proactive-ideas` — 9am/14:00/19:00. `~/.claude/hooks/proactive-ideas.sh` lee posts X+Threads últimas 24h + tareas Notion → idea JSON → escribe a Notion DB "Ideas Proactivas (CoS)" (id `59e0439d7fe0483ab735575b9e0c1007`) + Telegram. Slots: foco 🎯, tactical ⚡, lookahead 🔮. Plist creado pero NO cargado: requiere `X_BEARER_TOKEN`, `X_USER_ID`, `THREADS_TOKEN`, `THREADS_USER_ID`, `NOTION_TASKS_DB_ID`, `NOTION_IDEAS_DB_ID` en `~/.cos-agent/.env` + DB compartida con integración. Cargar con: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claude.proactive-ideas.plist`
 - **Status line:** muestra `fecha hora | proyecto | contexto | modelo`, refreshInterval 60s
 - **Config:** `~/.claude/settings.json` (hooks) + `~/.claude/statusline-command.sh`
 - **Skill telegram-miniapp:** guía global para construir TWAs — checklist, gotchas, boilerplate

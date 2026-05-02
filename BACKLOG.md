@@ -4,6 +4,11 @@
 
 ## Pendientes
 
+### Hooks pendientes de revisar (2026-05-02)
+- [ ] **pre-compact-snapshot.sh** (Apr 19) — revisar y registrar como PreCompact hook si sigue siendo válido
+- [ ] **notion-audit.sh** (Apr 19) — revisar y registrar como PostToolUse hook si sigue siendo válido
+- [ ] **Limpiar `~/.claude/channels/telegram/.env`** — crons ya migrados a `~/.cos-agent/.env`. Evaluar si el archivo puede simplificarse o eliminarse (solo queda NOTION_TOKEN para el plugin fork).
+
 ### Cierre OpenClaw — Fase 6 (multi-agente)
 - [ ] **Revisar y cerrar el plan OpenClaw** — Fases 1-5 implementadas. Fase 6 (multi-agent) es la única pendiente. Decidir si se implementa, se archiva como "out of scope por ahora", o se reformula. Consolidar learnings en `docs/superpowers/`.
 
