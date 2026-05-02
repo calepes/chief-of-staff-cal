@@ -11,6 +11,12 @@
 - **stop-telegram-notify.sh**: actualizado para usar @ClaudeCalbot. Mantenido fuera del settings.json — dispara en toda sesión CLI incluyendo crons, demasiado ruidoso.
 - **Docs**: referencias obsoletas limpiadas en CLAUDE.md (listTasks/getPersonas removidas, NOTION_TAREAS_DB_ID, channels/telegram/.env).
 
+### MCP Combustible + formato tablas
+
+- **Nuevo MCP `combustible`**: `getFuelStatus({ lat?, lon?, limit?, minLitros? })` disponibilidad gasolina 27 estaciones Santa Cruz con distancias Google Maps y links por estación. Wired en daemon.
+- **Tablas Telegram**: system prompt actualizado — `<pre>` con columnas alineadas y separador ─. NUNCA `| col |`.
+- **Fix bold system prompt**: `**Jano**` y `**Cal**` → sin bold para evitar asteriscos literales en HTML mode.
+
 ### Pendientes: Notion → Apple Reminders
 
 - **Refactor**: quitadas tools de Notion DB Tareas (`listTasks`, `createTask`, `setTaskStatus`, `setTaskFecha`, `setTaskDeadline`, `getPersonas`). Pendientes personales de Cal ahora en Apple Reminders — lista "Personal" (tareas) y "Vibe Projects" (ideas/backlog).

@@ -112,6 +112,8 @@ const APPLE_REMINDERS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/apple-reminders/dist/index.js";
 const AGENT_LEARNINGS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/agent-learnings/dist/index.js";
+const COMBUSTIBLE_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/combustible/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -158,6 +160,11 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [AGENT_LEARNINGS_DIST],
+    },
+    "combustible": {
+      type: "stdio",
+      command: "node",
+      args: [COMBUSTIBLE_DIST],
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],

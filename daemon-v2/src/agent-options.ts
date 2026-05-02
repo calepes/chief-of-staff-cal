@@ -127,4 +127,6 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__apple-reminders__deleteReminder",
   // Learning system — MCP externo (evita warm pool stale del in-process cos-tools)
   "mcp__agent-learnings__addLearning",
+  // Combustible Santa Cruz — disponibilidad y distancia a estaciones de gasolina
+  "mcp__combustible__getFuelStatus",
 ];

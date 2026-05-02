@@ -87,6 +87,7 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - `naabol-flights` (agregado 2026-04-29, antes era tool local de Vesta) — `getFlight`, `getFlights`, `getAirportFlights` para los 12 aeropuertos NAABOL. Wraps el CLI `~/Claude Projects/Personal/Apps/Aeropuertos Bolivia/cli/consultar-vuelo.mjs`. Server en `mcp-servers/servers/naabol-flights/`.
 - `health` (agregado 2026-04-30) — `getHealthSummary`, `getHealthTrend`, `getWorkouts`. Migrado de custom tools (`tools/health.ts`) a MCP global. Requiere `HEALTH_API_KEY` en env. Server en `mcp-servers/servers/health/`.
 - `apple-reminders` (agregado 2026-04-30) — `listReminderLists`, `listReminders`, `addReminder`, `editReminder`, `completeReminder`, `deleteReminder`. iOS Reminders personales de Cal vía `reminders-cli`. Server en `mcp-servers/servers/apple-reminders/`.
+- `combustible` (agregado 2026-05-02) — `getFuelStatus({ lat?, lon?, limit?, minLitros? })` disponibilidad gasolina 27 estaciones Santa Cruz con distancias y links Google Maps. API key desde `~/.combustible-mcp.env` (fallback si no hay env var). Server en `mcp-servers/servers/combustible/`.
 
 **Gotcha SDK librería:** el archivo `~/.claude/.mcp.json` solo lo lee el CLI de Claude Code. El daemon Node con `@anthropic-ai/claude-agent-sdk` librería NO lo lee — hay que registrar custom MCPs en `BASE_OPTIONS.mcpServers` (ver `daemon-v2/src/index.ts`). Confirmado bug 2026-04-29: el LLM intentaba llamar `mcp__youtube-transcribe__*` y recibía "permissions not granted" hasta que se agregó al BASE_OPTIONS.
 
@@ -97,7 +98,7 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - **Tags soportados:** `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<a href>`. NO usar MarkdownV2 (`*x*`, `_x_`).
 - **Escape:** solo `< > &` (en `escapeHtml()` de `shared-v2/src/telegram.ts` y `daemon-v2/src/index.ts`).
 - **Fallback robusto:** si HTML falla en el `editMessage`, `daemon-v2/src/index.ts:294` reintenta con `parseMode=null` (texto plano sin formato) — garantiza entrega aunque se pierda formato. El placeholder genérico "⚠️ No pude procesar tu mensaje" solo aparece si TODO falla.
-- **Family/Vesta sigue en MarkdownV2** (mismo bug pendiente). Migración a HTML quedó en BACKLOG como Fase 3.
+- **Family/Vesta migrado a HTML** (2026-05-02). System-prompt actualizado con FORMATO DE SALIDA block explícito.
 
 ## Callback router edge (worker)
 
