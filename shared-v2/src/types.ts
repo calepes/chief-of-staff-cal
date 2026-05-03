@@ -21,6 +21,7 @@ export interface TelegramMessage {
   photo?: Array<{ file_id: string; width: number; height: number; file_size?: number }>;
   document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   caption?: string;
+  location?: { latitude: number; longitude: number };
   reply_to_message?: TelegramMessage;
 }
 

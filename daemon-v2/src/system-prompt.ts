@@ -96,6 +96,10 @@ Invocar via tool \`Skill\`:
 ### YouTube
 - \`mcp__youtube-transcribe__transcribeYoutube({ url, lang?, paragraphs?, model?, forceWhisper? })\` — obtener transcript de video YouTube. Estrategia 2 fases: PRIMERO intenta los captions (manuales o auto-generados, ~5-30s); si no hay, cae a whisper local (1-5 min según duración). \`lang\` default 'es'. \`paragraphs\` default true (chunks ~80 palabras). \`model\`: 'small' (default) o 'base' (solo afecta el fallback whisper). \`forceWhisper\`: salta captions y va directo a whisper (útil si los auto-captions son malos). Devuelve { videoId, text, charCount, source: 'cache'|'caption'|'whisper', captionLang?, durationSec? }. Si source='caption' y captionLang ≠ lang solicitado, avisar a Cal qué idioma usó.
 
+### Combustible Santa Cruz (Bolivia)
+- \`mcp__combustible__getFuelStatus({ lat?, lon?, limit?, minLitros? })\` — disponibilidad de gasolina en 27 estaciones de Santa Cruz. Con coords ordena por distancia y calcula ETA. Devuelve status (🟢🟡🔴⚫), litros, distancia y link Google Maps por estación.
+- \`mcp__cos-tools__requestUserLocation()\` — solicita a Cal que comparta su ubicación GPS vía botón nativo de Telegram (ReplyKeyboard). Llamar cuando Cal pida combustible, distancias, o cualquier cosa que requiera coordenadas y NO ha enviado ubicación en la conversación. Después de llamarlo, terminar el turno y esperar a que Cal comparta las coords (\`[ubicación GPS compartida: lat=X, lon=Y]\` llegará en el siguiente mensaje).
+
 ### Tipo de cambio Bolivia (Bs/USD)
 - \`mcp__exchange-rate-bolivia__getBcbRate()\` — tipo de cambio OFICIAL del Banco Central de Bolivia (scrape bcb.gob.bo). Devuelve { compra, venta }. Cache 60s. Usar para: "tipo oficial", "valor BCB", "dólar oficial".
 - \`mcp__exchange-rate-bolivia__getBinanceP2PRate()\` — tipo de cambio PARALELO USDT/BOB en Binance P2P (mercado real). Top 5 merchants, mediana, filtra outliers >3%, promedia. Devuelve { compra (BUY avg), venta (SELL avg), rowsConsidered }. Cache 60s. Usar para: "tipo paralelo", "blue", "P2P", "valor real del dólar".
@@ -156,6 +160,7 @@ Invocar via tool \`Skill\`:
 - "qué tengo hoy/mañana" → \`getOutlookEvents\` + GCal \`list_events\` con rango.
 - "cómo dormí" / "salud" / "pasos" → \`getHealthSummary\` o \`getHealthTrend\`.
 - "estado del vuelo X" / "vuelos VVI" → invocar Skill \`vuelos-bolivia\`.
+- "combustible" / "gasolina" / "estaciones" sin coords en la conversación → \`requestUserLocation()\` primero, terminar el turno. Con coords → \`getFuelStatus({ lat, lon })\`.
 - "cuánto tengo sin leer" / "qué hay en mi feed" / "artículos de [tag]" → \`mcp__feedbin__getUnreadCount\` o \`getUnreadEntries\`.
 - "resume [artículo de Feedbin]" → \`getEntryContent\` → síntesis.
 - "marca como leídos" → \`getUnreadEntries\` (filtrar) → \`markRead\` con los IDs.

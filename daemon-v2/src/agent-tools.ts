@@ -42,6 +42,36 @@ export function buildSdkTools(deps: ToolDeps) {
     // addLearning migrada al MCP global agent-learnings (evita warm pool stale).
     // Disponible como mcp__agent-learnings__addLearning({ agent: "jano", text }).
     tool(
+      "requestUserLocation",
+      "Solicita al usuario que comparta su ubicación GPS vía un botón nativo de Telegram (ReplyKeyboard con request_location). Llamar cuando Cal pida combustible, distancias, o cualquier cosa que requiera coordenadas y NO ha enviado ubicación en la conversación.",
+      {},
+      async () => {
+        const chatId = deps.getCurrentChatId();
+        const token = deps.botToken;
+        if (!chatId || !token) return asText({ error: "No chatId/token disponible" });
+        try {
+          const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: "📍 Para calcular distancias necesito tu ubicación. Toca el botón:",
+              reply_markup: {
+                keyboard: [[{ text: "📍 Compartir ubicación", request_location: true }]],
+                one_time_keyboard: true,
+                resize_keyboard: true,
+              },
+            }),
+          });
+          const data = (await res.json()) as { ok: boolean; description?: string };
+          if (!data.ok) return asText({ error: data.description ?? "API error" });
+          return asText({ ok: true });
+        } catch (err) {
+          return asText({ error: String(err) });
+        }
+      },
+    ),
+    tool(
       "manageLearnEntry",
       "Gestiona un learning del CoS: keep (marcar válido), drop (marcar inválido), promote (válido + promover tier), keepall (batch), dropall (batch). Para keep/drop/promote: id = ID del learning (ej: err-2026-04-28-002). Para keepall/dropall: id = batch_id del archivo ~/.claude/state/learn-batches/<batch_id>. Llamar cuando llegue un [callback] learn:keep|drop|promote|keepall|dropall:<id>.",
       {

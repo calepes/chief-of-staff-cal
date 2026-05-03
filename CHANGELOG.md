@@ -2,6 +2,12 @@
 
 ## 2026-05-02
 
+### Solicitud de ubicación nativa + combustible (requestUserLocation)
+
+- **Nueva tool `requestUserLocation()`**: manda a Cal un botón nativo de Telegram (`ReplyKeyboardMarkup` con `request_location: true`) para obtener coordenadas GPS. Cuando Cal toca el botón, el daemon recibe el `message.location` y lo inyecta como texto neutral al agent.
+- **Location handling**: agregado `location?: { latitude; longitude }` a `shared-v2/src/types.ts` y manejo en `processMessage` — convierte el pin GPS en `[ubicación GPS compartida: lat=X, lon=Y]` antes de pasar al agent.
+- **Combustible en system-prompt**: sección `getFuelStatus` + `requestUserLocation` documentados con regla de selección.
+
 ### Hooks, bots y refactor de tokens
 
 - **Bots inventariados**: @cal_jano_bot (Jano), @yapito_cal_bot (Yapito), @Vesta_cal_bot (Vesta), @cal_pecunia_bot (Pecunia), @cal_codex_bot (Codex). Bot de Jano renombrado de @calclaudecode_bot → @cal_jano_bot.

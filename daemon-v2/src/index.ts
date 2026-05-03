@@ -312,6 +312,14 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
   const voice = m.voice;
   const photo = m.photo && m.photo.length > 0 ? m.photo[m.photo.length - 1] : undefined;
   const document = m.document;
+  const location = m.location;
+
+  // Pasar coordenadas al agent — él decide qué hacer según el contexto
+  if (location && !text) {
+    text = `[ubicación GPS compartida: lat=${location.latitude}, lon=${location.longitude}]${caption ? ` — ${caption}` : ""}`;
+  } else if (location && text) {
+    text = `[ubicación GPS: lat=${location.latitude}, lon=${location.longitude}] ${text}`;
+  }
 
   if (!text && !voice && !photo && !document) {
     log({ msg: "skip_message", reason: "unsupported kind", update_id: payload.update_id });
