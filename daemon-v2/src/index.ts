@@ -39,10 +39,13 @@ const env = {
   FEEDBIN_USERNAME: process.env.FEEDBIN_USERNAME ?? "",
   FEEDBIN_PASSWORD: process.env.FEEDBIN_PASSWORD ?? "",
   ANTHROPIC_API_KEY: requireEnv("ANTHROPIC_API_KEY"),
+  READWISE_TOKEN: process.env.READWISE_TOKEN ?? "",
   COS_WEBHOOK_URL: process.env.COS_WEBHOOK_URL ?? "https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook",
   COS_WEBHOOK_SECRET: process.env.COS_WEBHOOK_SECRET ?? "",
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ?? "",
   ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID ?? "",
+  GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? "",
+  HOME_PIN: process.env.HOME_PIN ?? "",
 };
 
 // Force SDK to use OAuth Max instead of API key (Tier 1 rate limited).
@@ -91,6 +94,8 @@ let currentChatId = 0;
 const sdkTools = buildSdkTools({
   botToken: env.COS_TELEGRAM_BOT_TOKEN,
   getCurrentChatId: () => currentChatId,
+  gmapsApiKey: env.GOOGLE_MAPS_API_KEY || undefined,
+  homePin: env.HOME_PIN || undefined,
 });
 const mcpServer = createSdkMcpServer({
   name: "cos-tools",
@@ -165,6 +170,16 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [COMBUSTIBLE_DIST],
+    },
+    // Readwise MCP remoto — bridge stdio via mcp-remote
+    "readwise": {
+      type: "stdio",
+      command: "/Users/calepes/.npm-global/bin/mcp-remote",
+      args: [
+        "https://mcp2.readwise.io/mcp",
+        "--header",
+        `Authorization: Token ${process.env.READWISE_TOKEN}`,
+      ],
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],

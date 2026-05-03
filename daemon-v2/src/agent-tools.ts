@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getOutlookEvents } from "./tools/outlook.js";
 import { runBriefing } from "./tools/briefing.js";
 import { manageLearning } from "./tools/learnings.js";
+import { searchPlaces, travelTime as calcTravelTime } from "./tools/maps.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
@@ -17,6 +18,8 @@ function asText(result: unknown) {
 export interface ToolDeps {
   botToken: string;
   getCurrentChatId: () => number;
+  gmapsApiKey?: string;
+  homePin?: string;
 }
 
 export function buildSdkTools(deps: ToolDeps) {
@@ -38,6 +41,31 @@ export function buildSdkTools(deps: ToolDeps) {
         fecha: z.string().optional(),
       },
       async (args) => asText(await runBriefing(briefingDeps, deps.getCurrentChatId(), args)),
+    ),
+    tool(
+      "searchPlace",
+      "Busca un lugar en Google Places (texto libre). Devuelve hasta 5 candidatos con id, name, address, location lat/lng y googleMapsUri. Útil para resolver coords de un destino antes de calcular tiempo de viaje.",
+      { query: z.string() },
+      async ({ query }) => {
+        if (!deps.gmapsApiKey) return asText({ error: "Google Maps API key no configurado" });
+        return asText(await searchPlaces(query, { apiKey: deps.gmapsApiKey, homePin: deps.homePin }));
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "travelTime",
+      "Calcula tiempo de viaje en tráfico real desde origen hasta destino (Google Routes API, modo DRIVE traffic-aware). Args: { destLatLng: 'lat,lng', originLatLng?: 'lat,lng' (default HOME_PIN de Cal) }. Devuelve { durationMin, distanceKm }.",
+      {
+        destLatLng: z.string(),
+        originLatLng: z.string().optional(),
+      },
+      async ({ destLatLng, originLatLng }) => {
+        if (!deps.gmapsApiKey) return asText({ error: "Google Maps API key no configurado" });
+        return asText(
+          await calcTravelTime(destLatLng, { apiKey: deps.gmapsApiKey, homePin: deps.homePin }, originLatLng),
+        );
+      },
+      READ_ONLY,
     ),
     // addLearning migrada al MCP global agent-learnings (evita warm pool stale).
     // Disponible como mcp__agent-learnings__addLearning({ agent: "jano", text }).

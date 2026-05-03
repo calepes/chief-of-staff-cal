@@ -26,6 +26,8 @@ const PATTERNS = {
   learnDrop:    /^learn:drop:([a-z]+-\d{4}-\d{2}-\d{2}-\d{3})$/,
   learnKeepAll: /^learn:keepall:([0-9a-f]{8})$/,
   learnDropAll: /^learn:dropall:([0-9a-f]{8})$/,
+  learnPromote:   /^learn:promote:([a-z]+-\d{4}-\d{2}-\d{2}-\d{3})$/,
+  learnSkipPromo: /^learn:skip-promo:([a-z]+-\d{4}-\d{2}-\d{2}-\d{3})$/,
   buildApprove: /^build:approve:(build-\d{4}-\d{2}-\d{2}-[0-9a-f]{8})$/,
   buildReject:  /^build:reject:(build-\d{4}-\d{2}-\d{2}-[0-9a-f]{8})$/,
   skillApprove: /^skill:approve:(skill-\d{4}-W\d{2}-[a-z][a-z0-9-]+)$/,
@@ -132,6 +134,21 @@ export async function routeCallback(data: string): Promise<RouteResult | null> {
       if (r.ok) ok++; else fail++;
     }
     return { editText: `🗑 ${ok} learnings descartados${fail > 0 ? ` (${fail} errores)` : ''}`, toast: `🗑 ${ok} descartados` };
+  }
+
+  // learn:promote:<id> — mover entry al siguiente tier
+  m = data.match(PATTERNS.learnPromote);
+  if (m) {
+    const id = m[1];
+    const r = runLearningsLib('promote_entry', id);
+    if (!r.ok) return { editText: `❌ Error al promover: ${r.error}`, toast: 'Error' };
+    return { editText: `⬆️ Promovido al siguiente tier: ${id}`, toast: '⬆️ Promovido' };
+  }
+
+  // learn:skip-promo:<id> — no-op, usuario decide no promover
+  m = data.match(PATTERNS.learnSkipPromo);
+  if (m) {
+    return { editText: `⏭ Sin cambios: ${m[1]}`, toast: '⏭' };
   }
 
   // build:approve:<id> — dispara ejecutor async (no bloquea el callback)

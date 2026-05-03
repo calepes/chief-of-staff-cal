@@ -36,6 +36,30 @@
 - **Webhook restaurado**: `setWebhook` manual a `cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook`.
 - **Docs**: gotcha documentado en `~/.claude/CLAUDE.md` y `Jano/CLAUDE.md`.
 
+### Google Maps tools + fix requestUserLocation
+
+- **Nuevas tools `searchPlace` + `travelTime`**: copiadas de Vesta (`tools/maps.ts`). `searchPlace` usa Google Places API New; `travelTime` usa Google Routes API v2 con modo DRIVE TRAFFIC_AWARE (tiempo real en tráfico). Requieren `GOOGLE_MAPS_API_KEY` y `HOME_PIN` en `~/.cos-agent/.env`.
+- **Fix trigger `requestUserLocation`**: el system-prompt solo tenía regla para consultas de combustible. Extendido para cubrir cualquier consulta de distancia, ruta, tiempo de viaje o "cuánto tardo".
+- **Wired en daemon**: `GOOGLE_MAPS_API_KEY` y `HOME_PIN` leídos de env, pasados a `buildSdkTools`. Tools añadidas a `CLAUDE_AI_COS_TOOLS` allowlist.
+
+### Fix formato HTML (REGLA ABSOLUTA position)
+
+- **Bug**: el bloque `## FORMATO DE SALIDA — REGLA ABSOLUTA` estaba enterrado en la sección UX (~línea 130 del system-prompt) → el LLM lo ignoraba y usaba `**bold**` en lugar de `<b>bold</b>`.
+- **Fix**: bloque movido al top del system-prompt, justo después del párrafo de identidad. El LLM ahora respeta HTML consistentemente.
+- **Family/Vesta**: mismo fix aplicado a Vesta (migrado a HTML en esta sesión).
+
+### Readwise MCP (via mcp-remote)
+
+- **MCP Readwise externo**: integrado via bridge `mcp-remote` apuntando a `https://mcp2.readwise.io/mcp` con auth `Authorization: Token TOKEN`. Alternativa al MCP OAuth Max de claude.ai (que requería re-auth en iPad).
+- **22 tools disponibles**: Reader (list/search/get_details/create/move docs, highlights, tags, export, bulk_edit) + Readwise classic (list/search/daily_review/create/update/delete highlights).
+- **Wired solo en Jano**: token `READWISE_TOKEN` en `~/.cos-agent/.env`. Vesta no tiene acceso (out of scope).
+- **Global también**: registrado en `~/.claude/.mcp.json` como `"type": "url"` para sesiones interactivas Claude Code.
+
+### Feedbin write tools + fix subscription_id
+
+- **Nuevas tools en MCP `feedbin`**: `savePage(url)` guarda artículo via POST /v2/pages.json (para leer luego en Reader), `addSubscription(feedUrl)` suscribe a feed (maneja 302 = ya suscrito), `deleteSubscription(subscriptionId)` elimina suscripción.
+- **Fix `getSubscriptions()`**: bug donde el output solo exponía `feed_id` pero el endpoint DELETE necesita `subscription_id` (`s.id`). Ahora expone ambos campos. Causaba 404 al intentar borrar suscripciones.
+
 ## 2026-05-01
 
 ### Capacidades de Salud + Renames

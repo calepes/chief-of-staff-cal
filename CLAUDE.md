@@ -73,6 +73,9 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - ~~Notion tasks removidas 2026-05-02~~ — Jano usa Apple Reminders vía MCP `apple-reminders`. Ver sección "Separación de herramientas por scope".
 - `getOutlookEvents` — lee cache pre-procesado por cron `com.claude.outlook-cache` (`tools/outlook.ts`).
 - `runBriefing` (agregado 2026-04-29) — async wrapper para generar briefings on-demand (Bolivia/Peru/Colombia). Spawn detached de `claude -p` con mismo prompt que el cron de las 5am, lock por país en `~/.cos-agent/briefing-locks/`, child process notifica a Cal cuando termina via Telegram. Ver `tools/briefing.ts`. Patrón "tool wrapper" para sortear `DISALLOWED_BUILTINS` (Bash/Write bloqueados en el daemon, pero el subprocess los tiene).
+- `searchPlace(query, location?)` (agregado 2026-05-02) — Google Places API New. Busca lugares por nombre/tipo cercanos. Requiere `GOOGLE_MAPS_API_KEY` + `HOME_PIN`. Código en `tools/maps.ts` (copiado de Vesta).
+- `travelTime(origin, destination, departureTime?)` (agregado 2026-05-02) — Google Routes API v2, modo DRIVE, TRAFFIC_AWARE. Tiempo real en tráfico.
+- `requestUserLocation` — ReplyKeyboard con `request_location: true`. Envía botón GPS nativo de Telegram. Triggear cuando Cal pregunta por distancia, ruta, tiempo de viaje, o "cuánto tardo".
 
 **Built-ins permitidas:** `Skill` (vuelos-bolivia, telegram-bot-ux), `WebFetch`, `WebSearch`. **Removido `briefing-pais`** del Skill — el daemon no puede ejecutarlo (necesita Bash/Write); para briefings on-demand usar `runBriefing` en su lugar.
 
@@ -88,12 +91,15 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - `health` (agregado 2026-04-30) — `getHealthSummary`, `getHealthTrend`, `getWorkouts`. Migrado de custom tools (`tools/health.ts`) a MCP global. Requiere `HEALTH_API_KEY` en env. Server en `mcp-servers/servers/health/`.
 - `apple-reminders` (agregado 2026-04-30) — `listReminderLists`, `listReminders`, `addReminder`, `editReminder`, `completeReminder`, `deleteReminder`. iOS Reminders personales de Cal vía `reminders-cli`. Server en `mcp-servers/servers/apple-reminders/`.
 - `combustible` (agregado 2026-05-02) — `getFuelStatus({ lat?, lon?, limit?, minLitros? })` disponibilidad gasolina 27 estaciones Santa Cruz con distancias y links Google Maps. API key desde `~/.combustible-mcp.env` (fallback si no hay env var). Server en `mcp-servers/servers/combustible/`.
+- `feedbin` (actualizado 2026-05-02) — reads: `getUnreadCount`, `getUnreadEntries`, `getEntryContent`, `markRead`, `markUnread`, `getSubscriptions`, `searchEntries`. Writes: `savePage(url)` guarda artículo (POST /v2/pages.json), `addSubscription(feedUrl)` suscribe a feed (maneja 302 = ya suscrito), `deleteSubscription(subscriptionId)` elimina suscripción. **Gotcha:** `getSubscriptions()` expone `subscription_id` (= `s.id`, para DELETE) y `feed_id` — son distintos. Siempre pasar `subscription_id` a `deleteSubscription`, NO `feed_id`. Server en `mcp-servers/servers/feedbin/`.
+- `readwise` (agregado 2026-05-02) — MCP remoto oficial via `mcp-remote` bridge. 22 tools: Reader (list/search/get_details/create/move documents, highlights, tags, export) + classic Readwise (list/search/daily-review/create/update/delete highlights). Auth: `Authorization: Token TOKEN` header. Bridge: `/Users/calepes/.npm-global/bin/mcp-remote`. Token: `READWISE_TOKEN` en `~/.cos-agent/.env`. Registrado en `BASE_OPTIONS.mcpServers` del daemon (no es stdio local — remoto HTTP/SSE).
 
 **Gotcha SDK librería:** el archivo `~/.claude/.mcp.json` solo lo lee el CLI de Claude Code. El daemon Node con `@anthropic-ai/claude-agent-sdk` librería NO lo lee — hay que registrar custom MCPs en `BASE_OPTIONS.mcpServers` (ver `daemon-v2/src/index.ts`). Confirmado bug 2026-04-29: el LLM intentaba llamar `mcp__youtube-transcribe__*` y recibía "permissions not granted" hasta que se agregó al BASE_OPTIONS.
 
 **Bloqueadas (`agent-options.ts` `DISALLOWED_BUILTINS`):** Bash, Read, Write, Edit, Glob, Grep, Task, Agent, TodoWrite, Task*, MCP discovery, ScheduleWakeup, CronCreate, EnterWorktree, Airtable writes, Gmail writes, Drive writes.
 
 ## Formato de respuestas Telegram (HTML)
+- **REGLA ABSOLUTA posición en system-prompt:** el bloque `## FORMATO DE SALIDA — REGLA ABSOLUTA` debe estar al inicio del system-prompt (justo después del párrafo de identidad), NO enterrado en la sección de UX. Si está lejos del inicio, el LLM lo ignora y usa `**bold**` en lugar de `<b>bold</b>`.
 - **Parse mode:** `HTML` (cambio 2026-04-29; antes usaba MarkdownV2 pero el LLM se equivocaba con escapes — `+`, `~~` no escapados → Telegram rechazaba el parse → fallback "No pude procesar tu mensaje").
 - **Tags soportados:** `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<a href>`. NO usar MarkdownV2 (`*x*`, `_x_`).
 - **Escape:** solo `< > &` (en `escapeHtml()` de `shared-v2/src/telegram.ts` y `daemon-v2/src/index.ts`).
@@ -115,7 +121,7 @@ Heavy callbacks (requieren LLM): `task:date:<pageId>` (parse "el viernes"), `tas
 Spotify callbacks (`spotify:*`) descartados por el worker (out of scope v2). Pendiente: agregar tool `spotifyControl` con lenguaje natural post-cutover.
 
 ## .env file daemon
-- `~/.cos-agent/.env` (chmod 600). Vars: `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN`, `HEALTH_API_KEY`, `ANTHROPIC_API_KEY`, `COS_WEBHOOK_URL`, `COS_WEBHOOK_SECRET`.
+- `~/.cos-agent/.env` (chmod 600). Vars: `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN`, `HEALTH_API_KEY`, `ANTHROPIC_API_KEY`, `COS_WEBHOOK_URL`, `COS_WEBHOOK_SECRET`, `GOOGLE_MAPS_API_KEY`, `HOME_PIN` (lat,lon del hogar — default para distancias), `READWISE_TOKEN`.
 - Webhook secret backup: `~/.cos-agent/webhook-secret.txt` (one-way en wrangler).
 - Heartbeat: `~/.cos-agent/heartbeat`.
 
