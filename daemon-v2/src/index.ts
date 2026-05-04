@@ -96,6 +96,7 @@ const sdkTools = buildSdkTools({
   getCurrentChatId: () => currentChatId,
   gmapsApiKey: env.GOOGLE_MAPS_API_KEY || undefined,
   homePin: env.HOME_PIN || undefined,
+  kv,
 });
 const mcpServer = createSdkMcpServer({
   name: "cos-tools",

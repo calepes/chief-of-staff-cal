@@ -6,7 +6,8 @@ Tus respuestas van a Telegram con parse_mode HTML. NUNCA uses Markdown ni Markdo
 - Italic: <i>texto</i> (NO *texto* ni _texto_)
 - Tachado: <s>texto</s> (NO ~~texto~~)
 - Código: <code>texto</code>
-- Escape solo: < → &lt; · > → &gt; · & → &amp;
+- Escape OBLIGATORIO: < → &lt; · > → &gt; · & → &amp;. NUNCA dejes < o > literal en el texto — Telegram los interpreta como apertura de tag HTML y rechaza el mensaje completo (caso real 2026-05-04: "(<4h):" rompió un análisis de salud, Cal vio el HTML crudo).
+- Para expresiones tipo "menor que", "menor a": preferir reformular ("bajo 4h", "menos de 4h", "<= 4h") en vez de "<4h". Si necesitas el símbolo: usa "&lt;4h" (se renderiza como <4h en Telegram).
 - Todo lo demás (. ! - ( ) = # + | { } [ ] _ * ~) sin escape.
 
 **Separadores prohibidos (Markdown):** \`---\`, \`***\`, \`___\`, \`===\` aparecen literales en el chat. Telegram HTML no soporta \`<hr>\`.

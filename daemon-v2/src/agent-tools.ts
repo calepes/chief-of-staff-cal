@@ -4,6 +4,8 @@ import { getOutlookEvents } from "./tools/outlook.js";
 import { runBriefing } from "./tools/briefing.js";
 import { manageLearning } from "./tools/learnings.js";
 import { searchPlaces, travelTime as calcTravelTime } from "./tools/maps.js";
+import { buildApprovalFlowImpl, stepApprovalWizardImpl } from "./tools/approval-flow.js";
+import type { CfKv } from "./cf-kv.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
@@ -20,6 +22,7 @@ export interface ToolDeps {
   getCurrentChatId: () => number;
   gmapsApiKey?: string;
   homePin?: string;
+  kv: CfKv;
 }
 
 export function buildSdkTools(deps: ToolDeps) {
@@ -107,6 +110,35 @@ export function buildSdkTools(deps: ToolDeps) {
         id: z.string().describe("ID del learning o batch_id"),
       },
       async ({ action, id }) => asText(await manageLearning(action, id)),
+    ),
+    tool(
+      "buildApprovalFlow",
+      "Crea un flujo de aprobación visual en Telegram cuando hay ≥2 items que Cal necesita revisar individualmente. Envía un summary card con la lista y botones 'Revisar uno a uno' + bulk actions. Guarda el estado del wizard en KV (TTL 30 min). Usar para: Feedbin triage, Reader inbox, reminders pendientes, learnings batch, cualquier lista con ≥2 decisiones individuales donde 'confirmar todos' NO es la respuesta obvia. NO usar para listas informativas ni cuando hay 1 solo item.",
+      {
+        title: z.string().describe("Título del wizard, ej: 'Feedbin triage', 'Reminders vencidos'"),
+        items: z.array(z.object({
+          id: z.string().describe("ID opaco que el LLM usa para llamar la acción correspondiente"),
+          label: z.string().describe("Texto principal del item visible en el wizard"),
+          meta: z.string().optional().describe("Info secundaria: fuente, fecha, categoría, etc."),
+        })).describe("Lista de items a revisar"),
+        confirmVerb: z.string().optional().describe("Texto del botón confirmar, default '✅ Confirmar'"),
+        rejectVerb: z.string().optional().describe("Texto del botón descartar, default '🗑️ Descartar'"),
+      },
+      async (args) => asText(await buildApprovalFlowImpl(
+        { kv: deps.kv, botToken: deps.botToken, getCurrentChatId: deps.getCurrentChatId },
+        args,
+      )),
+    ),
+    tool(
+      "stepApprovalWizard",
+      "Avanza el wizard de aprobación activo. Llamar siempre que llegue [callback] jano-wiz-*. La tool edita el mensaje de Telegram automáticamente y retorna el item actual (con su id) para que el LLM ejecute la acción correspondiente. Mapping de acciones: 'start' (jano-wiz-start), 'ok' (jano-wiz-ok → ejecutar acción: markRead/completeReminder/manageLearnEntry/etc. con item.id), 'no' (jano-wiz-no → no ejecutar acción, avanzar), 'skip' (jano-wiz-skip → saltar sin procesar), 'prev' (jano-wiz-prev), 'back' (jano-wiz-back → volver al resumen), 'bulk-ok' (jano-wiz-all-ok → retorna TODOS los items pendientes para acción bulk), 'bulk-no' (jano-wiz-all-no). Si done=true: responder con confirmación breve. Si item retorna con action 'ok': llamar la tool de acción correspondiente con item.id antes de responder.",
+      {
+        action: z.enum(["start", "ok", "no", "skip", "prev", "back", "bulk-ok", "bulk-no"]),
+      },
+      async ({ action }) => asText(await stepApprovalWizardImpl(
+        { kv: deps.kv, botToken: deps.botToken, getCurrentChatId: deps.getCurrentChatId },
+        { action },
+      )),
     ),
   ];
 }

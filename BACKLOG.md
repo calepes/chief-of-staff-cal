@@ -15,7 +15,8 @@
 ### Hooks pendientes de revisar (2026-05-02)
 - [ ] **pre-compact-snapshot.sh** (Apr 19) — revisar y registrar como PreCompact hook si sigue siendo válido
 - [ ] **notion-audit.sh** (Apr 19) — revisar y registrar como PostToolUse hook si sigue siendo válido
-- [ ] **Limpiar `~/.claude/channels/telegram/.env`** — crons ya migrados a `~/.cos-agent/.env`. Evaluar si el archivo puede simplificarse o eliminarse (solo queda NOTION_TOKEN para el plugin fork).
+- [x] ✅ **Limpiar `~/.claude/channels/telegram/.env`** (2026-05-04) — token de Jano removido (rotado vía BotFather, invalidó copias leakeadas en transcripts). Quedan solo `NOTION_TOKEN` y `HEALTH_API_KEY` en el .env. Como parte de la migración Jano+Vesta al modelo Pecunia (sin plugin interactivo), state dirs `telegram-cos/` y `telegram-family/` fueron eliminados completos.
+- [ ] **Validar setup de Yapito** (`@yapito_cal_bot`, `~/.yapito/.env`) — durante el inventario 2026-05-03 vimos que NO tiene webhook configurado y no aparece daemon en `launchctl list`. Confirmar si está activo en otra máquina, archivado, o si necesita setup completo (worker CF + queue + daemon Node estilo Pecunia).
 - [ ] **Revisar contenido y formato del nightly-report cron** (2026-05-04) → reporte 2026-05-03 22:00 mostró: (1) "GCal no disponible" pese a tener `mcp__claude_ai_Google_Calendar__list_events` en `--allowedTools` — el OAuth Max del cron no autoriza el MCP, ver log; (2) formato Markdown legacy con `**bold**` (revisar parse_mode usado vs HTML que usa el daemon Jano); (3) **validar con Cal qué secciones deben ir en el briefing** antes de tocar el script — el contenido actual (Hoy/Pendientes/Mañana/Feedbin/Readwise/Sugerencia/Learnings) puede no ser el set ideal. Script: `~/.claude/hooks/nightly-report.sh`.
 
 ### Cierre OpenClaw — Fase 6 (multi-agente)
@@ -36,6 +37,7 @@
 - 16 plists pausados en `disabled-2026-04-21/`. Candidatos a embeber con `node-cron` en daemon v2: briefings país, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas.
 - Alternativa: dejar como `claude -p` programado independiente (asume riesgo TCC reset en updates del binario).
 - **Briefings país (post 2026-04-29):** ya no es bloqueante el cron — el bot CoS puede generar on-demand via tool `runBriefing`. Re-habilitar `com.claude.daily-briefings` (mover de `disabled-2026-04-29/` a `~/Library/LaunchAgents/`) si se quiere briefing automático cada 5am como antes.
+- **Priorizar `eisenhower-weekly`** (2026-05-04): tres razones para migrar antes que otros crons. (a) Cold start `claude -p` ~30-60s + ~25 items secuenciales está al límite del timeout 600s actual; (b) cuando el MCP de apple-reminders migre a EventKit, un cron embebido en el daemon podrá actualizar priority real (hoy solo genera reporte visual); (c) el prompt del script duplica reglas FORMATO del system-prompt del daemon — mantener una sola fuente de verdad. Beneficio esperado: warm pool + MCPs ya cargados → ejecución <60s sin cold start.
 
 ### Migrar Family/Vesta de MarkdownV2 a HTML (Fase 3 - 2026-04-29)
 - **Bug compartido con CoS pre-fix:** Family/Vesta system-prompt instruye MarkdownV2 al LLM, pero el `shared-v2/src/telegram.ts` ya tiene default `HTML`. Resultado: LLM genera `*texto*`, `\.`, `\!` y al mandar como HTML → Cal/Noe ven los caracteres literales (asteriscos, backslashes en puntos).
