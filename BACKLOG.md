@@ -4,10 +4,19 @@
 
 ## Pendientes
 
+### Migración MCP apple-reminders → EventKit (2026-05-04)
+- [ ] **Reemplazar wrapper `keith/reminders-cli`** en `~/Claude Projects/Personal/MCP Servers/mcp-servers/servers/apple-reminders/` por una solución basada en EventKit nativo. Limitación actual: el CLI underlying (`reminders-cli` 2.5.1) **NO soporta priority ni dueDate en `edit`** — solo title y notes. El MCP ahora throw-ea error claro si el LLM intenta. Eisenhower semanal queda como reporte visual sin escritura de prioridades.
+- **Opciones evaluadas (2026-05-04):**
+  - **A) Swap del CLI underlying** por `BRO3886/rem` (Go + cgo + EventKit), `AungMyoKyaw/apple-reminders-cli` (Swift + EventKit), o `ekctl` (Swift). Riesgo: TCC re-grant + ajustar wrapper TS si la API difiere.
+  - **B) Reemplazar el MCP completo** por un publicado: [FradSer/mcp-server-apple-events](https://github.com/FradSer/mcp-server-apple-events) o [Krishna-Desiraju/apple-reminders-swift-mcp-server](https://github.com/Krishna-Desiraju/apple-reminders-swift-mcp-server) — soportan priority + dueDate + recurring + location + tags. Requiere actualizar `BASE_OPTIONS.mcpServers` de Jano + Vesta + Pecunia + system prompts.
+  - **C) Helper Swift custom** firmado con TCC + EventKit. Más esfuerzo pero control total.
+- **Triggers para priorizar:** Eisenhower no actualiza prioridades en Apple, recurring/location/tags se vuelvan necesarios, o un MCP de la lista se vuelva mantenedor activo en npm.
+
 ### Hooks pendientes de revisar (2026-05-02)
 - [ ] **pre-compact-snapshot.sh** (Apr 19) — revisar y registrar como PreCompact hook si sigue siendo válido
 - [ ] **notion-audit.sh** (Apr 19) — revisar y registrar como PostToolUse hook si sigue siendo válido
 - [ ] **Limpiar `~/.claude/channels/telegram/.env`** — crons ya migrados a `~/.cos-agent/.env`. Evaluar si el archivo puede simplificarse o eliminarse (solo queda NOTION_TOKEN para el plugin fork).
+- [ ] **Revisar contenido y formato del nightly-report cron** (2026-05-04) → reporte 2026-05-03 22:00 mostró: (1) "GCal no disponible" pese a tener `mcp__claude_ai_Google_Calendar__list_events` en `--allowedTools` — el OAuth Max del cron no autoriza el MCP, ver log; (2) formato Markdown legacy con `**bold**` (revisar parse_mode usado vs HTML que usa el daemon Jano); (3) **validar con Cal qué secciones deben ir en el briefing** antes de tocar el script — el contenido actual (Hoy/Pendientes/Mañana/Feedbin/Readwise/Sugerencia/Learnings) puede no ser el set ideal. Script: `~/.claude/hooks/nightly-report.sh`.
 
 ### Cierre OpenClaw — Fase 6 (multi-agente)
 - [ ] **Revisar y cerrar el plan OpenClaw** — Fases 1-5 implementadas. Fase 6 (multi-agent) es la única pendiente. Decidir si se implementa, se archiva como "out of scope por ahora", o se reformula. Consolidar learnings en `docs/superpowers/`.
@@ -228,5 +237,5 @@ Notas:
 - [ ] Migrar secrets a 1Password CLI (`op`)
 - [x] **Google Maps API — distancias y tiempos** (2026-05-02) → implementado: `searchPlace` (Places API New) + `travelTime` (Routes API v2 TRAFFIC_AWARE) en `tools/maps.ts`. `requestUserLocation` extendido para cualquier consulta de distancia/ruta/ETA.
 - [ ] **Aprendizaje de largo plazo (Paweł model)** (2026-05-01) → sistema de knowledge tiers en `~/.claude/learnings/jano/` (facts→hypotheses→rules). Al cerrar sesión, el summary compactado pasa por extracción de patrones. Dependencia: conversation memory operativa primero. Ver diseño en `~/.claude/docs/superpowers/specs/2026-05-01-conversation-memory-design.md`
-- [ ] **Evaluar `remindctl` como reemplazo de `reminders-cli`** (surgido 2026-05-02) → `reminders-cli` tiene gotcha de índices enteros vs UUIDs en versiones nuevas. `remindctl` podría ser más estable. Evaluar API/schema antes de migrar `apple-reminders` MCP.
+- [ ] ~~**Evaluar `remindctl` como reemplazo de `reminders-cli`**~~ (parqueado 2026-05-03) → migración no aporta valor: (1) gotcha de índices UUID ya tiene workaround en código (`String(idx)` ignorando `externalId`), (2) `remindctl` también usa EventKit → no evita TCC. Si en el futuro se quiere blindar Reminders contra TCC reset (ej. para portar a otra Mac/VPS sin diálogos), las únicas vías reales son CalDAV directo a iCloud o espejar a Notion — ambos son proyectos en sí, no migraciones de CLI.
 - [ ] **Evaluar VPS para correr Claude Code** (agregado 2026-04-21) → alternativa a Mac local + launchd para correr cos-agent y family-agent 24/7. Motivación: problemas recurrentes con health-checks + zombies MCP + dependencia de red local (SNI filtering tumba polling Telegram). Evaluar: costo mensual vs estabilidad, migración del fork del plugin + workers + ambientes, latencia desde/hacia Telegram, y si conviene VPS completo o solo ejecutores remotos. Referencias: spec de watchdog (`docs/references/2026-04-21-agent-launchd-fix.pdf`) — si el VPS resuelve el problema raíz, el rediseño de health-check se vuelve innecesario

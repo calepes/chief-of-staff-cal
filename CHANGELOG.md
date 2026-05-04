@@ -1,5 +1,20 @@
 # CHANGELOG — Jano
 
+## 2026-05-04
+
+### Fix naabol-flights — Jano respondía "no puedo confirmar" pese a tener datos
+
+- **Root cause**: el CLI `consultar-vuelo.mjs` emitía un campo `nota` con texto "Endpoint operativo NAABOL caído (404)" en cada response. El LLM lo interpretaba como "no puedo responder" y omitía `gate`/`estado`/`horaProgramada` que sí venían poblados en `matches[]`. Bug reportado mid-pre-flight 2026-05-04 04:23 hora Bolivia.
+- **Fix CLI** (`Aeropuertos Bolivia/cli/consultar-vuelo.mjs`): removido el campo `nota` cuando hay matches. Solo aparece si no hay resultados.
+- **Fix system-prompt** (`daemon-v2/src/system-prompt.ts`): regla OBLIGATORIA — si `matches[]` trae items con `gate`/`estado`/`horaProgramada` poblados, mostrarlos literales. PROHIBIDO decir "no puedo confirmar gate/delays" o "endpoint caído". Mismo refuerzo aplicado a Vesta.
+- **Docs**: gotcha documentado en `Aeropuertos Bolivia/CLAUDE.md` + `CHANGELOG.md` (nuevo), `MCP Servers/CLAUDE.md` (principio general "outputs minimalistas") y `Jano/CLAUDE.md` (regla naabol-flights).
+
+### Auditoría TCC pre-viaje
+
+- Confirmado que los 3 daemons activos (`com.cal.cos-agent-v2`, `com.cal.family-agent-v2`, `com.calepes.pecunia-agent`) usan Node + SDK librería — inmunes a TCC reset.
+- `enabledPlugins.telegram: false` en `~/.claude/settings.json` previene que crons disparen `deleteWebhook` automático del plugin grammY. Webhooks de Jano/Vesta/Pecunia activos sin drift.
+- BACKLOG actualizado: parqueado item "evaluar remindctl" (EventKit no se evita migrando CLI), agregado item "revisar contenido + formato + secciones del nightly-report cron".
+
 ## 2026-05-02
 
 ### Solicitud de ubicación nativa + combustible (requestUserLocation)

@@ -10,7 +10,7 @@
 - **Plists viejos (`disabled-2026-04-29/`):** `com.cal.cos-agent` (plugin Telegram polling, sufría TCC reset y conflict 409).
 - **Plists viejos Family (`disabled-2026-04-28/`):** `com.cal.family-agent`, `com.cal.family-check-recordatorios`.
 - **Pausados (`disabled-2026-04-21/`):** 16 plists secundarios pendientes de rediseño (heartbeat, briefings, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas, outlook-cache, extract-learnings, sync-learnings, cos-health-check, family-briefings AM/PM, family-extrae-aprendizajes, family-health-check).
-- **Hooks `settings.json` global ACTIVOS:** SessionStart `cos-channel-bootout.sh` + `family-channel-bootout.sh`; SessionEnd `*-bootstrap.sh`. Ahora ambos bots usan webhook — abrir `claude --channels` con bot default va a borrar el webhook (grammY `bot.start()`). El bootstrap hook lo restaura al cerrar la sesión; el watchdog del daemon también lo restaura cada 1 min como defensa.
+- **Hooks `settings.json` global:** ya NO hay `cos-channel-*` ni `family-channel-*` (eliminados 2026-05-03 al migrar Jano y Vesta al modelo Pecunia: webhook puro, sin flujo interactivo de plugin Telegram). El watchdog del propio daemon restaura el webhook cada 1 min como defensa.
 - Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
@@ -90,6 +90,8 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - `naabol-flights` (agregado 2026-04-29, antes era tool local de Vesta) — `getFlight`, `getFlights`, `getAirportFlights` para los 12 aeropuertos NAABOL. Wraps el CLI `~/Claude Projects/Personal/Apps/Aeropuertos Bolivia/cli/consultar-vuelo.mjs`. Server en `mcp-servers/servers/naabol-flights/`.
 - `health` (agregado 2026-04-30) — `getHealthSummary`, `getHealthTrend`, `getWorkouts`. Migrado de custom tools (`tools/health.ts`) a MCP global. Requiere `HEALTH_API_KEY` en env. Server en `mcp-servers/servers/health/`.
 - `apple-reminders` (agregado 2026-04-30) — `listReminderLists`, `listReminders`, `addReminder`, `editReminder`, `completeReminder`, `deleteReminder`. iOS Reminders personales de Cal vía `reminders-cli`. Server en `mcp-servers/servers/apple-reminders/`.
+
+**Regla naabol-flights (2026-05-04):** system-prompt fuerza al LLM a usar `matches[].gate`/`estado`/`horaProgramada` literales cuando vienen poblados. PROHIBIDO decir "no puedo confirmar gate/delays" o repetir el campo `nota` del CLI (que ahora solo aparece sin matches). Mismo refuerzo en Vesta system-prompt. Bug original 2026-05-04: Jano respondía "endpoint caído, no puedo confirmar" aunque el JSON tuviera gate=4, estado=PRE-EMBARQUE.
 - `combustible` (agregado 2026-05-02) — `getFuelStatus({ lat?, lon?, limit?, minLitros? })` disponibilidad gasolina 27 estaciones Santa Cruz con distancias y links Google Maps. API key desde `~/.combustible-mcp.env` (fallback si no hay env var). Server en `mcp-servers/servers/combustible/`.
 - `feedbin` (actualizado 2026-05-02) — reads: `getUnreadCount`, `getUnreadEntries`, `getEntryContent`, `markRead`, `markUnread`, `getSubscriptions`, `searchEntries`. Writes: `savePage(url)` guarda artículo (POST /v2/pages.json), `addSubscription(feedUrl)` suscribe a feed (maneja 302 = ya suscrito), `deleteSubscription(subscriptionId)` elimina suscripción. **Gotcha:** `getSubscriptions()` expone `subscription_id` (= `s.id`, para DELETE) y `feed_id` — son distintos. Siempre pasar `subscription_id` a `deleteSubscription`, NO `feed_id`. Server en `mcp-servers/servers/feedbin/`.
 - `readwise` (agregado 2026-05-02) — MCP remoto oficial via `mcp-remote` bridge. 22 tools: Reader (list/search/get_details/create/move documents, highlights, tags, export) + classic Readwise (list/search/daily-review/create/update/delete highlights). Auth: `Authorization: Token TOKEN` header. Bridge: `/Users/calepes/.npm-global/bin/mcp-remote`. Token: `READWISE_TOKEN` en `~/.cos-agent/.env`. Registrado en `BASE_OPTIONS.mcpServers` del daemon (no es stdio local — remoto HTTP/SSE).
@@ -186,6 +188,12 @@ Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/
 **Uso en /today:** sección 🏥 Salud si hay data disponible.
 **Triggers naturales:** "cómo dormí", "pasos hoy", "salud semana", "peso".
 
+## Calendarios consultables (2026-05-04)
+- **Personal** (`carlos@lepesqueur.net`): agenda personal de Cal. Default GCal sin `calendarId`.
+- **AntoCataNoeCal** (`c_4c2ogsnda3b61k1sd9eta6vc2k@group.calendar.google.com`): viajes (Flighty) + eventos familiares.
+- **Outlook BCP**: NO consultar el calendar importado en GCal (`655cenb4ro558qcnuucafn0kitdqtmia@import...`) — bug de timezone (eventos en TZID UTC se desplazan -4h). Usar siempre `getOutlookEvents` (cache local del cron `com.claude.outlook-cache`).
+- **Cumpleaños**: `list_events` con `eventTypeFilter: ["birthday"]` en calendar Personal. Incluir sección 🎂 en briefings/today si hay cumple del rango.
+
 ## Gestión de Viajes
 - **Fuente:** Flighty (iOS) → sincronizado a Google Calendar "AntoCataNoeCal"
 - **Calendar ID:** `c_4c2ogsnda3b61k1sd9eta6vc2k@group.calendar.google.com`
@@ -235,14 +243,15 @@ Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/
 - **SNI filtering bloquea Telegram en ciertas redes**: algunas WiFi (guest, hoteles, captive portals) bloquean `api.telegram.org` con "Connection reset by peer" durante TLS handshake. Daemon arranca OK pero no puede hacer polling, bot queda mudo. No es la oficina por default — es red-específico. Diagnóstico rápido: `curl -s https://api.telegram.org/bot$TOKEN/getMe` devuelve vacío mientras `curl https://google.com` funciona. Fix: cambiar red (hotspot iPhone o VPN)
 - **Zombies de bun tras kill mal del cos-agent**: si `kill` del agent no limpia su subprocess `bun server.ts`, quedan haciendo polling huérfanos y causan conflict 409 al próximo arranque. Limpiar con `pkill -9 -f "bun server.ts"` antes de `launchctl bootstrap`
 - **Debug estado launchd:** `launchctl print gui/$(id -u)/com.cal.<agent>` muestra estado detallado (running/failed, PID, PATH, args). Más útil que `launchctl list | grep` cuando algo no arranca
-- **Webhook drift cada 60s (2026-05-02):** causado por `telegram@claude-plugins-official: true` en `~/.claude/settings.json` + `channelsEnabled: true` → el plugin Telegram arranca en cada sesión de Claude Code y llama `deleteWebhook()`. Fix: setear a `false` en enabledPlugins. Para restaurar webhook manualmente: `TOKEN=$(grep COS_TELEGRAM_BOT_TOKEN ~/.cos-agent/.env | cut -d= -f2-) && SECRET=$(cat ~/.cos-agent/webhook-secret.txt) && curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" -H "Content-Type: application/json" -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\"}"`
+- **MCP `apple-reminders` `editReminder` no soporta priority ni dueDate (2026-05-04):** el CLI underlying `keith/reminders-cli 2.5.1` solo permite editar title (positional) y `--notes`. Los flags `--priority` y `--due-date` son ignorados silenciosamente (exit 0 sin actualizar). El MCP ahora throw-ea error claro si se intenta `editReminder` con priority o dueDate. Para esos cambios: `deleteReminder + addReminder` con la nueva property. Migración a MCP con EventKit (Krishna-Desiraju u omarshahine — requieren Xcode full; snarris usa Python+PyObjC sin Xcode pero menos features) en `BACKLOG.md`.
+- **`claude -p` del cron NO carga el system prompt del daemon:** si el cron necesita reglas de formato (HTML, sin Markdown, sin separadores `---`, sin preámbulo) hay que duplicarlas literal en el prompt del script. El LLM cae en hábitos Markdown por default. Visto en cron Eisenhower (fix 2026-05-04 — prompt incluye reglas FORMATO completas).
+- **LLM puede alucinar workarounds cuando una tool falla silenciosa:** si un CLI ignora un flag y devuelve exit 0 sin actualizar, el LLM puede afirmar en su respuesta que ejecutó workaround vía Bash/AppleScript aunque NO tenga esa tool en `--allowedTools`. Caso real 2026-05-03: Eisenhower run reportó "actualizadas vía AppleScript como workaround" sin tener Bash habilitado. Validar siempre con outputs reales (ej. re-list después del edit), no confiar en lo que el LLM narra.
+- **Webhook drift histórico (2026-05-02 / 2026-05-03):** RESUELTO de raíz al migrar al modelo Pecunia (2026-05-03). Causa original: cualquier proceso que cargara el plugin Telegram con un state dir cuyo `.env` tuviera el token de Jano arrancaba grammY → `bot.start()` → `deleteWebhook()` automático → loop de 60s con el watchdog del daemon. Fix definitivo: token rotado, eliminados todos los state dirs y hooks de channel — Jano ahora opera SOLO via webhook + daemon (sin canal interactivo). Imposible reincidir salvo que alguien re-cree manualmente un state dir con el token. Si el daemon falla, restauración manual del webhook: `TOKEN=$(grep COS_TELEGRAM_BOT_TOKEN ~/.cos-agent/.env | cut -d= -f2-) && SECRET=$(cat ~/.cos-agent/webhook-secret.txt) && curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" -H "Content-Type: application/json" -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\"}"`
 
 ## Comandos operativos
 
-### Telegram channel
-```bash
-claude --channels plugin:telegram@claude-plugins-official
-```
+### Telegram interactivo
+**Eliminado 2026-05-03.** Jano opera 100% via webhook + daemon (modelo Pecunia). No hay flujo `claude --channels` — si el daemon está caído, debug via logs y restart, no via plugin interactivo.
 
 ### Deploy plugin fork (después de editar telegram-plugin/)
 ```bash
@@ -272,23 +281,16 @@ echo 0 > ~/.claude/state/heartbeat-failures
 
 ## Hooks & Automatización
 - **SessionStart hook:** `~/.claude/hooks/session-start-context.sh` — inyecta fecha/hora + recordatorios Apple + instrucción GCal. **Registrado** en `~/.claude/settings.json` (activo 2026-05-02)
-- **Channel conflict guard (SessionStart/SessionEnd):** `.claude/settings.json` del proyecto registra dos hooks:
-  - `cos-channel-bootout.sh` (SessionStart): si la sesión interactiva usa `--channels plugin:telegram` con el bot default, descarga el launchd agent `com.cal.cos-agent` para que no compitan por `getUpdates` (Telegram long-poll solo permite UN consumidor por bot → conflict 409 reparte mensajes aleatoriamente)
-  - `cos-channel-bootstrap.sh` (SessionEnd): cuando cierras la última sesión interactiva del CoS, recarga el cos-agent para que retome escucha en background
-  - `family-channel-bootout.sh` / `family-channel-bootstrap.sh` (SessionStart/End): equivalentes para sesiones con `TELEGRAM_STATE_DIR=...telegram-family`. Family v2 ya usa webhook (no polling), pero los hooks siguen siendo defensivos para evitar que una sesión `--channels` accidental tumbe el webhook (grammY `bot.start()` llama `deleteWebhook` automático).
-  - **Invariante:** nunca corren simultáneo agent launchd + sesión interactiva del mismo bot. Siempre hay exactamente un consumidor activo
-  - Ignora sesiones con `TELEGRAM_STATE_DIR=` custom (ej. family-agent usa otro bot)
-  - **Anti self-sabotage:** el plist del cos-agent tiene `COS_AGENT_BG=1` en env — los hooks lo chequean y exit 0 si corren dentro del propio agent (sin esto, el SessionStart del agent haría bootout de su propio launchd → KeepAlive respawn → loop spawneando bun zombies). Misma lógica en Family con `FAMILY_AGENT_BG=1`
-  - Si abres múltiples sesiones interactivas, el bootstrap espera hasta cerrar la última
+- **Channel conflict guard:** ELIMINADO 2026-05-03. Jano y Vesta migraron al modelo Pecunia (webhook puro, sin plugin interactivo). Los hooks `cos-channel-*.sh` y `family-channel-*.sh` ya no existen — innecesarios sin sesiones `--channels`.
 - **Stop hook:** `~/.claude/hooks/stop-telegram-notify.sh` — notifica vía @ClaudeCalbot en `end_turn`. **NO registrado** — dispara en toda sesión CLI incluyendo crons (demasiado ruidoso). Usa `~/.claude/notifications/.env:NOTIF_BOT_TOKEN`.
 - **PostToolUse hook:** `~/.claude/hooks/learn-error.sh` — captura errores de tools. **Registrado** en `~/.claude/settings.json` (activo 2026-05-02)
 - **PreCompact hook:** `~/.claude/hooks/pre-compact-snapshot.sh` — copia transcript a `~/.claude/compact-snapshots/` antes de compactar (últimos 20). Notifica Telegram si trigger=manual
 - **PostToolUse hook (Notion):** `~/.claude/hooks/notion-audit.sh` — filtrado a `mcp__notion__.*` (solo writes). Loguea a `~/.claude/logs/notion-audit.log` con rotación a 5MB
 - **Outlook cache:** `~/.claude/hooks/refresh-outlook-cache.sh` — descarga ICS, extrae hoy/mañana, guarda en `~/.claude/hooks/cache/outlook-events.txt`
-- **Cron Outlook:** launchd `com.claude.outlook-cache` — cada 4 horas + al boot
+- **Cron Outlook:** launchd `com.claude.outlook-cache` — cada 4 horas + al boot. Reactivado 2026-05-04 (estuvo disabled desde 2026-04-21). Script `~/.claude/hooks/refresh-outlook-cache.sh` descarga ICS BCP + parsea con Python `recurring_ical_events` (instalado en `/opt/homebrew/bin/python3`) para expandir RRULE. Cache `~/.claude/hooks/cache/outlook-events.txt` consumido por tool `getOutlookEvents`. Antes del fix solo veía eventos no recurrentes (3 vs 9 reales para un día típico).
 - **Cron Briefings:** launchd `com.claude.daily-briefings` — 5:00am diario, genera briefings Bolivia + Perú + Colombia via claude CLI. Usa `gtimeout` 15min por país (coreutils). Notifica errores a Telegram via curl
 - **Cron Reporte nocturno:** launchd `com.claude.nightly-report` — 22:00 diario, ejecuta `~/.claude/hooks/nightly-report.sh`. Resumen día + plan mañana via Telegram
-- **Cron Eisenhower semanal:** launchd `com.claude.eisenhower-weekly` — domingo 21:00, ejecuta `~/.claude/hooks/eisenhower-weekly.sh`. Clasifica tareas activas en matriz Q1-Q4 via Telegram
+- **Cron Eisenhower semanal:** launchd `com.claude.eisenhower-weekly` — domingo 21:00, ejecuta `~/.claude/hooks/eisenhower-weekly.sh`. Clasifica recordatorios en matriz Q1-Q4 y manda resumen al bot Jano. Cambios 2026-05-04: timeout 600s (era 300s, insuficiente), scope reducido a Personal + Tareas Familia (NO Vibe Projects), removido `mcp__plugin_telegram_telegram__reply` — ahora envía vía `curl` directo con token Jano leído de `~/.cos-agent/.env`. Prompt incluye reglas FORMATO HTML completas (sin Markdown, sin `---`, sin preámbulo) porque `claude -p` NO carga el system prompt del daemon. NO actualiza priority en Apple Reminders (limitación del MCP — ver gotcha).
 - **Heartbeat engine:** launchd `com.claude.heartbeat` — cada 30min de 7am a 22:30. `~/.claude/hooks/heartbeat.sh` lee `~/.claude/heartbeat-tasks/*.md` (frontmatter `schedule`+`priority`), ejecuta cada check con `claude -p` (timeout 60s), agrupa ALERTs por prioridad en un único mensaje a Telegram. Failure counter en `~/.claude/state/heartbeat-failures` → alerta si ≥3 consecutivos. Status: `~/.claude/hooks/heartbeat-status.sh`. Flags: `--dry-run`, `--only <name>` (este último bypassa el filtro de `schedule` para testing). Repo copies: `hooks/heartbeat*.sh`, `heartbeat-tasks/`, `launchd/com.claude.heartbeat.plist`
 - **Gotcha launchd PATH:** Plists que invocan `claude` CLI DEBEN incluir `/Users/calepes/.local/bin` (claude) y `/Users/calepes/.bun/bin` (bun, usado por MCP servers de plugins como el de Telegram) en `EnvironmentVariables.PATH`. Sin claude: `gtimeout: failed to run command 'claude'` y silencio (heartbeat caído tras 3 fallos). Sin bun: plugin MCP falla con "1 MCP server failed", daemon arranca pero sin polling (bot no recibe mensajes)
 - **Heartbeat checks actuales:**
