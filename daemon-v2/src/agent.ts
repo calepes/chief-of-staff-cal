@@ -21,6 +21,7 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__searchPlace":         "🗺️ Buscando lugar...",
   "mcp__cos-tools__travelTime":          "🚗 Calculando tiempo de viaje...",
   "mcp__cos-tools__manageLearnEntry":    "🧠 Procesando aprendizaje...",
+  "mcp__cos-tools__getTokenUsage":       "📊 Consultando consumo de tokens...",
   // MCPs externos
   "mcp__youtube-transcribe__transcribeYoutube":        "🎬 Transcribiendo video...",
   "mcp__apple-reminders__addReminder":                 "🔔 Agregando recordatorio...",

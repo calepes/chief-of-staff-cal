@@ -135,6 +135,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Google Maps — búsqueda de lugares y tiempo de viaje en tráfico real
   "mcp__cos-tools__searchPlace",
   "mcp__cos-tools__travelTime",
+  // Consumo de tokens Claude Max — ciclo activo, burn rate, presupuesto
+  "mcp__cos-tools__getTokenUsage",
   // Readwise Reader + Highlights — 22 tools (confirmados 2026-05-02)
   "mcp__readwise__reader_list_documents",
   "mcp__readwise__reader_search_documents",

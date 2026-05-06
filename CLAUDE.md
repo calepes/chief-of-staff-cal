@@ -76,8 +76,9 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - `searchPlace(query, location?)` (agregado 2026-05-02) — Google Places API New. Busca lugares por nombre/tipo cercanos. Requiere `GOOGLE_MAPS_API_KEY` + `HOME_PIN`. Código en `tools/maps.ts` (copiado de Vesta).
 - `travelTime(origin, destination, departureTime?)` (agregado 2026-05-02) — Google Routes API v2, modo DRIVE, TRAFFIC_AWARE. Tiempo real en tráfico.
 - `requestUserLocation` — ReplyKeyboard con `request_location: true`. Envía botón GPS nativo de Telegram. Triggear cuando Cal pregunta por distancia, ruta, tiempo de viaje, o "cuánto tardo".
+- `getTokenUsage` (agregado 2026-05-06) — devuelve JSON del ciclo Claude Max: % usado, burn rate, ETA al 100%, tokens por día y por modelo. Wrappea `~/.claude/scripts/claude-usage.py json` via `spawnSync` (sin Bash). Triggear cuando Cal pregunte cuánto ha consumido, burn rate, presupuesto del día.
 
-**Built-ins permitidas:** `Skill` (vuelos-bolivia, telegram-bot-ux), `WebFetch`, `WebSearch`. **Removido `briefing-pais`** del Skill — el daemon no puede ejecutarlo (necesita Bash/Write); para briefings on-demand usar `runBriefing` en su lugar.
+**Built-ins permitidas:** `Skill` (vuelos-bolivia, telegram-bot-ux, token-usage), `WebFetch`, `WebSearch`. **Removido `briefing-pais`** del Skill — el daemon no puede ejecutarlo (necesita Bash/Write); para briefings on-demand usar `runBriefing` en su lugar.
 
 **MCPs heredados (OAuth Max claude.ai):**
 - Google Calendar (8 tools incl. create/update/delete event)

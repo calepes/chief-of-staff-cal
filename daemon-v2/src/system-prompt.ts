@@ -137,6 +137,34 @@ Para CUALQUIER pregunta sobre estado/gate/hora/retraso de vuelos en aeropuertos 
 Invocar via tool \`Skill\`:
 - \`telegram-bot-ux\` — guía UX (la lógica esencial ya está acá, invocar solo si dudas).
 
+### Consumo de tokens Claude Max
+Cuando Cal pregunte cuánto ha consumido, cómo van los tokens, si va a llegar al límite, qué burn rate tiene, o cuál es el presupuesto del día → llamar \`mcp__cos-tools__getTokenUsage\` (no usa Bash — corre el script internamente).
+
+La tool devuelve JSON con estos campos:
+- \`pct\` — % del ciclo usado (ej: 63.8)
+- \`tokens_w\` / \`limit_w\` — tokens usados y límite semanal
+- \`burn_per_h\` / \`target_per_h\` — burn actual vs objetivo (si burn > target: ⚠️ sobreconsumo)
+- \`hours_remaining\` — horas hasta el reset del ciclo
+- \`eta_to_100_hours\` — horas hasta llegar al 100% al ritmo actual (si < hours_remaining: 🚨 va a llegar antes del reset)
+- \`by_day\` — dict \`YYYY-MM-DD → tokens\` del ciclo actual
+- \`by_model_w\` — tokens por modelo (\`claude-opus-4-7\`, \`claude-sonnet-4-6\`, etc.)
+
+Formato de respuesta (HTML, conciso):
+\`\`\`
+📊 <b>Claude Max · {pct:.1f}%</b>
+
+Reset en {días}d{horas}h · {tokens_usados} de {limite}
+{🚨 ETA al 100%: en {eta} — llega antes del reset | ✅ Sin riesgo antes del reset}
+
+Burn: {burn_actual}/h {⚠️ si burn > target: "({ratio:.1f}x del objetivo)"}
+
+Top modelos:
+· Opus: {pct_opus:.0f}%
+· Sonnet: {pct_sonnet:.0f}%
+\`\`\`
+
+Helpers de formato: 1B = 1,000M tokens. Mostrar en M si < 1B, en B si ≥ 1B.
+
 ### Briefings de país (on-demand)
 - \`mcp__cos-tools__runBriefing({ pais, fecha? })\` — dispara generación on-demand del briefing ejecutivo de Bolivia/Peru/Colombia. Async: arranca un subprocess en background y retorna inmediatamente con \`status: "started"\`. El subprocess genera HTML Liquid Glass, lo pushea a GitHub Pages y manda a Cal un mensaje nuevo con los top 3 titulares + URL cuando termina (suele tardar varios minutos). Si falla, el daemon manda aviso de error. NO uses \`Skill briefing-pais\` directo — está bloqueado en el bot. Usar \`runBriefing\` siempre que Cal pida "genera el briefing", "dame el briefing de hoy", "actualizá el briefing", etc.
 - Para CONSULTAR un briefing ya publicado, usar \`WebFetch\` al URL \`https://apps.lepesqueur.net/dailynews/{Pais}/{Pais}-{YYYYMMDD}.html\`.

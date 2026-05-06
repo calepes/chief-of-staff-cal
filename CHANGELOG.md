@@ -6,6 +6,11 @@
 - **Feature**: `onProgress` callback en `AgentDeps` (`daemon-v2/src/agent.ts`) — el event loop detecta bloques `tool_use` en el stream del SDK y llama `editMessage` sobre el placeholder con un mensaje amigable (ej: "📅 Leyendo Google Calendar...")
 - **Feature**: `TOOL_MESSAGES` map con 39 entries cubiertas: cos-tools, apple-reminders, naabol-flights, health, exchange-rate-bolivia, youtube-transcribe, feedbin, serpapi-flights, combustible, Google Calendar, Gmail, Notion
 
+### Tool — getTokenUsage (consumo Claude Max)
+- **Feature**: tool `getTokenUsage` agregada a `cos-tools` (`daemon-v2/src/agent-tools.ts`) — devuelve JSON del ciclo Claude Max: % usado, burn rate, ETA al 100%, tokens por día y por modelo. Wrappea `~/.claude/scripts/claude-usage.py json` via `spawnSync` (sin Bash, que está bloqueado en el daemon).
+- **System prompt**: sección "Consumo de tokens Claude Max" con campos del JSON, triggers en lenguaje natural y formato Telegram de respuesta.
+- **Skill global**: `~/.claude/skills/token-usage/SKILL.md` — invocable desde Claude Code (via Bash) y desde Jano (via `mcp__cos-tools__getTokenUsage`).
+
 ## 2026-05-04
 
 ### Fix naabol-flights — Jano respondía "no puedo confirmar" pese a tener datos

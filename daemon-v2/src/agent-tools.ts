@@ -1,5 +1,7 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { spawnSync } from "node:child_process";
+import { homedir } from "node:os";
 import { getOutlookEvents } from "./tools/outlook.js";
 import { runBriefing } from "./tools/briefing.js";
 import { manageLearning } from "./tools/learnings.js";
@@ -72,6 +74,24 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     // addLearning migrada al MCP global agent-learnings (evita warm pool stale).
     // Disponible como mcp__agent-learnings__addLearning({ agent: "jano", text }).
+    tool(
+      "getTokenUsage",
+      "Devuelve el estado actual del ciclo de tokens de Claude Max: % usado, burn rate, horas al reset, ETA al 100%, tokens por día y por modelo. Llamar cuando Cal pregunte cuánto ha consumido, cómo van los tokens, si va a llegar al límite, qué modelos está usando más, o cuál es el presupuesto del día.",
+      {},
+      async () => {
+        const script = `${homedir()}/.claude/scripts/claude-usage.py`;
+        const result = spawnSync("python3", [script, "json"], { encoding: "utf8", timeout: 20_000 });
+        if (result.error || result.status !== 0) {
+          return asText({ error: "No se pudo obtener el consumo de tokens", detail: result.stderr?.trim() });
+        }
+        try {
+          return asText(JSON.parse(result.stdout));
+        } catch {
+          return asText({ error: "Respuesta inesperada del script", raw: result.stdout.slice(0, 200) });
+        }
+      },
+      READ_ONLY,
+    ),
     tool(
       "requestUserLocation",
       "Solicita al usuario que comparta su ubicación GPS vía un botón nativo de Telegram (ReplyKeyboard con request_location). Llamar cuando Cal pida combustible, distancias, o cualquier cosa que requiera coordenadas y NO ha enviado ubicación en la conversación.",
