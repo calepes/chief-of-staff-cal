@@ -76,7 +76,7 @@ export function buildSdkTools(deps: ToolDeps) {
     // Disponible como mcp__agent-learnings__addLearning({ agent: "jano", text }).
     tool(
       "getTokenUsage",
-      "Devuelve el estado actual del ciclo de tokens de Claude Max: % usado, burn rate, horas al reset, ETA al 100%, tokens por día y por modelo. Llamar cuando Cal pregunte cuánto ha consumido, cómo van los tokens, si va a llegar al límite, qué modelos está usando más, o cuál es el presupuesto del día.",
+      "Devuelve el presupuesto de tokens Claude Max del día: % usado, tokens disponibles hoy, historial por día y tendencia. Llamar cuando Cal pregunte cuánto ha consumido, cómo van los tokens, si va a llegar al límite, o cuál es el presupuesto del día.",
       {},
       async () => {
         const script = `${homedir()}/.claude/scripts/claude-usage.py`;
@@ -84,11 +84,84 @@ export function buildSdkTools(deps: ToolDeps) {
         if (result.error || result.status !== 0) {
           return asText({ error: "No se pudo obtener el consumo de tokens", detail: result.stderr?.trim() });
         }
+
+        let data: Record<string, unknown>;
         try {
-          return asText(JSON.parse(result.stdout));
+          data = JSON.parse(result.stdout);
         } catch {
           return asText({ error: "Respuesta inesperada del script", raw: result.stdout.slice(0, 200) });
         }
+
+        const pct = data.pct as number;
+        const tokensW = data.tokens_w as number;
+        const limitW = data.limit_w as number;
+        const hRem = data.hours_remaining as number;
+        const byDay = data.by_day as Record<string, number>;
+
+        const budgetDay = limitW / 7;
+
+        const fmtN = (n: number): string => {
+          if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+          if (n >= 1e6) return `${Math.round(n / 1e6)}M`;
+          return `${Math.round(n / 1e3)}K`;
+        };
+
+        const semaforo = (w: number): string => {
+          const r = w / budgetDay;
+          if (r <= 1.0) return "🟢";
+          if (r <= 1.5) return "🟡";
+          if (r <= 2.5) return "🟠";
+          return "🔴";
+        };
+
+        const DOW = ["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"];
+
+        // Bolivia: UTC-4
+        const todayLocal = new Date(Date.now() - 4 * 3600 * 1000).toISOString().slice(0, 10);
+
+        const sortedDays = Object.keys(byDay).sort();
+        const pastDays = sortedDays.filter((d) => d < todayLocal);
+
+        const daysRem = Math.max(1, hRem / 24);
+        const budgetToday = (limitW - tokensW) / daysRem;
+
+        let tendencia = "—";
+        if (pastDays.length >= 2) {
+          const yesterW = byDay[pastDays[pastDays.length - 1]];
+          const prevW = byDay[pastDays[pastDays.length - 2]];
+          if (yesterW < prevW * 0.9) tendencia = "↓ bajando ✅";
+          else if (yesterW > prevW * 1.1) tendencia = "↑ subiendo ⚠️";
+          else tendencia = "→ estable";
+        }
+
+        const rows = sortedDays.slice(-5).map((d) => {
+          const [y, m, day] = d.split("-").map(Number);
+          const dow = DOW[new Date(y, m - 1, day).getDay()];
+          const dd = d.slice(8);
+          const w = byDay[d];
+          const p = (w / limitW) * 100;
+          const marker = d === todayLocal ? " <b>←hoy</b>" : "";
+          return `${semaforo(w)} <code>${dow}${dd}  ${p.toFixed(1).padStart(4)}%  ${fmtN(w).padStart(5)}</code>${marker}`;
+        });
+
+        const dRem = Math.floor(hRem / 24);
+        const hRemMod = Math.floor(hRem % 24);
+
+        const msg = [
+          `☀️ <b>Presupuesto · ${todayLocal}</b>`,
+          "",
+          `Ciclo: <b>${pct.toFixed(1)}%</b> usado · reset en ${dRem}d${hRemMod}h`,
+          "",
+          `📦 <b>Hoy puedes usar: ${fmtN(budgetToday)} tokens</b>`,
+          `<i>(${fmtN(limitW - tokensW)} restantes ÷ ${daysRem.toFixed(1)} días)</i>`,
+          "",
+          "📊 Días del ciclo:",
+          ...rows,
+          "",
+          `Tendencia: ${tendencia}`,
+        ].join("\n");
+
+        return { content: [{ type: "text" as const, text: msg }] };
       },
       READ_ONLY,
     ),

@@ -11,6 +11,10 @@
 - **System prompt**: sección "Consumo de tokens Claude Max" con campos del JSON, triggers en lenguaje natural y formato Telegram de respuesta.
 - **Skill global**: `~/.claude/skills/token-usage/SKILL.md` — invocable desde Claude Code (via Bash) y desde Jano (via `mcp__cos-tools__getTokenUsage`).
 
+### Tool — getTokenUsage (refactor formato)
+- **Fix**: `getTokenUsage` ahora pre-formatea HTML en TypeScript (mismo formato que `~/.claude/heartbeat-tasks/usage-morning.md`) en lugar de devolver JSON crudo al LLM. Eliminado bug de nombres de día incorrectos (el LLM infería "Lun" para fechas que eran martes, etc.) y diferencias de redondeo.
+- **System prompt**: instrucción simplificada — "la tool ya devuelve HTML formateado listo para Telegram, reenviar sin reformatear".
+
 ## 2026-05-04
 
 ### Fix naabol-flights — Jano respondía "no puedo confirmar" pese a tener datos
