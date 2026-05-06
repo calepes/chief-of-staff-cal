@@ -475,7 +475,14 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
 
     try {
       const t2 = Date.now();
-      const { reply, sdkMs, firstEventMs } = await runAgent(text, { warm, history, contextHeader });
+      const { reply, sdkMs, firstEventMs } = await runAgent(text, {
+        warm,
+        history,
+        contextHeader,
+        onProgress: async (progressText) => {
+          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, progressText).catch(() => {});
+        },
+      });
       const totalAgentMs = Date.now() - t2;
 
       const t3 = Date.now();

@@ -1,5 +1,11 @@
 # CHANGELOG — Jano
 
+## 2026-05-06
+
+### UX — Progress Updates en Telegram
+- **Feature**: `onProgress` callback en `AgentDeps` (`daemon-v2/src/agent.ts`) — el event loop detecta bloques `tool_use` en el stream del SDK y llama `editMessage` sobre el placeholder con un mensaje amigable (ej: "📅 Leyendo Google Calendar...")
+- **Feature**: `TOOL_MESSAGES` map con 39 entries cubiertas: cos-tools, apple-reminders, naabol-flights, health, exchange-rate-bolivia, youtube-transcribe, feedbin, serpapi-flights, combustible, Google Calendar, Gmail, Notion
+
 ## 2026-05-04
 
 ### Fix naabol-flights — Jano respondía "no puedo confirmar" pese a tener datos

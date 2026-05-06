@@ -5,6 +5,7 @@ export interface AgentDeps {
   warm: WarmQuery;
   history: ConversationMessage[];
   contextHeader?: string;
+  onProgress?: (text: string) => Promise<void>;
 }
 
 export interface AgentResult {
@@ -12,6 +13,48 @@ export interface AgentResult {
   sdkMs: number;
   firstEventMs: number;
 }
+
+const TOOL_MESSAGES: Record<string, string> = {
+  // Custom cos-tools
+  "mcp__cos-tools__getOutlookEvents":    "📋 Leyendo calendario Outlook...",
+  "mcp__cos-tools__runBriefing":         "📰 Generando briefing...",
+  "mcp__cos-tools__searchPlace":         "🗺️ Buscando lugar...",
+  "mcp__cos-tools__travelTime":          "🚗 Calculando tiempo de viaje...",
+  "mcp__cos-tools__manageLearnEntry":    "🧠 Procesando aprendizaje...",
+  // MCPs externos
+  "mcp__youtube-transcribe__transcribeYoutube":        "🎬 Transcribiendo video...",
+  "mcp__apple-reminders__addReminder":                 "🔔 Agregando recordatorio...",
+  "mcp__apple-reminders__editReminder":                "🔔 Editando recordatorio...",
+  "mcp__apple-reminders__completeReminder":            "✅ Completando recordatorio...",
+  "mcp__apple-reminders__deleteReminder":              "🗑️ Eliminando recordatorio...",
+  "mcp__apple-reminders__listReminderLists":            "🔔 Leyendo listas...",
+  "mcp__apple-reminders__listReminders":               "🔔 Leyendo recordatorios...",
+  "mcp__combustible__getFuelStatus":                   "⛽ Revisando combustible...",
+  "mcp__naabol-flights__getFlights":                   "✈️ Consultando vuelos...",
+  "mcp__naabol-flights__getFlight":                    "✈️ Consultando vuelo...",
+  "mcp__naabol-flights__getAirportFlights":            "✈️ Consultando aeropuerto...",
+  "mcp__health__getHealthSummary":                     "💪 Cargando datos de salud...",
+  "mcp__health__getHealthTrend":                       "📈 Analizando tendencia de salud...",
+  "mcp__health__getWorkouts":                          "🏋️ Leyendo entrenamientos...",
+  "mcp__exchange-rate-bolivia__getBcbRate":             "💱 Consultando tipo de cambio...",
+  "mcp__exchange-rate-bolivia__getBinanceP2PRate":      "💱 Consultando Binance P2P...",
+  "mcp__serpapi-flights__searchFlights":               "✈️ Buscando vuelos...",
+  "mcp__feedbin__getUnreadEntries":                    "📰 Leyendo artículos...",
+  "mcp__feedbin__getEntryContent":                     "📰 Leyendo artículo...",
+  "mcp__feedbin__searchEntries":                       "🔍 Buscando en Feedbin...",
+  // Claude.ai MCPs
+  "mcp__claude_ai_Google_Calendar__list_events":       "📅 Leyendo Google Calendar...",
+  "mcp__claude_ai_Google_Calendar__create_event":      "📅 Creando evento...",
+  "mcp__claude_ai_Google_Calendar__update_event":      "📅 Actualizando evento...",
+  "mcp__claude_ai_Google_Calendar__delete_event":      "📅 Eliminando evento...",
+  "mcp__claude_ai_Gmail__search_threads":              "📧 Revisando Gmail...",
+  "mcp__claude_ai_Gmail__get_thread":                  "📧 Leyendo correo...",
+  "mcp__claude_ai_Notion__notion-query-database-view": "📊 Consultando Notion...",
+  "mcp__claude_ai_Notion__notion-search":              "🔍 Buscando en Notion...",
+  "mcp__claude_ai_Notion__notion-fetch":               "📄 Leyendo página Notion...",
+  "mcp__claude_ai_Notion__notion-create-pages":        "📝 Creando página Notion...",
+  "mcp__claude_ai_Notion__notion-update-page":         "✏️ Actualizando Notion...",
+};
 
 export async function runAgent(userMessage: string, deps: AgentDeps): Promise<AgentResult> {
   const summaryMsg = deps.history.find((m) => m.role === "summary");
@@ -47,6 +90,10 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
         if (block.type === "tool_use" && block.name) {
           toolCalls.push({ name: block.name });
           console.log(JSON.stringify({ ts: Date.now(), msg: "tool_use", name: block.name, input: block.input }));
+          const progressMsg = TOOL_MESSAGES[block.name];
+          if (progressMsg && deps.onProgress) {
+            await deps.onProgress(progressMsg).catch(() => {});
+          }
         }
       }
     } else if (message.type === "user") {
