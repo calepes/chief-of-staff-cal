@@ -1,5 +1,16 @@
 # CHANGELOG — Jano
 
+## 2026-05-08
+
+### Tools — WhatsApp link skill
+- **Feature**: tools `getWhatsappContacts` + `saveWhatsappContact` agregadas a `cos-tools` (`daemon-v2/src/tools/whatsapp.ts` + tests `whatsapp.test.ts`). Lee/escribe `~/.claude/whatsapp-contacts.md` (compartido con Vesta y skill CLI `~/.claude/skills/whatsapp/`). El link `wa.me` se genera en el LLM (`encodeURIComponent` del mensaje).
+- **System prompt**: sección WhatsApp con flujo de 6 pasos (identificar contacto, manejar múltiples matches, capturar mensaje, generar link, ofrecer crear contacto nuevo con mapa de códigos de país).
+- **TOOL_MESSAGES**: entradas para los 2 tools nuevos en `agent.ts`.
+
+### Fix — MCP -32602 en tools que retornan void
+- **Root cause**: `saveWhatsappContact` retornaba `Promise<void>` y se registraba con `asText(await fn())`. `JSON.stringify(undefined)` produce `text: undefined` → MCP server tira `Invalid tools/call result: invalid_union expected string`.
+- **Fix**: el handler ahora retorna `asText(\`Contacto ${nombre} guardado.\`)` después del await. Documentado como gotcha global en `~/.claude/CLAUDE.md` sección "Claude Agent SDK + OAuth Max".
+
 ## 2026-05-06
 
 ### UX — Progress Updates en Telegram

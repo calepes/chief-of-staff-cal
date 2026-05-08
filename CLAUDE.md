@@ -23,7 +23,8 @@
 
 ```
 Telegram → CF Worker /telegram/webhook
-              ├─ light callback (menu/t:d/t:c/t:s/t:sd/nav)? → callback-router edge (~300ms)
+              ├─ light callback (t:d/t:c/t:s/t:sd) → callback-router edge (~300ms)
+              ├─ j:* callback (menú interactivo) → CF Queue cos-events → daemon (mecánico sin LLM ~50ms o LLM ~2-5s)
               └─ heavy / message → CF Queue cos-events
                                        ↓
                                  Mac daemon Node (Agent SDK + OAuth Max)
@@ -77,6 +78,7 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 - `travelTime(origin, destination, departureTime?)` (agregado 2026-05-02) — Google Routes API v2, modo DRIVE, TRAFFIC_AWARE. Tiempo real en tráfico.
 - `requestUserLocation` — ReplyKeyboard con `request_location: true`. Envía botón GPS nativo de Telegram. Triggear cuando Cal pregunta por distancia, ruta, tiempo de viaje, o "cuánto tardo".
 - `getTokenUsage` (agregado 2026-05-06, refactored 2026-05-06) — devuelve HTML pre-formateado listo para Telegram (formato idéntico al bot de Notificaciones): presupuesto del día, % ciclo, historial 5 días con semáforo y días correctos, tendencia. El LLM debe reenviar el resultado sin reformatear. Wrappea `~/.claude/scripts/claude-usage.py json` via `spawnSync`.
+- `getWhatsappContacts`, `saveWhatsappContact` (agregado 2026-05-08) — gestión de contactos para generar links `wa.me`. Lee/escribe `~/.claude/whatsapp-contacts.md` (compartido con Vesta y skill CLI `~/.claude/skills/whatsapp/`). El link se genera en el LLM: `https://wa.me/{numero}?text={encodeURIComponent(msg)}`. Código en `tools/whatsapp.ts` + tests `whatsapp.test.ts`.
 
 **Built-ins permitidas:** `Skill` (vuelos-bolivia, telegram-bot-ux, token-usage), `WebFetch`, `WebSearch`. **Removido `briefing-pais`** del Skill — el daemon no puede ejecutarlo (necesita Bash/Write); para briefings on-demand usar `runBriefing` en su lugar.
 
@@ -114,14 +116,16 @@ curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
 ## Callback router edge (worker)
 
 Light callbacks resueltos en CF Worker sin LLM (~300ms):
-- `menu:<section>` — render estático desde `worker-v2/src/menu.ts`.
-- `nav:<section>` — alias de menu.
+- `j:menu` / `j:brief` / `j:tasks` / `j:cal` / `j:health` / `j:fx` — navegan a sub-menú (mecánico en el daemon, no el worker).
+- `j:brief:bo` / `j:tasks:personal` / etc. — acciones del menú que pasan al LLM como mensaje sintético.
+- `menu:<section>` — alias legacy (menú viejo); redirige igual.
+- `nav:<section>` — alias legacy de menu.
 - `t:d:<pageId32>` — mark task done (status="Listo").
 - `t:c:<pageId32>` — complete (alias de done).
 - `t:s:<pageId32>` — skip (no-op, solo ack).
 - `t:sd:<pageId32>` — set fecha=hoy.
 
-Heavy callbacks (requieren LLM): `task:date:<pageId>` (parse "el viernes"), `task:change:<pageId>`, `build:approve:<id>` — caen al daemon vía queue como mensaje sintético `[callback] data`.
+Heavy callbacks (requieren LLM): `j:action:*` (acciones del menú interactivo), `task:date:<pageId>` (parse "el viernes"), `task:change:<pageId>`, `build:approve:<id>` — caen al daemon vía queue como mensaje sintético `[callback] data`.
 
 Spotify callbacks (`spotify:*`) descartados por el worker (out of scope v2). Pendiente: agregar tool `spotifyControl` con lenguaje natural post-cutover.
 
@@ -147,17 +151,78 @@ Ver: `/Users/calepes/Claude Projects/telegram-reference.md` — referencia conso
 - `~/.claude/CLAUDE.md` (global) — instrucciones globales (idioma, planning, comunicación) + detalles del fork Telegram (source of truth, deploy, callback format)
 
 ## Telegram Bot (@cal_jano_bot)
-- **Menú de comandos:** /briefing_bolivia, /briefing_peru, /today, /status, /tareas, /menu, /spotify
-- **Menú interactivo:** Configurable en `~/.claude/channels/telegram/menu.json`. Skill `/menu` lee el JSON y envía botones inline.
-- **Botones inline interactivos:** Fork del plugin con soporte para callbacks (ver sección fork en ~/.claude/CLAUDE.md)
-- **Botones inline en reply:** El tool `reply` del fork soporta parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}` o `{text, url}` (para deep links). El keyboard se adjunta al último chunk.
-- **Callback format:** `[callback] prefix:action[:context]` — prefixes: menu, task, approve, spotify, nav
-- **Callback optimization:** Prefijos mecánicos (t:d, t:c, t:s, t:sd, spotify:*) se procesan directo en el plugin (~200ms). Módulos: `callback-router.ts`, `notion-client.ts`
-- **Navegación de menú:** Callbacks `menu:*` hacen edit mecánico instantáneo ("⏳ Cargando...") en el plugin, luego el LLM envía el contenido como **reply nuevo** (NO edit_message) sin botones callback, y restaura el menú original arriba. No usar edit para contenido porque el plugin destruye el mensaje al hacer edit mecánico
+- **Comandos registrados:** `/menu`, `/reset`
+- **Menú interactivo:** Comando `/menu` (también accesible desde el ícono `/` junto al campo de texto). Ver sección "Menú interactivo de Telegram" abajo.
+- **Botones inline en reply:** parámetro `buttons` — array de filas, cada fila array de `{text, callback_data}` o `{text, url}` (para deep links). El keyboard se adjunta al último chunk.
+- **Callback format:** `[callback] prefix:action[:context]` — prefixes: `j:` (menú interactivo), `t:d/c/s/sd` (tareas), `build:`, `skill:`
 - **MAX_KEYBOARD_ROWS:** 4 filas máximo en inline keyboards (reply y edit_message) para evitar stutter en iOS
 - **Notion token:** en `~/.cos-agent/.env` como `NOTION_TOKEN`
 - **Progreso en tareas largas:** Enviar mensajes nuevos (no editar) para que cada update genere push notification
 - **Fallback outbound si MCP desconectado:** `TOKEN=$(grep COS_TELEGRAM_BOT_TOKEN ~/.cos-agent/.env | cut -d= -f2-) && curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" -d "chat_id=94137698" --data-urlencode "text=..."` — funciona sin el plugin (solo outbound, no recibe mensajes entrantes)
+
+## Menú interactivo de Telegram
+
+### Invocación
+- Comando `/menu` desde el chat con @cal_jano_bot
+- También disponible desde el ícono `/` junto al campo de texto (menú de comandos registrados)
+
+### Estructura de botones
+
+**Menú principal:**
+```
+[🔮 Briefing]    [📋 Tareas]    [📅 Agenda]
+[🏥 Salud]       [💰 Cambio]    [🚗 Combustible]
+[✈️ Vuelos]      [⚡ Tokens]
+```
+
+**Sub-menús:**
+
+| Sección | Opciones |
+|---------|---------|
+| Briefing | 🇧🇴 Bolivia · 🇵🇪 Perú · 🇨🇴 Colombia |
+| Tareas | Personal · Vibe Projects · Nueva |
+| Agenda | Hoy · Esta semana · Outlook · Nuevo evento |
+| Salud | Resumen · Tendencia · Workouts |
+| Cambio | BCB Oficial · P2P Binance · Ambos |
+| Combustible | → dispara `requestUserLocation` → estaciones cercanas |
+| Vuelos | → pasa directo al LLM |
+| Tokens | → pasa directo al LLM |
+
+### Convención de callback_data
+
+- **Prefijo `j:`** — todos los callbacks del menú interactivo de Jano
+- **Navegación:** `j:menu`, `j:brief`, `j:tasks`, `j:cal`, `j:health`, `j:fx` — edita el mensaje en el daemon (~50ms, sin LLM)
+- **Acción:** `j:brief:bo`, `j:tasks:personal`, etc. — se convierten a texto natural y pasan al LLM como mensaje sintético
+
+**Ejemplos:**
+```
+j:brief         → navega al sub-menú Briefing (mecánico, daemon)
+j:health        → navega al sub-menú Salud (mecánico, daemon)
+j:brief:bo      → LLM recibe "Genera el briefing para Bolivia" (heavy, daemon)
+j:tasks:new     → LLM recibe "Quiero agregar una nueva tarea" (heavy, daemon)
+```
+
+### Arquitectura de procesamiento
+
+```
+Callback j:menu / j:brief / j:tasks / j:cal / j:health / j:fx
+  → CF Queue → daemon → editMessage instantáneo (~50ms, sin LLM)
+
+Callback j:brief:bo / j:tasks:personal / j:cal:today / etc.
+  → CF Queue → daemon → LLM → respuesta Telegram (~2-5s)
+```
+
+Los callbacks de **navegación** son mecánicos: el daemon edita el teclado sin invocar al LLM. Los callbacks de **acción** generan un mensaje sintético que el daemon procesa con el LLM normalmente.
+
+### Cómo agregar nuevos items al menú
+
+El menú `j:*` vive 100% en el daemon (NO en el worker). El worker solo maneja `t:d/c/s/sd` (legacy).
+
+1. Editar `daemon-v2/src/menu.ts` — agregar botón en `buildXxxMenu()` o crear nueva función de sub-menú
+2. Si es **navegación**: agregar entrada en `NAV_MENUS` dentro de `handleMenuCallback` (callback_data → función de menú)
+3. Si es **acción**: agregar entrada en `ACTION_TEXTS` dentro de `handleMenuCallback` (callback_data → texto natural para el LLM)
+4. Agregar entry en `daemon-v2/src/agent.ts:TOOL_MESSAGES` si la acción dispara un tool específico
+5. Build solo del daemon: `npm -w @cos/shared run build && npm -w @cos/daemon run build` + restart daemon (no se necesita deploy del worker)
 
 ### Flujos de revisión de tareas
 - **<10 tareas:** Botones inline uno por uno con estado, asignado, deadline, emojis
