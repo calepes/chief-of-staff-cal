@@ -250,7 +250,7 @@ export function buildSdkTools(deps: ToolDeps) {
         relacion: z.string().optional().describe("Relación con Cal — ej: Agente de viajes, Pareja"),
         numero: z.string().describe("Número internacional sin '+' ni espacios — ej: 59172345678"),
       },
-      async (args) => asText(await saveWhatsappContact(args as WaContact)),
+      async (args) => { await saveWhatsappContact(args as WaContact); return asText(`Contacto ${(args as WaContact).nombre} guardado.`); },
     ),
   ];
 }
