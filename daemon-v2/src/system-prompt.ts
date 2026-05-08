@@ -162,6 +162,19 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 - \`mcp__exchange-rate-bolivia__getBinanceP2PRate()\` — tipo de cambio PARALELO USDT/BOB en Binance P2P (mercado real). Top 5 merchants, mediana, filtra outliers >3%, promedia. Devuelve { compra (BUY avg), venta (SELL avg), rowsConsidered }. Cache 60s. Usar para: "tipo paralelo", "blue", "P2P", "valor real del dólar".
 - **Triggers naturales:** "¿a cuánto está el dólar hoy?" → llamar AMBAS y mostrar oficial vs paralelo (la brecha es información clave en Bolivia). "¿oficial?" → solo BCB. "¿paralelo/P2P/blue?" → solo Binance.
 
+### WhatsApp
+
+Cuando Cal pida preparar un mensaje de WhatsApp, link wa.me, o contactar a alguien por WhatsApp:
+1. Llamar \`mcp__cos-tools__getWhatsappContacts\` para obtener la lista.
+2. Si Cal menciona un nombre/alias, buscar match (case-insensitive, parcial).
+   - Match único → usar directo
+   - Sin match → listar todos y preguntar "¿A quién?"
+   - Múltiples matches → listar solo los coincidentes y preguntar cuál
+3. Preguntar el mensaje (o tomarlo del contexto si Cal ya lo dio).
+4. Generar el link: \`https://wa.me/{numero}?text={encodeURIComponent(mensaje)}\`
+5. Enviar el link al chat.
+6. Si el contacto no existe y Cal quiere crearlo: pedir nombre, alias (opcional), relación (opcional), país (Bolivia=591, Perú=51, Argentina=54, Chile=56, Colombia=57, EEUU=1) y número local → llamar \`mcp__cos-tools__saveWhatsappContact\`.
+
 ## UX Telegram
 
 1. **Placeholder en <1s**: el daemon ya envió "⏳ Pensando..." antes de invocarte. Tu output editará ese mensaje. Da la respuesta final directa.

@@ -7,6 +7,7 @@ import { runBriefing } from "./tools/briefing.js";
 import { manageLearning } from "./tools/learnings.js";
 import { searchPlaces, travelTime as calcTravelTime } from "./tools/maps.js";
 import { buildApprovalFlowImpl, stepApprovalWizardImpl } from "./tools/approval-flow.js";
+import { getWhatsappContacts, saveWhatsappContact, type WaContact } from "./tools/whatsapp.js";
 import type { CfKv } from "./cf-kv.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
@@ -232,6 +233,24 @@ export function buildSdkTools(deps: ToolDeps) {
         { kv: deps.kv, botToken: deps.botToken, getCurrentChatId: deps.getCurrentChatId },
         { action },
       )),
+    ),
+    tool(
+      "getWhatsappContacts",
+      "Lista todos los contactos guardados en ~/.claude/whatsapp-contacts.md. Devuelve array de { nombre, alias?, relacion?, numero } donde numero es el número internacional sin '+' (ej: '59172345678'). Llamar cuando Cal quiera preparar un WhatsApp o buscar un contacto.",
+      {},
+      async () => asText(await getWhatsappContacts()),
+      READ_ONLY,
+    ),
+    tool(
+      "saveWhatsappContact",
+      "Agrega un contacto nuevo a ~/.claude/whatsapp-contacts.md. Args: { nombre, alias?, relacion?, numero } donde numero es el número internacional sin '+' (ej: '59172345678'). Llamar después de confirmar los datos con Cal.",
+      {
+        nombre: z.string().describe("Nombre completo"),
+        alias: z.string().optional().describe("Alias o apodo — default: primera palabra del nombre"),
+        relacion: z.string().optional().describe("Relación con Cal — ej: Agente de viajes, Pareja"),
+        numero: z.string().describe("Número internacional sin '+' ni espacios — ej: 59172345678"),
+      },
+      async (args) => asText(await saveWhatsappContact(args as WaContact)),
     ),
   ];
 }
