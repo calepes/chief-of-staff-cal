@@ -4,6 +4,9 @@
 
 ## Pendientes
 
+### ✅ Completados recientes
+- [x] **WhatsApp link skill** ✅ 2026-05-08 — Tools `getWhatsappContacts` + `saveWhatsappContact` en daemon-v2 (`tools/whatsapp.ts` + tests). Skill CLI en `~/.claude/skills/whatsapp/`. Contactos compartidos en `~/.claude/whatsapp-contacts.md`. Replicado en Vesta. Spec/plan: `docs/superpowers/{specs,plans}/2026-05-08-whatsapp-link-skill*.md`. Bug fix MCP -32602: `saveWhatsappContact` retornaba void → JSON.stringify(undefined) → text:undefined; ahora retorna confirmación de texto.
+
 ### Migración MCP apple-reminders → EventKit (2026-05-04)
 - [ ] **Reemplazar wrapper `keith/reminders-cli`** en `~/Claude Projects/Personal/MCP Servers/mcp-servers/servers/apple-reminders/` por una solución basada en EventKit nativo. Limitación actual: el CLI underlying (`reminders-cli` 2.5.1) **NO soporta priority ni dueDate en `edit`** — solo title y notes. El MCP ahora throw-ea error claro si el LLM intenta. Eisenhower semanal queda como reporte visual sin escritura de prioridades.
 - **Opciones evaluadas (2026-05-04):**
