@@ -1,3 +1,5 @@
+> 🌀 **15 items migrados a Atenea (Notion)** el 2026-05-08 — ver DBs Projects/Stories. Los items unchecked originales se conservan abajo como historia. El backlog vivo está en Notion.
+
 # Backlog — Jano
 
 > ✅ **Estado 2026-04-29: CoS v2 ACTIVO** — daemon Node + Agent SDK librería + webhook + CF Queue. Daemon viejo `com.cal.cos-agent` movido a `disabled-2026-04-29/`. Hooks SessionStart/End adaptados (deleteWebhook gracioso, bootstrap restaura webhook). 16 crons secundarios siguen pausados en `disabled-2026-04-21/` pendientes de rediseño. Detalle en `CLAUDE.md` → sección "Estado (2026-04-29)".
@@ -6,6 +8,10 @@
 
 ### ✅ Completados recientes
 - [x] **WhatsApp link skill** ✅ 2026-05-08 — Tools `getWhatsappContacts` + `saveWhatsappContact` en daemon-v2 (`tools/whatsapp.ts` + tests). Skill CLI en `~/.claude/skills/whatsapp/`. Contactos compartidos en `~/.claude/whatsapp-contacts.md`. Replicado en Vesta. Spec/plan: `docs/superpowers/{specs,plans}/2026-05-08-whatsapp-link-skill*.md`. Bug fix MCP -32602: `saveWhatsappContact` retornaba void → JSON.stringify(undefined) → text:undefined; ahora retorna confirmación de texto.
+
+### Surgieron en sesión 2026-05-08
+- [ ] **Reestructurar Jano/CLAUDE.md** — mover secciones operativas históricas (Morning Builds, Skill Detector, Heartbeat checks detalle) a `docs/automation/`. CLAUDE.md hoy: 402 líneas / 39.8KB → meta ~150-200 líneas. Identificado en audit `claude-md-improver` 2026-05-08.
+- [ ] **System-prompt: regla "mira X" = WebSearch** — cuando Cal usa "mira X" sin entidad local clara, default a WebSearch sobre Santa Cruz/Bolivia. Bug observado 2026-05-08: "mira restaurantes vigentes" → Jano buscó listas en Apple Notes/Notion en vez de buscar en web. Agregar disambiguación en system-prompt o pedir confirmación con botones inline cuando el comando sea ambiguo.
 
 ### Migración MCP apple-reminders → EventKit (2026-05-04)
 - [ ] **Reemplazar wrapper `keith/reminders-cli`** en `~/Claude Projects/Personal/MCP Servers/mcp-servers/servers/apple-reminders/` por una solución basada en EventKit nativo. Limitación actual: el CLI underlying (`reminders-cli` 2.5.1) **NO soporta priority ni dueDate en `edit`** — solo title y notes. El MCP ahora throw-ea error claro si el LLM intenta. Eisenhower semanal queda como reporte visual sin escritura de prioridades.

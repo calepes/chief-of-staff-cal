@@ -2,6 +2,20 @@
 
 ## 2026-05-08
 
+### Estado conversacional — TTL 12h + alineamiento con Pecunia/Vesta
+- **Change**: `TTL_SECONDS` 1800 → 43200 en `daemon-v2/src/state.ts` (12h). Análisis empírico de logs (`historyLen` por turno) mostró que las ráfagas reales de Cal están separadas por 1-12h — el TTL anterior hacía que cada interacción arrancara en frío.
+- **Tests**: `state.test.ts` actualizado.
+- **Doc**: tabla de context window por bot agregada a `~/Claude Projects/telegram-reference.md`.
+
+### Fix — Notion MCP prefijo correcto
+- **Bug**: `agent-options.ts` y `system-prompt.ts` referenciaban `mcp__notion__*` (prefijo viejo) — el MCP real heredado vía OAuth Max es `mcp__claude_ai_Notion__*`. Resultado: invocar Notion devolvía silenciosamente "permissions not granted" (con UI mostrando "🔍 Buscando..." engañoso).
+- **Fix**: 6 entradas en allowlist + 3 menciones en system-prompt.
+- **Doc**: gotcha agregado a `~/.claude/CLAUDE.md` global y `~/Claude Projects/CLAUDE.md` workspace.
+
+### Doc — CLAUDE.md updates
+- Sección Notion: prefijo MCP correcto documentado.
+- Comando para inspeccionar KV de contexto agregado en "Comandos operativos v2".
+
 ### Tools — WhatsApp link skill
 - **Feature**: tools `getWhatsappContacts` + `saveWhatsappContact` agregadas a `cos-tools` (`daemon-v2/src/tools/whatsapp.ts` + tests `whatsapp.test.ts`). Lee/escribe `~/.claude/whatsapp-contacts.md` (compartido con Vesta y skill CLI `~/.claude/skills/whatsapp/`). El link `wa.me` se genera en el LLM (`encodeURIComponent` del mensaje).
 - **System prompt**: sección WhatsApp con flujo de 6 pasos (identificar contacto, manejar múltiples matches, capturar mensaje, generar link, ofrecer crear contacto nuevo con mapa de códigos de país).

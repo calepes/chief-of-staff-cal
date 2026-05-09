@@ -66,6 +66,11 @@ SECRET=$(cat ~/.cos-agent/webhook-secret.txt)
 curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
   -H "Content-Type: application/json" \
   -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\",\"edited_message\"]}"
+
+# Inspeccionar contexto conversacional vivo en CF KV (debug TTL/memoria)
+set -a; source ~/.cos-agent/.env; set +a
+curl -s "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/cos-ctx:94137698" \
+  -H "Authorization: Bearer ${CF_API_TOKEN}" | python3 -m json.tool
 ```
 
 ## Tools registradas en CoS
@@ -233,6 +238,7 @@ El menú `j:*` vive 100% en el daemon (NO en el worker). El worker solo maneja `
 
 ## Notion
 - **Integración:** "Claude CoS" — conectada a DB de Tareas y People
+- **Prefijo MCP correcto:** `mcp__claude_ai_Notion__*` (heredado vía OAuth Max). NO usar `mcp__notion__*` en allowlist/system-prompt — el daemon devuelve "permissions not granted" silenciosamente. Fix aplicado 2026-05-08.
 - **Referencia:** `~/Claude Projects/notion-reference.md` (cross-project, cargar bajo demanda)
 
 ## Briefings

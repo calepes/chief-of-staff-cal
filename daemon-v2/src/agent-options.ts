@@ -81,12 +81,12 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__claude_ai_Google_Calendar__suggest_time",
   "mcp__claude_ai_Google_Calendar__respond_to_event",
   // Notion — DB Tareas, People, Memoria, búsquedas
-  "mcp__notion__notion-search",
-  "mcp__notion__notion-fetch",
-  "mcp__notion__notion-create-pages",
-  "mcp__notion__notion-update-page",
-  "mcp__notion__notion-query-database-view",
-  "mcp__notion__notion-get-users",
+  "mcp__claude_ai_Notion__notion-search",
+  "mcp__claude_ai_Notion__notion-fetch",
+  "mcp__claude_ai_Notion__notion-create-pages",
+  "mcp__claude_ai_Notion__notion-update-page",
+  "mcp__claude_ai_Notion__notion-query-database-view",
+  "mcp__claude_ai_Notion__notion-get-users",
   // YouTube — transcripción de audio via whisper local (no depende de captions)
   "mcp__youtube-transcribe__transcribeYoutube",
   // Tipo de cambio Bolivia — oficial (BCB) y paralelo (Binance P2P USDT/BOB)
@@ -132,6 +132,23 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__agent-learnings__addLearning",
   // Combustible Santa Cruz — disponibilidad y distancia a estaciones de gasolina
   "mcp__combustible__getFuelStatus",
+  // Google Flights via SerpAPI — vuelos internacionales (no Bolivia NAABOL)
+  "mcp__serpapi-flights__searchFlights",
+  "mcp__serpapi-flights__getReturnFlights",
+  // Apple Notes — notas personales de Cal
+  "mcp__apple-notes__create-note",
+  "mcp__apple-notes__search-notes",
+  "mcp__apple-notes__get-note-content",
+  "mcp__apple-notes__get-note-by-id",
+  "mcp__apple-notes__get-note-details",
+  "mcp__apple-notes__update-note",
+  "mcp__apple-notes__delete-note",
+  "mcp__apple-notes__move-note",
+  "mcp__apple-notes__list-notes",
+  "mcp__apple-notes__list-folders",
+  "mcp__apple-notes__list-accounts",
+  "mcp__apple-notes__get-note-markdown",
+  "mcp__apple-notes__get-checklist-state",
   // Google Maps — búsqueda de lugares y tiempo de viaje en tráfico real
   "mcp__cos-tools__searchPlace",
   "mcp__cos-tools__travelTime",

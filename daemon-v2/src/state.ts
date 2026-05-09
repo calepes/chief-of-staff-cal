@@ -9,7 +9,7 @@ export interface ConversationMessage {
 
 export type Compactor = (msgs: ConversationMessage[]) => Promise<string>;
 
-const TTL_SECONDS = 1800;
+const TTL_SECONDS = 43200;
 const MAX_MESSAGES = 40;
 const COMPACT_WINDOW = 20;
 

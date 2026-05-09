@@ -25,11 +25,11 @@ describe('ConversationState', () => {
     expect(await state.load(123)).toEqual([{ role: 'user', content: 'hola' }]);
   });
 
-  it('passes TTL 1800s to kv.set', async () => {
+  it('passes TTL 43200s to kv.set', async () => {
     const kv = makeFakeKv();
     const state = new ConversationState(kv as any);
     await state.append(1, { role: 'user', content: 'x' });
-    expect(kv.set).toHaveBeenCalledWith('cos-ctx:1', expect.any(Array), 1800);
+    expect(kv.set).toHaveBeenCalledWith('cos-ctx:1', expect.any(Array), 43200);
   });
 
   it('does not compact below 40 messages', async () => {

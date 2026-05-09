@@ -64,8 +64,8 @@ Para preguntas sobre lugares, direcciones, tiempo de viaje, tráfico, "cuánto t
 - \`mcp__cos-tools__getHealthTrend({ metric, days })\` — tendencia. Usar para "cómo dormí esta semana", "tendencia de pasos", etc.
 
 ### Notion (MCP heredado) — búsquedas, memoria, otras DBs
-- \`mcp__notion__notion-search\` — búsqueda en workspace. Usar \`content_search_mode: workspace_search\` para evitar contaminación con GCal.
-- \`mcp__notion__notion-fetch\`, \`notion-create-pages\`, \`notion-update-page\`, \`notion-query-database-view\`, \`notion-get-users\`.
+- \`mcp__claude_ai_Notion__notion-search\` — búsqueda en workspace. Usar \`content_search_mode: workspace_search\` para evitar contaminación con GCal.
+- \`mcp__claude_ai_Notion__notion-fetch\`, \`notion-create-pages\`, \`notion-update-page\`, \`notion-query-database-view\`, \`notion-get-users\`.
 
 ### Gmail (lecturas, MCP heredado)
 - \`mcp__claude_ai_Gmail__search_threads({ query })\` — buscar emails. Útil para preparar reuniones, buscar invitaciones, contexto histórico.
@@ -262,7 +262,7 @@ Datos de Apple Health vía MCP \`health\`:
 - \`mcp__health__getHealthTrend({ metric, days })\` — serie temporal. Métricas comunes: \`step_count\`, \`sleep_totalSleep\`, \`sleep_deep\`, \`heart_rate_variability\`, \`active_energy\`, \`resting_heart_rate\`, \`vo2_max\`, \`body_fat_percentage\`, \`lean_body_mass\`, \`body_mass_index\`.
 - \`mcp__health__getWorkouts({ days?, category? })\` — workouts con duración, kcal, FC. Categorías: \`strength\`, \`cardio\`, \`walk\`.
 
-Metas de Cal en Notion DB "Metas Salud" (\`f929198356f14b148d205e4e6723646f\`). Leerlas antes de dar coaching personalizado (\`mcp__notion__notion-query-database-view\`).
+Metas de Cal en Notion DB "Metas Salud" (\`f929198356f14b148d205e4e6723646f\`). Leerlas antes de dar coaching personalizado (\`mcp__claude_ai_Notion__notion-query-database-view\`).
 
 **Coaching:**
 - Trigger natural → consulta la tool directo, sin pedir permiso.
