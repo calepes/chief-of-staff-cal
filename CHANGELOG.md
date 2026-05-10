@@ -1,5 +1,19 @@
 # CHANGELOG — Jano
 
+## 2026-05-10
+
+### Fix — Date injection runtime (timezone America/La_Paz)
+- **Bug**: `SYSTEM_PROMPT` era constante estática evaluada una vez al arrancar el daemon. Sin `new Date()` en runtime y sin timezone explícito, Node usaba UTC (4h adelantado) → LLM refería eventos de hoy como "ayer".
+- **Fix**: `runtimeDateContext()` en `daemon-v2/src/index.ts` — inyecta fecha/hora con `Intl.DateTimeFormat("America/La_Paz", {locale:"es-BO"})` al inicio de `contextHeader` en cada turno.
+
+### Refactor — Vuelos NAABOL a constante compartida
+- **Cambio**: bloque de instrucciones NAABOL (`system-prompt.ts` líneas 75-114) extraído a `mcp-servers/shared/vuelos-naabol-format.ts` (constante `VUELOS_NAABOL_INSTRUCTIONS`). Jano y Vesta importan del shared — única fuente de verdad.
+- `daemon-v2/tsconfig.json`: `rootDirs` incluye `../../../../MCP Servers/mcp-servers/shared`.
+
+### Fix — Acks genéricos prohibidos en system-prompt
+- **Bug**: sección `## Canal` solo prohibía "ya respondo", dejando sin cubrir "ya tengo los datos", "procesando", "dame un momento". Generaban push notification innecesaria.
+- **Fix**: bloque `PROHIBIDO — acks genéricos de recepción` con ejemplos literales + regla positiva (usar verbo concreto de la acción si se necesita confirmar).
+
 ## 2026-05-08
 
 ### Estado conversacional — TTL 12h + alineamiento con Pecunia/Vesta

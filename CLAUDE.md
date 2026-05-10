@@ -14,6 +14,11 @@
 - Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
+## Cambios daemon (2026-05-10)
+- **Date injection runtime:** `daemon-v2/src/index.ts` tiene `runtimeDateContext()` — inyecta fecha/hora con `Intl.DateTimeFormat("America/La_Paz", {locale:"es-BO"})` al inicio de `contextHeader` en cada turno. Sin esto el LLM usaba UTC y refería eventos de hoy como "ayer".
+- **Vuelos NAABOL compartidos:** `daemon-v2/src/system-prompt.ts` líneas 75-114 reemplazadas por `${VUELOS_NAABOL_INSTRUCTIONS}` importado de `mcp-servers/shared/vuelos-naabol-format.ts`. Para cambiar formato de vuelos, editar el shared, no el system-prompt.
+- **Acks genéricos prohibidos:** system-prompt (sección `## Canal`) prohíbe explícitamente "ya tengo los datos / procesando / dame un momento". Si vuelven a aparecer, revisar esa sección.
+
 ## Separación de herramientas por scope
 - **Jano (personal):** pendientes en Apple Reminders — lista "Personal" (tareas) y "Vibe Projects" (ideas/backlog). NO usar Notion para tareas.
 - **Yapito (trabajo):** pendientes en Notion DB Tareas con tools custom (listTasks, createTask, etc.). Ver `Yapito/CLAUDE.md`.

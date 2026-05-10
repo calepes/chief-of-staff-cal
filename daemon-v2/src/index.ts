@@ -12,11 +12,12 @@ import { compactHistory } from "./compact.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
-import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, type ChatAction } from "@cos/shared";
+import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage } from "@cos/shared";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto } from "./tools/vision.js";
+import { buildMainMenu, handleMenuCallback } from "./menu.js";
 
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
 
@@ -38,6 +39,7 @@ const env = {
   HEALTH_API_KEY: process.env.HEALTH_API_KEY ?? "",
   FEEDBIN_USERNAME: process.env.FEEDBIN_USERNAME ?? "",
   FEEDBIN_PASSWORD: process.env.FEEDBIN_PASSWORD ?? "",
+  SERPAPI_KEY: process.env.SERPAPI_KEY ?? "",
   ANTHROPIC_API_KEY: requireEnv("ANTHROPIC_API_KEY"),
   READWISE_TOKEN: process.env.READWISE_TOKEN ?? "",
   COS_WEBHOOK_URL: process.env.COS_WEBHOOK_URL ?? "https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook",
@@ -76,6 +78,26 @@ function sleep(ms: number): Promise<void> {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Genera una línea de contexto de fecha/hora en runtime con timezone America/La_Paz.
+ * Se inyecta al inicio de cada turno para evitar que el LLM infiera la fecha
+ * desde el historial cacheado (que puede tener referencias de turnos del día anterior).
+ */
+function runtimeDateContext(): string {
+  const now = new Date();
+  const fmt = new Intl.DateTimeFormat("es-BO", {
+    timeZone: "America/La_Paz",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `[Fecha y hora actual: ${fmt.format(now)} (America/La_Paz, UTC-4)]`;
 }
 
 const kv = new CfKv({
@@ -120,6 +142,10 @@ const AGENT_LEARNINGS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/agent-learnings/dist/index.js";
 const COMBUSTIBLE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/combustible/dist/index.js";
+const SERPAPI_FLIGHTS_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/serpapi-flights/dist/index.js";
+const APPLE_NOTES_BIN =
+  "/Users/calepes/.npm-global/lib/node_modules/apple-notes-mcp/build/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -171,6 +197,17 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [COMBUSTIBLE_DIST],
+    },
+    "serpapi-flights": {
+      type: "stdio",
+      command: "node",
+      args: [SERPAPI_FLIGHTS_DIST],
+      env: { SERPAPI_KEY: env.SERPAPI_KEY },
+    },
+    "apple-notes": {
+      type: "stdio",
+      command: "node",
+      args: [APPLE_NOTES_BIN],
     },
     // Readwise MCP remoto — bridge stdio via mcp-remote
     "readwise": {
@@ -289,23 +326,30 @@ async function processDocument(
   }
 }
 
-async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Promise<void> {
+async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts?: { existingPlaceholderId?: number }): Promise<void> {
   if (!payload.message && !payload.callback_query) {
     log({ msg: "skip_unsupported_update", update_id: payload.update_id });
     return;
   }
 
-  // Heavy callbacks: por ahora pasamos el data como mensaje para que el agent
-  // lo interprete (ej. task:date:<pageId>, task:change:<pageId>). Phase futura
-  // puede agregar lógica específica.
+  // Callbacks de Telegram
   if (payload.callback_query) {
     const cb = payload.callback_query;
     if (!cb.message) {
       log({ msg: "callback_no_message", data: cb.data });
       return;
     }
+
+    // Menú interactivo Jano: callbacks con prefijo "j:" se manejan sin LLM
+    // (navegación) o con mensaje sintético en lenguaje natural (acciones).
+    if (cb.data?.startsWith("j:")) {
+      log({ msg: "menu_callback", data: cb.data });
+      await handleMenuCallback(cb, env.COS_TELEGRAM_BOT_TOKEN, processMessage, payload.update_id);
+      return;
+    }
+
+    // Heavy callbacks legacy: pasar al agent como mensaje sintético
     log({ msg: "heavy_callback_received", data: cb.data });
-    // Por simplicidad, procesamos como un mensaje sintético en el chat de origen
     const synthetic: TelegramUpdate = {
       update_id: payload.update_id,
       message: {
@@ -352,6 +396,18 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
     return;
   }
 
+  // /menu command — envía menú principal interactivo
+  if (text && text.trim().toLowerCase() === "/menu") {
+    const menu = buildMainMenu();
+    await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+      chatId,
+      text: menu.text,
+      parseMode: "HTML",
+      replyMarkup: menu.keyboard,
+    });
+    return;
+  }
+
   // Typing indicator + placeholder en <1s
   const initialAction: ChatAction = voice ? "typing" : photo ? "upload_photo" : document ? "upload_document" : "typing";
   void sendChatAction(env.COS_TELEGRAM_BOT_TOKEN, chatId, initialAction);
@@ -366,15 +422,17 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
       : document
         ? "📄 Leyendo documento..."
         : "⏳ Pensando...";
-  const placeholder = await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
-    chatId,
-    text: initialPlaceholder,
-  });
-  const placeholderMsgId = placeholder.message_id;
+  const placeholderMsgId: number = opts?.existingPlaceholderId != null
+    ? opts.existingPlaceholderId
+    : (await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: initialPlaceholder })).message_id;
 
   let voiceTranscript: string | undefined;
 
   try {
+    // Fecha/hora en runtime con tz America/La_Paz — se calcula aquí para que sea
+    // siempre el momento exacto del mensaje, nunca cacheado desde turnos anteriores.
+    const dateCtx = runtimeDateContext();
+
     // Multimodal preprocessing
     let contextHeader: string | undefined;
     if (voice) {
@@ -391,7 +449,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
       }
       text = transcript;
       voiceTranscript = transcript;
-      contextHeader = `(Audio transcrito) chat_type=${chatType}`;
+      contextHeader = `${dateCtx}\n(Audio transcrito) chat_type=${chatType}`;
       await editMessage(
         env.COS_TELEGRAM_BOT_TOKEN,
         chatId,
@@ -412,7 +470,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
         return;
       }
       text = caption ? `${caption}\n\n[Foto adjunta — análisis: ${analysis}]` : `[Foto adjunta — análisis: ${analysis}]`;
-      contextHeader = `(Foto recibida — análisis ya hecho) chat_type=${chatType}`;
+      contextHeader = `${dateCtx}\n(Foto recibida — análisis ya hecho) chat_type=${chatType}`;
     } else if (document) {
       const docText = await processDocument(env.COS_TELEGRAM_BOT_TOKEN, document, caption);
       if (!docText) {
@@ -429,9 +487,9 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number): Pro
       text = caption
         ? `${caption}\n\n[Documento adjunto: ${label}]\n\n${docText}`
         : `[Documento adjunto: ${label}]\n\n${docText}`;
-      contextHeader = `(Documento adjunto leído — texto ya extraído) chat_type=${chatType}`;
+      contextHeader = `${dateCtx}\n(Documento adjunto leído — texto ya extraído) chat_type=${chatType}`;
     } else {
-      contextHeader = `chat_type=${chatType}`;
+      contextHeader = `${dateCtx}\nchat_type=${chatType}`;
     }
 
     if (!text) {
@@ -572,6 +630,33 @@ function scheduleWebhookWatchdog(): void {
   log({ msg: "webhook_watchdog_scheduled", interval: "1min" });
 }
 
+async function registerBotCommands(token: string): Promise<void> {
+  const commands = [
+    { command: "menu", description: "Menú principal" },
+    { command: "reset", description: "Limpiar contexto" },
+  ];
+  const scopes = [
+    {},
+    { scope: { type: "all_private_chats" } },
+  ];
+  try {
+    for (const scope of scopes) {
+      const res = await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commands, ...scope }),
+      });
+      const data = (await res.json()) as { ok: boolean; description?: string };
+      if (!data.ok) {
+        log({ msg: "bot_commands_failed", scope: JSON.stringify(scope), err: data.description });
+      }
+    }
+    log({ msg: "bot_commands_registered" });
+  } catch (err) {
+    log({ msg: "bot_commands_error", err: String(err) });
+  }
+}
+
 async function loop(): Promise<void> {
   const poller = new QueuePoller({
     accountId: env.CF_ACCOUNT_ID,
@@ -581,6 +666,7 @@ async function loop(): Promise<void> {
 
   scheduleWebhookWatchdog();
   void ensureWebhook();
+  void registerBotCommands(env.COS_TELEGRAM_BOT_TOKEN);
 
   log({ msg: "cos-daemon-v2 ready", queueId: env.CF_QUEUE_ID });
 
