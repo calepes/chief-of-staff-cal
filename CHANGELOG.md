@@ -1,5 +1,15 @@
 # CHANGELOG — Jano
 
+## 2026-05-13
+
+### Fix — getTokenUsage: campos JSON actualizados y formato mejorado
+- **Bug**: `agent-tools.ts` usaba campos del schema viejo (`pct`, `tokens_w`, `limit_w`, `burn_per_h`) que dejaron de existir al reescribir `claude-usage.py` en 2026-05-12. La tool devolvía error al intentar formatear valores `undefined`.
+- **Fix**: `getTokenUsage` reescrito para usar campos actuales: `total_pct`, `local_tokens_w`, `local_burn_per_h`, `has_live_data`, `live`. Eliminada lógica de "presupuesto del día" (requería `limitW`). Semáforo diario relativo al promedio de días anteriores.
+
+### Fix — claude-usage.py: deduplicación por message.id en JSONL
+- **Bug**: `collect_tokens()` acumulaba cada línea de streaming por separado. Claude Code escribe N registros con el mismo `message.id` por respuesta; sin dedup los tokens se contaban ~2x (707M → 379M tokens-w reales).
+- **Fix**: dict `{message_id → last_record}` — el último registro por `message.id` gana y contiene los totales finales del stream. Registros sin `message.id` reciben clave sintética única.
+
 ## 2026-05-10
 
 ### Fix — Date injection runtime (timezone America/La_Paz)
