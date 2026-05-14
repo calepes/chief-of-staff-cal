@@ -1,5 +1,13 @@
 # CHANGELOG — Jano
 
+## 2026-05-14
+
+### Feature — inversiones-query MCP wired
+
+- **`inversiones-query` wired:** 8 tools de portafolio disponibles en Jano. Permite queries sobre `getPortfolioSummary`, `getDailyMovers`, `getPortfolioPerformance`, `getPortfolioConcentration`, `getPositionDetail`, `getPriceHistory`, `getTransactionHistory`, `searchPosition`.
+- **Env vars agregadas** a `~/.cos-agent/.env`: `KUBERA_AUTH_TOKEN`, `AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID`.
+- **`agent-options.ts`:** 8 tool names en `CLAUDE_AI_COS_TOOLS`; **`index.ts`:** mcpServer entry con `command: "node"`.
+
 ## 2026-05-13
 
 ### Fix — getTokenUsage: campos JSON actualizados y formato mejorado
