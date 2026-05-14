@@ -135,6 +135,14 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Google Flights via SerpAPI — vuelos internacionales (no Bolivia NAABOL)
   "mcp__serpapi-flights__searchFlights",
   "mcp__serpapi-flights__getReturnFlights",
+  // Panini FIFA World Cup 2026 — álbum de Cal y Noe
+  "mcp__panini-mundial__paniniProgress",
+  "mcp__panini-mundial__paniniSection",
+  "mcp__panini-mundial__paniniMissing",
+  "mcp__panini-mundial__paniniDuplicates",
+  "mcp__panini-mundial__paniniRegister",
+  "mcp__panini-mundial__paniniRemove",
+  "mcp__panini-mundial__paniniSearch",
   // Apple Notes — notas personales de Cal
   "mcp__apple-notes__create-note",
   "mcp__apple-notes__search-notes",
@@ -177,4 +185,13 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__readwise__readwise_create_highlights",
   "mcp__readwise__readwise_update_highlight",
   "mcp__readwise__readwise_delete_highlight",
+  // inversiones-query — portfolio de inversiones de Cal (Kubera + Yahoo Finance + Airtable)
+  "mcp__inversiones-query__getPortfolioSummary",
+  "mcp__inversiones-query__getDailyMovers",
+  "mcp__inversiones-query__getPositionDetail",
+  "mcp__inversiones-query__getPortfolioPerformance",
+  "mcp__inversiones-query__getPriceHistory",
+  "mcp__inversiones-query__getTransactionHistory",
+  "mcp__inversiones-query__getPortfolioConcentration",
+  "mcp__inversiones-query__searchPosition",
 ];

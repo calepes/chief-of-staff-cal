@@ -1,5 +1,7 @@
-import { writeFileSync } from "node:fs";
+import { writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
+import path from "node:path";
 import { config as loadEnv } from "dotenv";
 import cron from "node-cron";
 import { createSdkMcpServer, startup, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
@@ -14,6 +16,7 @@ import { CfKv } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
 import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage } from "@cos/shared";
+import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto } from "./tools/vision.js";
@@ -42,6 +45,9 @@ const env = {
   SERPAPI_KEY: process.env.SERPAPI_KEY ?? "",
   ANTHROPIC_API_KEY: requireEnv("ANTHROPIC_API_KEY"),
   READWISE_TOKEN: process.env.READWISE_TOKEN ?? "",
+  KUBERA_AUTH_TOKEN: process.env.KUBERA_AUTH_TOKEN ?? "",
+  AIRTABLE_TOKEN: process.env.AIRTABLE_TOKEN ?? "",
+  AIRTABLE_BASE_ID: process.env.AIRTABLE_BASE_ID ?? "",
   COS_WEBHOOK_URL: process.env.COS_WEBHOOK_URL ?? "https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook",
   COS_WEBHOOK_SECRET: process.env.COS_WEBHOOK_SECRET ?? "",
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ?? "",
@@ -146,6 +152,10 @@ const SERPAPI_FLIGHTS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/serpapi-flights/dist/index.js";
 const APPLE_NOTES_BIN =
   "/Users/calepes/.npm-global/lib/node_modules/apple-notes-mcp/build/index.js";
+const PANINI_MUNDIAL_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/panini-mundial/dist/index.js";
+const INVERSIONES_QUERY_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/inversiones-query/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -208,6 +218,25 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [APPLE_NOTES_BIN],
+    },
+    "panini-mundial": {
+      type: "stdio",
+      command: "node",
+      args: [PANINI_MUNDIAL_DIST],
+      env: {
+        NOTION_TOKEN: env.NOTION_TOKEN,
+        PANINI_DB_ID: "35cc487609dd80868b1dc68095a6f84f",
+      },
+    },
+    "inversiones-query": {
+      type: "stdio",
+      command: "node",
+      args: [INVERSIONES_QUERY_DIST],
+      env: {
+        KUBERA_AUTH_TOKEN: env.KUBERA_AUTH_TOKEN,
+        AIRTABLE_TOKEN: env.AIRTABLE_TOKEN,
+        AIRTABLE_BASE_ID: env.AIRTABLE_BASE_ID,
+      },
     },
     // Readwise MCP remoto — bridge stdio via mcp-remote
     "readwise": {
@@ -345,6 +374,26 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     if (cb.data?.startsWith("j:")) {
       log({ msg: "menu_callback", data: cb.data });
       await handleMenuCallback(cb, env.COS_TELEGRAM_BOT_TOKEN, processMessage, payload.update_id);
+      return;
+    }
+
+    // build:approve:<id> / build:reject:<id> — mecánico, sin LLM
+    if (cb.data?.startsWith("build:approve:") || cb.data?.startsWith("build:reject:")) {
+      const [action, , id] = cb.data.split(":");
+      const proposalsDir = path.join(process.env.HOME!, ".cos-agent", "morning-builds", "proposals");
+      const rejectedDir  = path.join(process.env.HOME!, ".cos-agent", "morning-builds", "rejected");
+      const proposalFile = path.join(proposalsDir, `${id}.json`);
+      if (action === "build:approve") {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "🔨 Ejecutando...");
+        await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId: cb.message.chat.id, text: "🔨 Ejecutando morning build..." });
+        const executor = path.join(process.env.HOME!, ".cos-agent", "morning-build-execute.sh");
+        spawn("/bin/bash", [executor, id], { detached: true, stdio: "ignore" }).unref();
+      } else {
+        mkdirSync(rejectedDir, { recursive: true });
+        if (existsSync(proposalFile)) renameSync(proposalFile, path.join(rejectedDir, `${id}.json`));
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "🗑️ Descartado");
+        await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId: cb.message.chat.id, text: "🗑️ Propuesta descartada." });
+      }
       return;
     }
 
@@ -596,7 +645,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
 async function ensureWebhook(): Promise<void> {
   if (!env.COS_WEBHOOK_SECRET || !env.COS_WEBHOOK_URL) return;
   try {
-    const info = await fetch(`https://api.telegram.org/bot${env.COS_TELEGRAM_BOT_TOKEN}/getWebhookInfo`).then((r) =>
+    const info = await fetch(`https://api.telegram.org/bot${env.COS_TELEGRAM_BOT_TOKEN}/getWebhookInfo`, { signal: AbortSignal.timeout(10_000) }).then((r) =>
       r.json() as Promise<{ ok: boolean; result?: { url?: string } }>,
     );
     const currentUrl = info.result?.url ?? "";
@@ -611,6 +660,7 @@ async function ensureWebhook(): Promise<void> {
         drop_pending_updates: false,
         allowed_updates: ["message", "callback_query", "edited_message"],
       }),
+      signal: AbortSignal.timeout(10_000),
     });
     const data = (await res.json()) as { ok: boolean; description?: string };
     if (data.ok) {
@@ -630,6 +680,18 @@ function scheduleWebhookWatchdog(): void {
   log({ msg: "webhook_watchdog_scheduled", interval: "1min" });
 }
 
+function scheduleFlightCheckin(): void {
+  cron.schedule("0,30 7-22 * * *", () => {
+    void checkFlightCheckin({
+      kv,
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      options: BASE_OPTIONS,
+    });
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "flight_checkin_scheduled", interval: "every 30min 7-22h" });
+}
+
 async function registerBotCommands(token: string): Promise<void> {
   const commands = [
     { command: "menu", description: "Menú principal" },
@@ -645,6 +707,7 @@ async function registerBotCommands(token: string): Promise<void> {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ commands, ...scope }),
+        signal: AbortSignal.timeout(10_000),
       });
       const data = (await res.json()) as { ok: boolean; description?: string };
       if (!data.ok) {
@@ -665,6 +728,7 @@ async function loop(): Promise<void> {
   });
 
   scheduleWebhookWatchdog();
+  scheduleFlightCheckin();
   void ensureWebhook();
   void registerBotCommands(env.COS_TELEGRAM_BOT_TOKEN);
 
