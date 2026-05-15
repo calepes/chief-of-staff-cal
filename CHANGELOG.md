@@ -1,5 +1,29 @@
 # CHANGELOG — Jano
 
+## 2026-05-15
+
+### Fix — Automatizaciones: nightly-report, heartbeat, morning-build
+
+#### Nightly Report (`~/.claude/hooks/nightly-report.sh`)
+- **Fix preamble leak:** `claude -p` emitía texto de razonamiento antes del HTML. Prompt reforzado con "el PRIMER carácter DEBE ser 📊" + Python post-processor stripea contenido antes del emoji.
+- **Fix prefijos Readwise:** `mcp__readwise__*` → `mcp__claude_ai_Readwise__*` en `--allowedTools` y en el prompt.
+- **Feature horizonte +2 días:** sección "Mañana" ahora incluye sublínea condensada de recordatorios del día siguiente.
+
+#### Heartbeat — `incomplete-tasks.md`
+- **Fix spam matutino:** task sin deduplicación alertaba el mismo item hasta 10 veces por mañana (cada 30 min). Agregado patrón `seen_today`/`mark_seen` con state file `~/.claude/state/incomplete-tasks-seen.json`.
+
+#### Heartbeat — `usage-evening.md` / `usage-morning.md`
+- **Fix KeyError:** scripts usaban keys del schema viejo de `claude-usage.py` (`pct`, `tokens_w`, `limit_w`). Actualizados a schema actual: `total_pct`, `local_tokens_w`; `limit_w` derivado como `tokens_w / (pct/100)`.
+
+#### Morning Build (`~/.cos-agent/morning-build.sh`)
+- **Fix cuelgue nocturno:** `reminders show-lists` colgaba 8.5h cada noche esperando respuesta TCC con pantalla bloqueada. Agregado `timeout 30s` antes de la llamada.
+
+### Docs — CLAUDE.md Jano
+- Documentado gotcha `reminders show-lists` con pantalla bloqueada.
+- Documentado requisito de dedup en heartbeat tasks con schedule multi-run.
+- Documentado nightly-report: preamble fix + prefijo Readwise correcto.
+- Corregido path de morning-build: `~/.claude/hooks/` → `~/.cos-agent/`.
+
 ## 2026-05-14
 
 ### Feature — inversiones-query MCP wired
