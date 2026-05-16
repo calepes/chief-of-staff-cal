@@ -194,4 +194,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__inversiones-query__getTransactionHistory",
   "mcp__inversiones-query__getPortfolioConcentration",
   "mcp__inversiones-query__searchPosition",
+  "mcp__inversiones-query__recordTransaction",
+  "mcp__inversiones-query__kuberaCashFlow",
+  "mcp__inversiones-query__kuberaUpdateShares",
+  "mcp__inversiones-query__kuberaFindCustodian",
 ];

@@ -69,6 +69,10 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__claude_ai_Notion__notion-fetch":               "📄 Leyendo página Notion...",
   "mcp__claude_ai_Notion__notion-create-pages":        "📝 Creando página Notion...",
   "mcp__claude_ai_Notion__notion-update-page":         "✏️ Actualizando Notion...",
+  "mcp__inversiones-query__recordTransaction":          "📈 Registrando transacción...",
+  "mcp__inversiones-query__kuberaCashFlow":             "📊 Registrando cash flow en Kubera...",
+  "mcp__inversiones-query__kuberaUpdateShares":         "📊 Actualizando shares en Kubera...",
+  "mcp__inversiones-query__kuberaFindCustodian":        "🔍 Buscando custodian en Kubera...",
 };
 
 export async function runAgent(userMessage: string, deps: AgentDeps): Promise<AgentResult> {
