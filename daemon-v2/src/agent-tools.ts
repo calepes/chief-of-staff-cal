@@ -8,6 +8,7 @@ import { manageLearning } from "./tools/learnings.js";
 import { searchPlaces, travelTime as calcTravelTime } from "./tools/maps.js";
 import { buildApprovalFlowImpl, stepApprovalWizardImpl } from "./tools/approval-flow.js";
 import { getWhatsappContacts, saveWhatsappContact, type WaContact } from "./tools/whatsapp.js";
+import { pptWizardSaveImpl, pptWizardLoadImpl } from "./tools/ppt-wizard.js";
 import type { CfKv } from "./cf-kv.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
@@ -77,7 +78,7 @@ export function buildSdkTools(deps: ToolDeps) {
     // Disponible como mcp__agent-learnings__addLearning({ agent: "jano", text }).
     tool(
       "getTokenUsage",
-      "Devuelve el presupuesto de tokens Claude Max del día: % usado, tokens disponibles hoy, historial por día y tendencia. Llamar cuando Cal pregunte cuánto ha consumido, cómo van los tokens, si va a llegar al límite, o cuál es el presupuesto del día.",
+      "Devuelve el consumo real de tokens Claude Max (todos los clientes: CC + web + iOS). % semanal real vía API headers. Llamar cuando Cal pregunte cuánto ha consumido, cómo van los tokens, si va a llegar al límite, o cuál es el estado de la sesión.",
       {},
       async () => {
         const script = `${homedir()}/.claude/scripts/claude-usage.py`;
@@ -93,26 +94,18 @@ export function buildSdkTools(deps: ToolDeps) {
           return asText({ error: "Respuesta inesperada del script", raw: result.stdout.slice(0, 200) });
         }
 
-        const pct = data.pct as number;
-        const tokensW = data.tokens_w as number;
-        const limitW = data.limit_w as number;
+        const totalPct = data.total_pct as number;
+        const hasLiveData = data.has_live_data as boolean;
+        const localTokensW = data.local_tokens_w as number;
+        const localBurnPerH = data.local_burn_per_h as number;
         const hRem = data.hours_remaining as number;
         const byDay = data.by_day as Record<string, number>;
-
-        const budgetDay = limitW / 7;
+        const live = data.live as Record<string, unknown> | undefined;
 
         const fmtN = (n: number): string => {
           if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
           if (n >= 1e6) return `${Math.round(n / 1e6)}M`;
           return `${Math.round(n / 1e3)}K`;
-        };
-
-        const semaforo = (w: number): string => {
-          const r = w / budgetDay;
-          if (r <= 1.0) return "🟢";
-          if (r <= 1.5) return "🟡";
-          if (r <= 2.5) return "🟠";
-          return "🔴";
         };
 
         const DOW = ["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"];
@@ -123,8 +116,19 @@ export function buildSdkTools(deps: ToolDeps) {
         const sortedDays = Object.keys(byDay).sort();
         const pastDays = sortedDays.filter((d) => d < todayLocal);
 
-        const daysRem = Math.max(1, hRem / 24);
-        const budgetToday = (limitW - tokensW) / daysRem;
+        // Semáforo relativo al promedio de días anteriores
+        const avgPast =
+          pastDays.length > 0
+            ? pastDays.reduce((s, d) => s + byDay[d], 0) / pastDays.length
+            : 0;
+        const semaforo = (w: number): string => {
+          if (avgPast === 0) return "⚪";
+          const r = w / avgPast;
+          if (r <= 1.0) return "🟢";
+          if (r <= 1.5) return "🟡";
+          if (r <= 2.0) return "🟠";
+          return "🔴";
+        };
 
         let tendencia = "—";
         if (pastDays.length >= 2) {
@@ -140,27 +144,40 @@ export function buildSdkTools(deps: ToolDeps) {
           const dow = DOW[new Date(y, m - 1, day).getDay()];
           const dd = d.slice(8);
           const w = byDay[d];
-          const p = (w / limitW) * 100;
           const marker = d === todayLocal ? " <b>←hoy</b>" : "";
-          return `${semaforo(w)} <code>${dow}${dd}  ${p.toFixed(1).padStart(4)}%  ${fmtN(w).padStart(5)}</code>${marker}`;
+          return `${semaforo(w)} <code>${dow}${dd}  ${fmtN(w).padStart(5)}</code>${marker}`;
         });
 
         const dRem = Math.floor(hRem / 24);
         const hRemMod = Math.floor(hRem % 24);
 
+        const sessionStatus = live?.["5h_status"] as string | undefined;
+        const overageActive = live?.["overage_in_use"] as boolean | undefined;
+        let statusLine = "";
+        if (sessionStatus === "rejected") {
+          const h5Rem = Math.ceil(5 - ((live?.["5h_util"] as number) ?? 0) * 5);
+          statusLine = `🛑 Sesión pausada · ventana 5h agotada (reset en ~${Math.max(0, h5Rem)}h)`;
+        } else if (overageActive) {
+          statusLine = "⚡ Overage activo";
+        }
+
+        const liveWarning = hasLiveData ? "" : "\n<i>⚠️ Dato de ciclo: caché local (sin conexión a API)</i>";
+
         const msg = [
-          `☀️ <b>Presupuesto · ${todayLocal}</b>`,
+          `☀️ <b>Claude Max · ${todayLocal}</b>`,
           "",
-          `Ciclo: <b>${pct.toFixed(1)}%</b> usado · reset en ${dRem}d${hRemMod}h`,
+          `Ciclo (todos los clientes): <b>${totalPct.toFixed(1)}%</b> · reset en ${dRem}d${hRemMod}h`,
+          ...(statusLine ? [statusLine] : []),
           "",
-          `📦 <b>Hoy puedes usar: ${fmtN(budgetToday)} tokens</b>`,
-          `<i>(${fmtN(limitW - tokensW)} restantes ÷ ${daysRem.toFixed(1)} días)</i>`,
-          "",
-          "📊 Días del ciclo:",
+          `📊 CC local — últimos días:`,
           ...rows,
           "",
           `Tendencia: ${tendencia}`,
-        ].join("\n");
+          `Burn CC: ${fmtN(localBurnPerH)}/h · acumulado ${fmtN(localTokensW)}`,
+          liveWarning,
+        ]
+          .filter((l) => l !== undefined)
+          .join("\n");
 
         return { content: [{ type: "text" as const, text: msg }] };
       },
@@ -239,6 +256,45 @@ export function buildSdkTools(deps: ToolDeps) {
       "Lista todos los contactos guardados en ~/.claude/whatsapp-contacts.md. Devuelve array de { nombre, alias?, relacion?, numero } donde numero es el número internacional sin '+' (ej: '59172345678'). Llamar cuando Cal quiera preparar un WhatsApp o buscar un contacto.",
       {},
       async () => asText(await getWhatsappContacts()),
+      READ_ONLY,
+    ),
+    tool(
+      "pptWizardSave",
+      "Guarda o actualiza el estado del wizard PPT en curso para el chat activo (KV, TTL 2h). Llamar después de cada intercambio del wizard para persistir el progreso: topic (título tentativo), audience (quiénes son + tiempo disponible), step (1=SCQA, 2=Storyline, 3=Tipos de slide, 4=Contenido, 5=Listo), scqa ({ s, c, q, a }), storyline (array de assertions ordenadas), slides (array de slides con assertion, type, mensaje, cuerpo, pendiente). Solo pasar los campos que cambien en este turno — el resto se preserva.",
+      {
+        topic:     z.string().optional().describe("Título tentativo del deck"),
+        audience:  z.string().optional().describe("Audiencia: quiénes son, qué les importa, tiempo disponible"),
+        step:      z.number().int().min(1).max(5).optional().describe("Paso actual del wizard: 1=SCQA 2=Storyline 3=Tipos 4=Contenido 5=Done"),
+        scqa:      z.object({
+          s: z.string().optional(),
+          c: z.string().optional(),
+          q: z.string().optional(),
+          a: z.string().optional(),
+        }).optional().describe("Marco SCQA parcial o completo"),
+        storyline: z.array(z.string()).optional().describe("Assertions ordenadas que soportan el Answer"),
+        slides:    z.array(z.object({
+          n:         z.number().int(),
+          assertion: z.string(),
+          type:      z.enum(["Chart", "Table", "Subtitle", "Framework", "Visual"]),
+          mensaje:   z.string().optional(),
+          cuerpo:    z.string().optional(),
+          pendiente: z.string().optional(),
+        })).optional().describe("Slides del deck con assertion-headline y tipo"),
+      },
+      async (args) => {
+        const chatId = deps.getCurrentChatId();
+        const state = await pptWizardSaveImpl(deps.kv, chatId, args);
+        return asText(state);
+      },
+    ),
+    tool(
+      "pptWizardLoad",
+      "Lee el estado actual del wizard PPT para el chat activo. Devuelve el objeto PptWizardState (topic, audience, step, scqa, storyline, slides) o null si no hay wizard activo. Llamar al inicio de un turno cuando Cal retoma una PPT o cuando necesitas saber en qué paso estás.",
+      {},
+      async () => {
+        const chatId = deps.getCurrentChatId();
+        return asText(await pptWizardLoadImpl(deps.kv, chatId));
+      },
       READ_ONLY,
     ),
     tool(

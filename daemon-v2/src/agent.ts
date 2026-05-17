@@ -24,6 +24,8 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__getTokenUsage":       "📊 Consultando consumo de tokens...",
   "mcp__cos-tools__getWhatsappContacts": "📱 Leyendo contactos de WhatsApp...",
   "mcp__cos-tools__saveWhatsappContact": "💾 Guardando contacto de WhatsApp...",
+  "mcp__cos-tools__pptWizardSave":       "📊 Guardando avance de la presentación...",
+  "mcp__cos-tools__pptWizardLoad":       "📊 Cargando estado de la presentación...",
   // MCPs externos
   "mcp__youtube-transcribe__transcribeYoutube":        "🎬 Transcribiendo video...",
   "mcp__apple-reminders__addReminder":                 "🔔 Agregando recordatorio...",

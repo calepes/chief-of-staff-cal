@@ -1,5 +1,15 @@
 # CHANGELOG — Jano
 
+## 2026-05-16
+
+### Feature — PPT Wizard en Jano + skill global ppt-yape
+
+- **Skill global `ppt-yape`:** wizard de 4 pasos (SCQA → Storyline → Tipos → Contenido) basado en Minto Pyramid Principle + 5 tipos de slides (McKinsey/BCG/Bain). Archivo en `~/.claude/skills/ppt-yape/SKILL.md`. Activa con cualquier variante de "arma una PPT / deck / presentación".
+- **Cheat sheet Yape:** `~/Claude Projects/Yape/Presentaciones/framework-presentaciones.md` — referencia rápida del método.
+- **`pptWizardSave`, `pptWizardLoad` tools:** estado del wizard en CF KV (`ppt-wiz:{chatId}`, TTL 2h). Implementado en `daemon-v2/src/tools/ppt-wizard.ts`.
+- **System prompt Jano:** sección `## Wizard de Presentaciones (PPT)` con instrucciones del wizard de 4 fases, uso de tools de estado, y formato Telegram para cada paso.
+- **Gotcha wizard tools (4 lugares):** al agregar un wizard tool nuevo en Jano hay que tocar: `tools/*.ts` (lógica + KV), `agent-tools.ts` (tool registration), `agent.ts:TOOL_MESSAGES` (progress text), `system-prompt.ts` (instrucciones LLM).
+
 ## 2026-05-15
 
 ### Fix — Automatizaciones: nightly-report, heartbeat, morning-build
