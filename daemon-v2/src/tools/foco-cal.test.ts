@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,10 +10,24 @@ import {
   type FocoProgressEntry,
 } from "./foco-cal.js";
 
+const tmpDirs: string[] = [];
+
 function makeTmpPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "foco-test-"));
+  tmpDirs.push(dir);
   return join(dir, "progress.json");
 }
+
+afterEach(() => {
+  for (const dir of tmpDirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+  tmpDirs.length = 0;
+});
 
 const BASE_ENTRY: Omit<FocoProgressEntry, "date"> = {
   ts: 1716307200,
