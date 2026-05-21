@@ -17,6 +17,7 @@ import { ConversationState } from "./state.js";
 import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
+import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto } from "./tools/vision.js";
@@ -40,8 +41,6 @@ const env = {
   NOTION_TAREAS_DB_ID: requireEnv("NOTION_TAREAS_DB_ID"),
   NOTION_PEOPLE_DB_ID: requireEnv("NOTION_PEOPLE_DB_ID"),
   HEALTH_API_KEY: process.env.HEALTH_API_KEY ?? "",
-  FEEDBIN_USERNAME: process.env.FEEDBIN_USERNAME ?? "",
-  FEEDBIN_PASSWORD: process.env.FEEDBIN_PASSWORD ?? "",
   SERPAPI_KEY: process.env.SERPAPI_KEY ?? "",
   ANTHROPIC_API_KEY: requireEnv("ANTHROPIC_API_KEY"),
   READWISE_TOKEN: process.env.READWISE_TOKEN ?? "",
@@ -138,8 +137,7 @@ const EXCHANGE_RATE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
 const NAABOL_FLIGHTS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/naabol-flights/dist/index.js";
-const FEEDBIN_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/feedbin/dist/index.js";
+const MCP_REMOTE = "/Users/calepes/.npm-global/bin/mcp-remote";
 const HEALTH_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
 const APPLE_REMINDERS_DIST =
@@ -180,12 +178,8 @@ const BASE_OPTIONS: Options = {
     },
     "feedbin": {
       type: "stdio",
-      command: "node",
-      args: [FEEDBIN_DIST],
-      env: {
-        FEEDBIN_USERNAME: env.FEEDBIN_USERNAME,
-        FEEDBIN_PASSWORD: env.FEEDBIN_PASSWORD,
-      },
+      command: MCP_REMOTE,
+      args: ["https://mcp-feedbin.carlos-cb4.workers.dev/mcp"],
     },
     "health": {
       type: "stdio",
@@ -430,6 +424,20 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     text = `[ubicación GPS: lat=${location.latitude}, lon=${location.longitude}] ${text}`;
   }
 
+  // Telegram Mini App data (web_app_data.data = JSON stringified payload)
+  if (!text && !voice && !photo && !document && m.web_app_data?.data) {
+    try {
+      const parsed = JSON.parse(m.web_app_data.data) as { codes?: string[] };
+      if (parsed.codes && parsed.codes.length > 0) {
+        const list = parsed.codes.join(", ");
+        text = `Registrar figuritas desde la mini app del álbum: ${list}`;
+        log({ msg: "web_app_data", codes: parsed.codes.length, list });
+      }
+    } catch {
+      log({ msg: "web_app_data_parse_error", raw: m.web_app_data.data });
+    }
+  }
+
   if (!text && !voice && !photo && !document) {
     log({ msg: "skip_message", reason: "unsupported kind", update_id: payload.update_id });
     return;
@@ -441,6 +449,23 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
       chatId,
       text: "🧹 Contexto limpiado.",
+    });
+    return;
+  }
+
+  // /album command — envía botón de teclado que abre la mini app del álbum.
+  // IMPORTANTE: sendData() de Telegram solo funciona cuando la mini app se abre
+  // desde un ReplyKeyboard web_app button (no desde el menu button del chat).
+  if (text && text.trim().toLowerCase() === "/album") {
+    await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+      chatId,
+      text: "🃏 <b>Álbum Panini 2026</b>\nToca el botón para abrir la mini app de carga masiva.",
+      parseMode: "HTML",
+      replyMarkup: {
+        keyboard: [[{ text: "🃏 Álbum Panini 2026", web_app: { url: "https://apps.lepesqueur.net/panini-album/" } }]],
+        resize_keyboard: true,
+        one_time_keyboard: false,
+      },
     });
     return;
   }
@@ -692,9 +717,22 @@ function scheduleFlightCheckin(): void {
   log({ msg: "flight_checkin_scheduled", interval: "every 30min 7-22h" });
 }
 
+function scheduleFocoCheckinsLocal(): void {
+  scheduleFocoCheckins({
+    kv,
+    botToken: env.COS_TELEGRAM_BOT_TOKEN,
+    chatId: ALERT_CHAT_ID,
+    options: BASE_OPTIONS,
+    setCurrentChatId: (id) => {
+      currentChatId = id;
+    },
+  });
+}
+
 async function registerBotCommands(token: string): Promise<void> {
   const commands = [
     { command: "menu", description: "Menú principal" },
+    { command: "album", description: "Álbum Panini 2026 (carga masiva)" },
     { command: "reset", description: "Limpiar contexto" },
   ];
   const scopes = [
@@ -729,6 +767,7 @@ async function loop(): Promise<void> {
 
   scheduleWebhookWatchdog();
   scheduleFlightCheckin();
+  scheduleFocoCheckinsLocal();
   void ensureWebhook();
   void registerBotCommands(env.COS_TELEGRAM_BOT_TOKEN);
 
