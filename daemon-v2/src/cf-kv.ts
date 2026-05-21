@@ -25,8 +25,10 @@ export class CfKv {
     return (await res.json()) as T;
   }
 
-  async set(key: string, value: unknown, ttlSeconds = 600): Promise<void> {
-    const url = `${this.url(key)}?expiration_ttl=${ttlSeconds}`;
+  async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
+    const url = ttlSeconds != null && ttlSeconds > 0
+      ? `${this.url(key)}?expiration_ttl=${ttlSeconds}`
+      : this.url(key);
     const res = await fetch(url, {
       method: "PUT",
       headers: { ...this.headers(), "content-type": "application/json" },
