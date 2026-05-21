@@ -10,6 +10,17 @@ import { buildApprovalFlowImpl, stepApprovalWizardImpl } from "./tools/approval-
 import { getWhatsappContacts, saveWhatsappContact, type WaContact } from "./tools/whatsapp.js";
 import { pptWizardSaveImpl, pptWizardLoadImpl } from "./tools/ppt-wizard.js";
 import type { CfKv } from "./cf-kv.js";
+import {
+  appendFocoProgress,
+  readFocoProgress,
+  peekCurrentSection,
+  FOCO_PAGE_ID,
+  FOCO_KPIS_VIEW_URL,
+  FOCO_TAREAS_VIEW_URL,
+  FOCO_SECTIONS,
+  type FocoProgressEntry,
+  type FocoSection,
+} from "./tools/foco-cal.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
@@ -307,6 +318,53 @@ export function buildSdkTools(deps: ToolDeps) {
         numero: z.string().describe("Número internacional sin '+' ni espacios — ej: 59172345678"),
       },
       async (args) => { await saveWhatsappContact(args as WaContact); return asText(`Contacto ${(args as WaContact).nombre} guardado.`); },
+    ),
+    tool(
+      "getFocoCalStatus",
+      "Lee el estado del Foco CAL de Cal: progreso local reciente por sección + punteros a los datos en vivo de Notion. " +
+      "Llamar cuando Cal pregunte sobre el Foco, su progreso, en qué enfocarse, qué lleva sin mover, " +
+      "cómo van los KPIs de Yape Bolivia (DAU, afiliaciones, TRX), o sus tareas de Notion de la semana. " +
+      "Después de este tool, usar notion-fetch(focoPageId) para estado de checkboxes, " +
+      "notion-query-database-view(kpisViewUrl) para KPIs, notion-query-database-view(tareaViewUrl) para tareas.",
+      {},
+      async () => {
+        const progress = readFocoProgress(30);
+        const section = await peekCurrentSection(deps.kv);
+        return asText({
+          recentProgress: progress,
+          currentSection: section,
+          focoPageId: FOCO_PAGE_ID,
+          kpisViewUrl: FOCO_KPIS_VIEW_URL,
+          tareaViewUrl: FOCO_TAREAS_VIEW_URL,
+        });
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "logFocoProgress",
+      "Loggea el avance de Cal en un item del Foco CAL. " +
+      "Llamar cuando Cal confirme 'hecho' en un check-in del Foco (via jano-wiz-ok → stepApprovalWizard → logFocoProgress), " +
+      "o cuando Cal mencione explícitamente haber completado o avanzado algo del Foco CAL. " +
+      "Retorna string de confirmación.",
+      {
+        itemText: z.string().describe("Texto del item tal como aparece en el Foco CAL"),
+        section: z
+          .enum(["CAL", "Prioridades", "Rufino", "Christian", "KPIs", "Tareas"] as const)
+          .describe("Sección del Foco CAL"),
+        note: z.string().optional().describe("Nota opcional de Cal sobre el avance"),
+      },
+      async ({ itemText, section, note }) => {
+        const now = new Date();
+        const entry: FocoProgressEntry = {
+          date: now.toISOString().slice(0, 10),
+          ts: Math.floor(now.getTime() / 1000),
+          section: section as FocoSection,
+          itemText,
+          note: note ?? null,
+        };
+        appendFocoProgress(entry);
+        return asText(`Progreso loggeado: ${itemText}`);
+      },
     ),
   ];
 }
