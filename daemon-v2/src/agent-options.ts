@@ -96,9 +96,11 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__naabol-flights__getFlight",
   "mcp__naabol-flights__getFlights",
   "mcp__naabol-flights__getAirportFlights",
-  // Feedbin — RSS reader: no leídos, contenido completo, marcar leídos, buscar
+  // Feedbin — RSS reader (CF Worker): no leídos por feed/carpeta, contenido, marcar leídos, buscar
   "mcp__feedbin__getUnreadCount",
   "mcp__feedbin__getUnreadEntries",
+  "mcp__feedbin__getUnreadByFeed",
+  "mcp__feedbin__getTaggings",
   "mcp__feedbin__getEntryContent",
   "mcp__feedbin__markRead",
   "mcp__feedbin__markUnread",
@@ -107,6 +109,12 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__feedbin__deleteSubscription",
   "mcp__feedbin__savePage",
   "mcp__feedbin__addSubscription",
+  "mcp__feedbin__getEntriesByFeed",
+  "mcp__feedbin__getEntriesByTag",
+  "mcp__feedbin__markFeedRead",
+  "mcp__feedbin__markTagRead",
+  "mcp__feedbin__getReadEntriesByFeed",
+  "mcp__feedbin__getReadEntriesByTag",
   // Readwise Reader — artículos guardados: listar, buscar, mover, tags, highlights
   "mcp__readwise__reader_list_documents",
   "mcp__readwise__reader_get_document_details",
@@ -162,6 +170,9 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__cos-tools__travelTime",
   // Consumo de tokens Claude Max — ciclo activo, burn rate, presupuesto
   "mcp__cos-tools__getTokenUsage",
+  // Foco CAL — check-ins proactivos y revisión on-demand
+  "mcp__cos-tools__getFocoCalStatus",
+  "mcp__cos-tools__logFocoProgress",
   // Readwise Reader + Highlights — 22 tools (confirmados 2026-05-02)
   "mcp__readwise__reader_list_documents",
   "mcp__readwise__reader_search_documents",

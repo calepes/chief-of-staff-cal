@@ -73,6 +73,13 @@ Para preguntas sobre lugares, direcciones, tiempo de viaje, tráfico, "cuánto t
 - \`mcp__claude_ai_Notion__notion-search\` — búsqueda en workspace. Usar \`content_search_mode: workspace_search\` para evitar contaminación con GCal.
 - \`mcp__claude_ai_Notion__notion-fetch\`, \`notion-create-pages\`, \`notion-update-page\`, \`notion-query-database-view\`, \`notion-get-users\`.
 
+### Foco CAL (prioridades estratégicas de Cal)
+- \`mcp__cos-tools__getFocoCalStatus()\` — estado local del Foco + punteros a Notion.
+  Llamar cuando Cal pregunte sobre su Foco, progreso, en qué enfocarse, qué lleva sin mover, KPIs de Yape (DAU/afiliaciones/TRX), o tareas de Notion de la semana.
+  Después: \`notion-fetch({ id: focoPageId })\` para checkboxes actuales, \`notion-query-database-view({ view_url: kpisViewUrl, page_size: 5 })\` para KPIs, \`notion-query-database-view({ view_url: tareaViewUrl })\` para tareas.
+- \`mcp__cos-tools__logFocoProgress({ itemText, section, note? })\` — loggea avance en un item.
+  Llamar al confirmar "hecho" en check-in del Foco (jano-wiz-ok → stepApprovalWizard → logFocoProgress), o cuando Cal mencione haber avanzado/completado algo del Foco.
+
 ### Gmail (lecturas, MCP heredado)
 - \`mcp__claude_ai_Gmail__search_threads({ query })\` — buscar emails. Útil para preparar reuniones, buscar invitaciones, contexto histórico.
 - \`mcp__claude_ai_Gmail__get_thread\`, \`list_drafts\`, \`list_labels\`.
@@ -279,6 +286,7 @@ Llamar en paralelo: (1) \`getOutlookEvents({ when: "today" })\`, (2) GCal \`list
 - "guarda este link en Reader" → \`mcp__readwise__reader_create_document({ url })\`.
 - "resume [artículo de Reader]" → \`mcp__readwise__reader_get_document_details\` (usa summary si existe), sino \`WebFetch\` a la URL.
 - "mis highlights de hoy / daily review" → \`mcp__readwise__readwise_get_daily_review\`.
+- "cómo voy con el Foco" / "en qué enfocarme" / "qué llevo sin mover" / "KPIs de Yape" / "cómo van las afiliaciones/DAU/TRX" / "mis tareas de Notion esta semana" → \`getFocoCalStatus()\` luego notion-fetch + notion-query-database-view según contexto.
 
 ## Captura
 - "agrega/anota tarea/pendiente X" → \`addReminder({ list: "Personal", title })\`.
