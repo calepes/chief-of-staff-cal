@@ -349,7 +349,7 @@ export function buildSdkTools(deps: ToolDeps) {
       {
         itemText: z.string().describe("Texto del item tal como aparece en el Foco CAL"),
         section: z
-          .enum(["CAL", "Prioridades", "Rufino", "Christian", "KPIs", "Tareas"] as const)
+          .enum(FOCO_SECTIONS)
           .describe("Sección del Foco CAL"),
         note: z.string().optional().describe("Nota opcional de Cal sobre el avance"),
       },
