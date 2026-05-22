@@ -1,5 +1,18 @@
 # CHANGELOG — Jano
 
+## 2026-05-21
+
+### Feature — Foco CAL: check-ins proactivos + tools de revisión
+
+- **3 crons proactivos (Lun–Vie):** `proactive/foco-check.ts` — 8:30 (mañana), 12:30 (mediodía), 18:00 (cierre), timezone `America/La_Paz`. Sección rotativa via KV counter `foco_checkin_counter` (mod 6).
+- **6 secciones rotativas:** CAL personal, Prioridades, Rufino Arribas, Christian Hausher, KPIs diarios (DB Notion), Tareas de la semana (vista Notion "This Week").
+- **`getFocoCalStatus` tool:** retorna progress log local (últimos 30 días) + punteros a Notion + sección activa. Triggerado cuando Cal pregunta por el Foco, KPIs Yape (DAU/afiliaciones/TRX), o tareas de Notion.
+- **`logFocoProgress` tool:** appends a `~/.cos-agent/foco-progress.json` (append-only). Llamado al confirmar "hecho" en check-in o cuando Cal menciona avance en una sección.
+- **Progress log:** `~/.cos-agent/foco-progress.json` — array append-only `{ date, ts, section, itemText, note }`.
+- **`CfKv.set()` TTL ahora opcional:** antes era `600s` fijo. Sin TTL → persiste indefinidamente (necesario para `foco_checkin_counter`).
+- **Patrón cron + buildApprovalFlow:** `setCurrentChatId(chatId)` debe llamarse antes de `startup()` en crons que usan approval flows; inyectado via `FocoCheckinOpts.setCurrentChatId` desde `index.ts`.
+- **Tests:** `tools/foco-cal.test.ts` — 8 tests: appendFocoProgress, readFocoProgress, sectionFromCounter.
+
 ## 2026-05-16
 
 ### Feature — PPT Wizard en Jano + skill global ppt-yape

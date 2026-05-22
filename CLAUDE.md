@@ -3,7 +3,7 @@
 ## Qué es
 **Jano** — Chief of Staff digital para Cal. Claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento. Se presenta como "Jano" (no "CoS").
 
-## Estado (2026-04-29)
+## Estado (2026-05-21)
 **ACTIVO — CoS v2** (Node + Agent SDK librería + webhook + CF Queue).
 - **Daemon activo:** `com.cal.cos-agent-v2` (Node 22, KeepAlive, plist en `~/Library/LaunchAgents/`). Bot `@cal_jano_bot` ahora opera vía webhook → `cos-agent-worker.carlos-cb4.workers.dev` → CF Queue `cos-events` → daemon Node polea cola.
 - **Activo (Vesta):** `com.cal.family-agent-v2` (mismo patrón). Bot `@antocatanoecal_bot`. Ver `Vesta/CLAUDE.md`.
@@ -14,8 +14,17 @@
 - Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
+## Cambios daemon (2026-05-21 — Foco CAL)
+- **Foco CAL check-ins proactivos:** `proactive/foco-check.ts` — 3 crons (`30 8 * * 1-5`, `30 12 * * 1-5`, `0 18 * * 1-5`, timezone `America/La_Paz`). Sección rotativa via KV counter `foco_checkin_counter` (mod 6). 6 secciones: CAL personal, Prioridades, Rufino Arribas, Christian Hausher, KPIs diarios, Tareas semana.
+- **Archivos nuevos:** `tools/foco-cal.ts` (helpers: `appendFocoProgress`, `readFocoProgress`, `getNextSection`, `sectionFromCounter`) + `proactive/foco-check.ts` (`scheduleFocoCheckins`, `runFocoCheckin`, `buildPrompt`). Tests en `tools/foco-cal.test.ts`.
+- **Progress log:** `~/.cos-agent/foco-progress.json` — array append-only con entries `{ date, ts, section, itemText, note }`. Lectura: filtrar últimos 30 días, dedup por `itemText` (más reciente gana).
+- **Notion IDs Foco CAL:** page `365c4876-09dd-806b-b602-f408c50a077b`, KPIs view `view://35920029-b0cc-4af9-bac1-0bff18afdb5c`, Tareas view `view://366c4876-09dd-8062-944d-000c6c57c26a`. El formato `view://` es correcto para `notion-query-database-view` (no es HTTP — es el formato nativo del MCP).
+- **Gotcha CfKv.set() TTL opcional:** `cf-kv.ts` modificado para aceptar `ttlSeconds?: number` (antes era default 600). Omitir TTL → KV persiste indefinidamente (default CF KV). Necesario para counters persistentes como `foco_checkin_counter`.
+- **Patrón cron + buildApprovalFlow:** crons que usan `buildApprovalFlow` deben llamar `setCurrentChatId(chatId)` ANTES de `startup()`. Sin esto, `currentChatId = 0` y el flow envía al chat incorrecto. Patrón implementado: `FocoCheckinOpts.setCurrentChatId` inyectado desde `index.ts` wrapper (`scheduleFocoCheckinsLocal`).
+
 ## Cambios daemon (2026-05-10 — parte 2)
 - **flight-checkin movido al daemon:** `daemon-v2/src/proactive/flight-checkin.ts` — cron `node-cron` cada 30min de 7-22h (America/La_Paz). Consulta GCal "AntoCataNoeCal" vía Agent SDK/OAuth Max (igual que las demás herramientas del daemon). Deduplicación vía CF KV (`flight_checkin_seen:{today}:{code}`, TTL 86400s). Alerta Telegram si hay booking codes nuevos en las próximas 24h. Heartbeat task `flight-checkin.md` eliminado (era incompatible: `timeout 30s bash` mataba el `claude -p` interno antes de que GCal respondiera).
+  - **Costo observado (2026-05-21):** ~$0.20 por run × 32 runs/día = **~$6.40/día** solo en este cron. Cada invocación hace `startup()` fresco → no aprovecha prompt cache entre runs (`cacheCreationInputTokens` ~34k cada vez). Optimización pendiente: warm pool dedicado para flight-checkin, o reducir frecuencia a cada 2h fuera de ventanas de vuelo conocidas.
 - **tsconfig.json corregido:** agregado `"rootDir": "src"` explícito (antes no estaba, y clean builds calculaban mal el rootDir causando output en `dist/Agents/Jano/.../src/` en vez de `dist/`). `include` ya no incluye el directorio shared externo. `system-prompt.ts` ahora importa `./shared/vuelos-naabol-format.js` (copia en `src/shared/`) en vez del path `../../../../MCP Servers/...`. **Gotcha para Vesta:** si haces clean build de Vesta y falla con output en ruta extraña, aplicar el mismo fix (rootDir + copia local de shared).
 - **overdue-reminders printf bug corregido:** `printf "$NEW_LINES"` → `printf '%b' "$NEW_LINES"` en `heartbeat-tasks/overdue-reminders.md`. El bug causaba `printf: - : invalid option` cuando un título de recordatorio empezaba con `-`.
 
@@ -95,6 +104,8 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/
 - `getTokenUsage` (refactored 2026-05-13) — muestra `total_pct` (todos los clientes vía API headers) + historial CC-local por día (semáforo relativo al promedio de días anteriores) + burn rate. Sin "presupuesto del día" (no hay limitW). JSON schema de `claude-usage.py json`: `total_pct`, `has_live_data`, `local_tokens_w`, `local_burn_per_h`, `hours_remaining`, `by_day`, `by_model_w`, `live`. El LLM debe reenviar el resultado sin reformatear. Wrappea `~/.claude/scripts/claude-usage.py json` vía `spawnSync`.
 - `getWhatsappContacts`, `saveWhatsappContact` (agregado 2026-05-08) — gestión de contactos para generar links `wa.me`. Lee/escribe `~/.claude/whatsapp-contacts.md` (compartido con Vesta y skill CLI `~/.claude/skills/whatsapp/`). El link se genera en el LLM: `https://wa.me/{numero}?text={encodeURIComponent(msg)}`. Código en `tools/whatsapp.ts` + tests `whatsapp.test.ts`.
 - `pptWizardSave({ topic?, audience?, step?, scqa?, storyline?, slides? })`, `pptWizardLoad()` (agregado 2026-05-16) — estado del wizard de presentaciones en CF KV (`ppt-wiz:{chatId}`, TTL 7200s). Upsert parcial en cada turno; load al inicio para retomar. `PptWizardState` en `tools/ppt-wizard.ts`. System prompt tiene instrucciones de los 4 pasos (SCQA → Storyline → Tipos → Contenido).
+- `getFocoCalStatus()` (agregado 2026-05-21) — lee `~/.cos-agent/foco-progress.json` (últimos 30 días) + retorna punteros a Notion (focoPageId, kpisViewUrl, tareaViewUrl) + sección activa. Llamar cuando Cal pregunte por Foco, KPIs Yape (DAU/afiliaciones/TRX), o tareas de Notion de la semana.
+- `logFocoProgress({ itemText, section, note? })` (agregado 2026-05-21) — appends a `~/.cos-agent/foco-progress.json`. `section` es `z.enum(FOCO_SECTIONS)` importado de `tools/foco-cal.ts`. Llamar al confirmar "hecho" en check-in de Foco, o cuando Cal mencione avance en una sección.
 
 **Built-ins permitidas:** `Skill` (vuelos-bolivia, telegram-bot-ux, token-usage), `WebFetch`, `WebSearch`. **Removido `briefing-pais`** del Skill — el daemon no puede ejecutarlo (necesita Bash/Write); para briefings on-demand usar `runBriefing` en su lugar.
 
