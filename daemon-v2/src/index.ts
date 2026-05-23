@@ -24,6 +24,7 @@ import { analyzePhoto } from "./tools/vision.js";
 import { buildMainMenu, handleMenuCallback } from "./menu.js";
 
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
+loadEnv({ path: `${process.env.HOME}/.claude/secrets/apps.env` });
 
 function requireEnv(k: string): string {
   const v = process.env[k];
@@ -154,6 +155,8 @@ const PANINI_MUNDIAL_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/panini-mundial/dist/index.js";
 const INVERSIONES_QUERY_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/inversiones-query/dist/index.js";
+const SPARK_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/spark/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -231,6 +234,11 @@ const BASE_OPTIONS: Options = {
         AIRTABLE_TOKEN: env.AIRTABLE_TOKEN,
         AIRTABLE_BASE_ID: env.AIRTABLE_BASE_ID,
       },
+    },
+    "spark": {
+      type: "stdio",
+      command: "node",
+      args: [SPARK_DIST],
     },
     // Readwise MCP remoto — bridge stdio via mcp-remote
     "readwise": {
