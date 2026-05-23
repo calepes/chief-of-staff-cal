@@ -81,7 +81,7 @@ TOKEN=$(grep '^COS_TELEGRAM_BOT_TOKEN=' ~/.cos-agent/.env | cut -d= -f2-)
 curl -s "https://api.telegram.org/bot${TOKEN}/getWebhookInfo" | python3 -m json.tool
 
 # Re-set webhook (raro — el watchdog lo hace solo cada 1 min)
-SECRET=$(cat ~/.cos-agent/webhook-secret.txt)
+SECRET=$(grep ^COS_WEBHOOK_SECRET ~/.cos-agent/.env | cut -d= -f2-)
 curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
   -H "Content-Type: application/json" \
   -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\",\"edited_message\"]}"
@@ -159,8 +159,9 @@ Heavy callbacks (requieren LLM): `j:action:*` (acciones del menú interactivo), 
 Spotify callbacks (`spotify:*`) descartados por el worker (out of scope v2). Pendiente: agregar tool `spotifyControl` con lenguaje natural post-cutover.
 
 ## .env file daemon
-- `~/.cos-agent/.env` (chmod 600). Vars: `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN`, `HEALTH_API_KEY`, `ANTHROPIC_API_KEY`, `COS_WEBHOOK_URL`, `COS_WEBHOOK_SECRET`, `GOOGLE_MAPS_API_KEY`, `HOME_PIN` (lat,lon del hogar — default para distancias), `READWISE_TOKEN`.
-- Webhook secret backup: `~/.cos-agent/webhook-secret.txt` (one-way en wrangler).
+- `~/.cos-agent/.env` (chmod 600). Vars específicas Jano: `COS_TELEGRAM_BOT_TOKEN`, `COS_WEBHOOK_URL`, `COS_WEBHOOK_SECRET`, `HOME_PIN` (lat,lon del hogar — default para distancias).
+- **Secretos compartidos:** `dist/index.js` carga `~/.cos-agent/.env` PRIMERO, luego `~/.claude/secrets/apps.env` (dotenv no-override = first-wins). Tokens cross-agent (Anthropic, Notion, Airtable, CF, Maps, Health, Readwise, SerpAPI, Kubera) viven en apps.env. Override puntual en `.cos-agent/.env` siempre gana. Ver `~/.claude/CLAUDE.md` sección Seguridad.
+- Webhook secret: env var `COS_WEBHOOK_SECRET` en `~/.cos-agent/.env` (espejo en wrangler secret de CF — single source local). Archivo legacy `~/.cos-agent/webhook-secret.txt` eliminado 2026-05-23 (backup en `~/.claude/secrets/_legacy-backup-20260523/`).
 - Heartbeat: `~/.cos-agent/heartbeat`.
 
 ## Referencia clave
@@ -345,7 +346,7 @@ Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/
 - **MCP `apple-reminders` `editReminder` no soporta priority ni dueDate (2026-05-04):** el CLI underlying `keith/reminders-cli 2.5.1` solo permite editar title (positional) y `--notes`. Los flags `--priority` y `--due-date` son ignorados silenciosamente (exit 0 sin actualizar). El MCP ahora throw-ea error claro si se intenta `editReminder` con priority o dueDate. Para esos cambios: `deleteReminder + addReminder` con la nueva property. Migración a MCP con EventKit (Krishna-Desiraju u omarshahine — requieren Xcode full; snarris usa Python+PyObjC sin Xcode pero menos features) en `BACKLOG.md`.
 - **`claude -p` del cron NO carga el system prompt del daemon:** si el cron necesita reglas de formato (HTML, sin Markdown, sin separadores `---`, sin preámbulo) hay que duplicarlas literal en el prompt del script. El LLM cae en hábitos Markdown por default. Visto en cron Eisenhower (fix 2026-05-04 — prompt incluye reglas FORMATO completas).
 - **LLM puede alucinar workarounds cuando una tool falla silenciosa:** si un CLI ignora un flag y devuelve exit 0 sin actualizar, el LLM puede afirmar en su respuesta que ejecutó workaround vía Bash/AppleScript aunque NO tenga esa tool en `--allowedTools`. Caso real 2026-05-03: Eisenhower run reportó "actualizadas vía AppleScript como workaround" sin tener Bash habilitado. Validar siempre con outputs reales (ej. re-list después del edit), no confiar en lo que el LLM narra.
-- **Webhook drift histórico (2026-05-02 / 2026-05-03):** RESUELTO de raíz al migrar al modelo Pecunia (2026-05-03). Causa original: cualquier proceso que cargara el plugin Telegram con un state dir cuyo `.env` tuviera el token de Jano arrancaba grammY → `bot.start()` → `deleteWebhook()` automático → loop de 60s con el watchdog del daemon. Fix definitivo: token rotado, eliminados todos los state dirs y hooks de channel — Jano ahora opera SOLO via webhook + daemon (sin canal interactivo). Imposible reincidir salvo que alguien re-cree manualmente un state dir con el token. Si el daemon falla, restauración manual del webhook: `TOKEN=$(grep COS_TELEGRAM_BOT_TOKEN ~/.cos-agent/.env | cut -d= -f2-) && SECRET=$(cat ~/.cos-agent/webhook-secret.txt) && curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" -H "Content-Type: application/json" -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\"}"`
+- **Webhook drift histórico (2026-05-02 / 2026-05-03):** RESUELTO de raíz al migrar al modelo Pecunia (2026-05-03). Causa original: cualquier proceso que cargara el plugin Telegram con un state dir cuyo `.env` tuviera el token de Jano arrancaba grammY → `bot.start()` → `deleteWebhook()` automático → loop de 60s con el watchdog del daemon. Fix definitivo: token rotado, eliminados todos los state dirs y hooks de channel — Jano ahora opera SOLO via webhook + daemon (sin canal interactivo). Imposible reincidir salvo que alguien re-cree manualmente un state dir con el token. Si el daemon falla, restauración manual del webhook: `TOKEN=$(grep ^COS_TELEGRAM_BOT_TOKEN ~/.cos-agent/.env | cut -d= -f2-) && SECRET=$(grep ^COS_WEBHOOK_SECRET ~/.cos-agent/.env | cut -d= -f2-) && curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" -H "Content-Type: application/json" -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\"}"`
 
 ## Comandos operativos
 
