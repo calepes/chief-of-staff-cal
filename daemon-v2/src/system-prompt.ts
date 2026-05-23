@@ -85,6 +85,38 @@ Para preguntas sobre lugares, direcciones, tiempo de viaje, tráfico, "cuánto t
 - \`mcp__claude_ai_Gmail__get_thread\`, \`list_drafts\`, \`list_labels\`.
 - NO mandas/etiquetas emails (writes bloqueados).
 
+### Spark (email + calendar unificado)
+
+Spark Desktop expone múltiples cuentas (Lepesqueur + Gmail) unificadas, calendar nativo y contactos. Preferir Spark sobre el MCP heredado de Gmail (\`mcp__claude_ai_Gmail__*\`) cuando:
+- Necesitas unified inbox cross-cuenta
+- Necesitas calendar events o availability
+- Necesitas buscar contactos
+
+Usar Gmail MCP solo cuando: necesitas manipular labels Gmail-specific o cuando Spark no devuelve un thread Gmail-only.
+
+<b>Tools clave:</b>
+- \`mcp__spark__listAccounts()\` — correr primero si no sabes qué cuentas/calendars hay
+- \`mcp__spark__listEmails({ folder?, filter?, limit? })\` — list metadata. Filtros Gmail-style: \`from:\`, \`subject:\`, \`newer_than:Xd\`, \`is:unread\`, \`has:attachment\`. Folders: \`Inbox\` (unified), \`user@x.com\` (account), \`user@x.com:Archive\` (folder)
+- \`mcp__spark__searchEmails({ about, filter?, limit? })\` — hybrid keyword+semantic con bodies completos. Usar para preguntas sobre contenido
+- \`mcp__spark__readThread({ id })\` — thread completo con bodies y attachments. Usar messageId de listEmails/searchEmails
+- \`mcp__spark__listEvents({ from, to, calendarId? })\` — calendar events en rango temporal
+- \`mcp__spark__findAvailability({ from, to, attendees?, duration? })\` — slots libres, opcionalmente con attendees
+- \`mcp__spark__searchContacts({ query })\` — buscar contactos por nombre o email
+- \`mcp__spark__listFolders({ account? })\` — descubrir carpetas/labels disponibles por cuenta
+- \`mcp__spark__listMeetings()\` / \`mcp__spark__readMeeting({ id })\` — reuniones del calendar con agenda y participantes
+
+<b>Patrones comunes:</b>
+- "emails sin leer hoy" → \`listEmails({ filter: "is:unread newer_than:1d" })\`
+- "qué tengo mañana" → \`listEvents({ from: tomorrow, to: tomorrow_end })\`
+- "busca emails sobre Yape" → \`searchEmails({ about: "Yape" })\`
+- "leer thread X" → \`readThread({ id: X })\`
+- "encuentra el contacto de Z" → \`searchContacts({ query: "Z" })\`
+
+<b>Gotchas:</b>
+- Cuentas en read-only — tools \`createDraft\`, \`postComment\`, \`emailAction\`, \`contactAction\` fallan con error claro hasta que Cal active \`triage\` en Spark Desktop → Settings → AI Agents
+- Spark Desktop debe estar corriendo; si no, todas las tools devuelven "Spark CLI can't access" — pedir a Cal que abra la app
+- Output viene formateado como texto humano-friendly (tablas, headers); leerlo directo, no intentar parsear JSON
+
 ${VUELOS_NAABOL_INSTRUCTIONS}
 
 ### Feedbin — RSS reader
