@@ -151,8 +151,6 @@ const SERPAPI_FLIGHTS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/serpapi-flights/dist/index.js";
 const APPLE_NOTES_BIN =
   "/Users/calepes/.npm-global/lib/node_modules/apple-notes-mcp/build/index.js";
-const PANINI_MUNDIAL_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/panini-mundial/dist/index.js";
 const INVERSIONES_QUERY_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/inversiones-query/dist/index.js";
 const SPARK_DIST =
@@ -215,15 +213,6 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [APPLE_NOTES_BIN],
-    },
-    "panini-mundial": {
-      type: "stdio",
-      command: "node",
-      args: [PANINI_MUNDIAL_DIST],
-      env: {
-        NOTION_TOKEN: env.NOTION_TOKEN,
-        PANINI_DB_ID: "35cc487609dd80868b1dc68095a6f84f",
-      },
     },
     "inversiones-query": {
       type: "stdio",
@@ -432,20 +421,6 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     text = `[ubicación GPS: lat=${location.latitude}, lon=${location.longitude}] ${text}`;
   }
 
-  // Telegram Mini App data (web_app_data.data = JSON stringified payload)
-  if (!text && !voice && !photo && !document && m.web_app_data?.data) {
-    try {
-      const parsed = JSON.parse(m.web_app_data.data) as { codes?: string[] };
-      if (parsed.codes && parsed.codes.length > 0) {
-        const list = parsed.codes.join(", ");
-        text = `Registrar figuritas desde la mini app del álbum: ${list}`;
-        log({ msg: "web_app_data", codes: parsed.codes.length, list });
-      }
-    } catch {
-      log({ msg: "web_app_data_parse_error", raw: m.web_app_data.data });
-    }
-  }
-
   if (!text && !voice && !photo && !document) {
     log({ msg: "skip_message", reason: "unsupported kind", update_id: payload.update_id });
     return;
@@ -457,23 +432,6 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
       chatId,
       text: "🧹 Contexto limpiado.",
-    });
-    return;
-  }
-
-  // /album command — envía botón de teclado que abre la mini app del álbum.
-  // IMPORTANTE: sendData() de Telegram solo funciona cuando la mini app se abre
-  // desde un ReplyKeyboard web_app button (no desde el menu button del chat).
-  if (text && text.trim().toLowerCase() === "/album") {
-    await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
-      chatId,
-      text: "🃏 <b>Álbum Panini 2026</b>\nToca el botón para abrir la mini app de carga masiva.",
-      parseMode: "HTML",
-      replyMarkup: {
-        keyboard: [[{ text: "🃏 Álbum Panini 2026", web_app: { url: "https://apps.lepesqueur.net/panini-album/" } }]],
-        resize_keyboard: true,
-        one_time_keyboard: false,
-      },
     });
     return;
   }
@@ -740,7 +698,6 @@ function scheduleFocoCheckinsLocal(): void {
 async function registerBotCommands(token: string): Promise<void> {
   const commands = [
     { command: "menu", description: "Menú principal" },
-    { command: "album", description: "Álbum Panini 2026 (carga masiva)" },
     { command: "reset", description: "Limpiar contexto" },
   ];
   const scopes = [

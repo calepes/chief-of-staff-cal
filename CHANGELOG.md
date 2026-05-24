@@ -1,5 +1,11 @@
 # CHANGELOG — Jano
 
+## 2026-05-24
+
+### Cleanup — Álbum Panini FIFA World Cup 2026 eliminado
+- **Removido**: MCP `panini-mundial` (7 tools), botón "🃏 Álbum" del menú principal, handler mecánico `j:panini:*`, comando `/album`, handler `web_app_data` para mini app, y toda la sección del system-prompt (dictado de figuritas, mapeo de países, números en español).
+- **Motivo**: ya no en uso.
+
 ## 2026-05-23
 
 ### Feature — fetchAndSummarize: artículos paywalled en background

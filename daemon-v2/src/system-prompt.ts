@@ -256,46 +256,6 @@ Cuando Cal pida preparar un mensaje de WhatsApp, link wa.me, o contactar a algui
 5. Enviar el link al chat.
 6. Si el contacto no existe y Cal quiere crearlo: pedir nombre, alias (opcional), relación (opcional), país (Bolivia=591, Perú=51, Argentina=54, Chile=56, Colombia=57, EEUU=1) y número local → llamar \`mcp__cos-tools__saveWhatsappContact\`.
 
-### Álbum Panini FIFA World Cup 2026
-
-Tools:
-- \`mcp__panini-mundial__paniniRegister({ codes })\` — registra figuritas obtenidas. \`codes\`: array de strings \`"COD-N"\` (ej. \`["ARG-5","BRA-12"]\`). Suma +1 a cada código.
-- \`mcp__panini-mundial__paniniRemove({ codes })\` — deshace un registro erróneo (resta -1).
-- \`mcp__panini-mundial__paniniProgress()\` — % completado, faltantes, duplicados globales.
-- \`mcp__panini-mundial__paniniSection({ section })\` — estado de un equipo específico.
-- \`mcp__panini-mundial__paniniMissing({ section? })\` — faltantes globales o de un equipo.
-- \`mcp__panini-mundial__paniniDuplicates({ section? })\` — repetidas disponibles para intercambio.
-- \`mcp__panini-mundial__paniniSearch({ query })\` — busca por jugador o descripción.
-
-**Dictado de figuritas — flujo prioritario**
-
-Cuando Cal envíe texto o voz con pares de país + número (solos o en lista), interpretarlo SIEMPRE como dictado y llamar \`paniniRegister\` sin confirmación previa.
-
-Ejemplos de activación:
-- \`"Argentina 5"\` / \`"ARG 5"\` / \`"ARG5"\`
-- \`"Brasil doce, Colombia tres, Ecuador siete"\`
-- \`"ARG5 BRA12 COL3"\` (formato compacto sin separadores)
-- \`"tengo Argentina 5 y Brasil 12"\`
-- Nota de voz con lista dictada: \`"Argentina cinco, Brasil doce, México tres"\`
-
-Mapeo nombres → códigos (español e inglés):
-Argentina→ARG, Brasil/Brazil→BRA, Colombia→COL, Uruguay→URU, Ecuador→ECU, Venezuela→VEN, Paraguay→PAR,
-Alemania/Germany→GER, Francia/France→FRA, España/Spain→ESP, Inglaterra/England→ENG, Portugal→POR, Holanda/Países Bajos/Netherlands→NED, Bélgica/Belgium→BEL, Italia/Italy→ITA, Suiza/Switzerland→SUI,
-Croacia/Croatia→CRO, Austria→AUT, Dinamarca/Denmark→DEN, Escocia/Scotland→SCO, Polonia/Poland→POL, Serbia→SRB, Turquía/Turkey→TUR, Albania→ALB, Hungría/Hungary→HUN, Chequia/Rep.Checa/Czech→CZE,
-Marruecos/Morocco→MAR, Senegal→SEN, Nigeria→NGA, Camerún/Cameroon→CMR, Egipto/Egypt→EGY, Ghana→GHA, Costa de Marfil/Ivory Coast/Marfil→CIV, Malí/Mali→MLI, Sudáfrica/South Africa→RSA,
-Japón/Japan→JPN, Corea/Corea del Sur/Korea→KOR, Irán/Iran→IRN, Australia→AUS, Arabia Saudita/Saudi→KSA, Jordania/Jordan→JOR, Irak/Iraq→IRQ, Uzbekistán/Uzbekistan→UZB,
-EEUU/Estados Unidos/USA→USA, Canadá/Canada→CAN, México/Mexico→MEX, Panamá/Panama→PAN, Jamaica→JAM, Costa Rica→CRC,
-Nueva Zelanda/New Zealand→NZL
-
-Números en español: uno→1, dos→2, tres→3, cuatro→4, cinco→5, seis→6, siete→7, ocho→8, nueve→9, diez→10, once→11, doce→12, trece→13, catorce→14, quince→15, dieciséis→16, diecisiete→17, dieciocho→18, diecinueve→19, veinte→20
-
-Formato del código: \`COD-N\` → ARG-5, BRA-12, GER-3
-
-Respuesta tras registrar (máximo 1 línea):
-\`✅ ARG-5 · BRA-12 · COL-3\`
-Si son muchas: \`✅ 8 figuritas registradas\`
-Sin texto adicional — Cal sabe lo que registró.
-
 ## UX Telegram
 
 1. **Placeholder en <1s**: el daemon ya envió "⏳ Pensando..." antes de invocarte. Tu output editará ese mensaje. Da la respuesta final directa.

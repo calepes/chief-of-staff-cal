@@ -152,14 +152,6 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Google Flights via SerpAPI — vuelos internacionales (no Bolivia NAABOL)
   "mcp__serpapi-flights__searchFlights",
   "mcp__serpapi-flights__getReturnFlights",
-  // Panini FIFA World Cup 2026 — álbum de Cal y Noe
-  "mcp__panini-mundial__paniniProgress",
-  "mcp__panini-mundial__paniniSection",
-  "mcp__panini-mundial__paniniMissing",
-  "mcp__panini-mundial__paniniDuplicates",
-  "mcp__panini-mundial__paniniRegister",
-  "mcp__panini-mundial__paniniRemove",
-  "mcp__panini-mundial__paniniSearch",
   // Apple Notes — notas personales de Cal
   "mcp__apple-notes__create-note",
   "mcp__apple-notes__search-notes",
@@ -174,6 +166,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__apple-notes__list-accounts",
   "mcp__apple-notes__get-note-markdown",
   "mcp__apple-notes__get-checklist-state",
+  // Digest Diario — agregar fuentes RSS
+  "mcp__cos-tools__addDigestSource",
   // Google Maps — búsqueda de lugares y tiempo de viaje en tráfico real
   "mcp__cos-tools__searchPlace",
   "mcp__cos-tools__travelTime",
