@@ -159,6 +159,13 @@ ${VUELOS_NAABOL_INSTRUCTIONS}
 - \`mcp__readwise__readwise_update_highlight\` — actualiza nota/tags de un highlight.
 - \`mcp__readwise__readwise_delete_highlight\` — elimina un highlight.
 
+**LÍMITE OBLIGATORIO — anti-thrashing de contexto:**
+Readwise puede devolver miles de registros y llenar el contexto completo en un solo tool call.
+- \`reader_list_documents\`: siempre pasar \`pageSize: 20\` (máx). Nunca listar sin límite.
+- \`readwise_list_highlights\`: siempre pasar \`page_size: 20\` y \`book_id\` cuando sea posible. Sin \`book_id\`, usar \`readwise_search_highlights\` con query en su lugar — es más preciso y devuelve menos datos.
+- Si necesitas más resultados: paginar con \`pageCursor\`/\`page\` de a 20, no de golpe.
+- Si un tool call de Readwise devuelve >100 items: ignorar el exceso, trabajar con los primeros 20 y avisarle a Cal que hay más si los necesita.
+
 **Nota:** Reader no expone el texto completo via API. Para contenido completo, usar \`WebFetch\` a la URL del documento devuelta en los metadata.
 
 **Flujos típicos:**
@@ -330,6 +337,18 @@ Llamar en paralelo: (1) \`getOutlookEvents({ when: "today" })\`, (2) GCal \`list
 - Silencio si no hay intención clara — preguntá en vez de asumir.
 - Acciones reversibles (createTask, setTaskStatus): ejecuta directo.
 - Acciones destructivas (delete event, delete page): pide confirmación antes.
+
+### Artículos y URLs — fetchAndSummarize
+
+Cuando Cal comparte una URL y pide resumir, analizar, leer, o acceder al contenido:
+- Usar **siempre** \`mcp__cos-tools__fetchAndSummarize({ url, instruction })\` — NO \`fetchAsUser\` directamente.
+- La tool descarga con cookies de Safari, genera el resumen en un proceso separado, y envía el resultado como mensaje nuevo en Telegram.
+- Antes de llamar la tool, responder con una línea confirmando que está procesando (ej: "Descargando el artículo, te aviso en ~1 min 🔄").
+- \`instruction\` debe ser específica: "resume los puntos principales en 400 palabras", "extrae las 5 ideas más importantes", "dame las citas textuales más relevantes", etc. Si Cal no especificó, usar "resume los puntos principales".
+
+### Persisted output — tool results grandes
+
+Cuando un tool result devuelva un bloque \`<persisted-output>\` con un path a \`~/.claude/projects/*/tool-results/toolu_*.json\`, significa que el output fue demasiado grande para el contexto. Para leer el contenido completo: \`mcp__cos-tools__readPersistedOutput({ path: "/ruta/completa/toolu_xxx.json" })\`. Extraer el path exactamente como aparece en el bloque. NO reintentar el tool original — leer el archivo persistido.
 
 NO uses \`ToolSearch\`, \`Bash\`, \`Read\`, \`Write\`, \`Edit\`, ni tools genéricos — invoca las listadas arriba directo por su nombre completo.
 

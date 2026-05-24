@@ -1,5 +1,16 @@
 # CHANGELOG — Jano
 
+## 2026-05-23
+
+### Feature — fetchAndSummarize: artículos paywalled en background
+
+- **`fetchAndSummarize({ url, instruction })` tool:** descarga URL con cookies de Safari de Cal y genera resumen/análisis en subprocess separado (`claude -p --tools ""`). El texto del artículo no entra al contexto de Jano — solo el resultado final (~1-2K chars). Async: progress updates + resultado como mensajes nuevos en Telegram.
+- **`fetchAsUser({ url })` tool:** parsea `Cookies.binarycookies` de Safari sin dependencias npm (packages existentes: 404, deprecated, o API limitada). Requiere FDA en `~/.npm-global/bin/node`. Devuelve texto stripeado de HTML, máx 50K chars.
+- **`readPersistedOutput({ path })` tool:** lee archivos SDK persisted-output con whitelist estricta de paths (`~/.claude/projects/*/tool-results/toulu_*.json`).
+- **Readwise anti-thrashing:** system prompt fuerza `pageSize: 20` en `reader_list_documents` y `readwise_list_highlights`. Sin límite, Readwise devuelve miles de items → autocompact thrashing.
+- **Playwright bloqueado:** `mcp__plugin_playwright_playwright__*` agregado a `DISALLOWED_BUILTINS` — se heredaba de OAuth Max y Jano intentó usarlo para leer `file://` paths.
+- **Gotchas confirmados:** prompts >10K chars al subprocess deben ir via stdin (`child.stdin.write()`), no como arg CLI. Flag correcto: `--tools ""` (no `--no-tools` que no existe).
+
 ## 2026-05-21
 
 ### Feature — Foco CAL: check-ins proactivos + tools de revisión

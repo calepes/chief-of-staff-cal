@@ -57,6 +57,15 @@ export const DISALLOWED_BUILTINS: string[] = [
   // mcp__youtube-transcribe en su lugar (caption fast-path + whisper fallback).
   // El viejo solo lee captions y rompe con videos sin captions.
   "mcp__youtube-transcript__get_transcripts",
+  // Playwright — bloqueado: Jano no necesita control de navegador. Fue visto
+  // intentando leer file:// paths de persisted-output (2026-05-23) — no es el patrón correcto.
+  "mcp__plugin_playwright_playwright__browser_navigate",
+  "mcp__plugin_playwright_playwright__browser_snapshot",
+  "mcp__plugin_playwright_playwright__browser_click",
+  "mcp__plugin_playwright_playwright__browser_fill_form",
+  "mcp__plugin_playwright_playwright__browser_type",
+  "mcp__plugin_playwright_playwright__browser_evaluate",
+  "mcp__plugin_playwright_playwright__browser_take_screenshot",
 ];
 
 // MCPs heredados que SÍ usa CoS. allowedTools es allowlist estricto.

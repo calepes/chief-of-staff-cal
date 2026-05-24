@@ -21,6 +21,9 @@ import {
   type FocoProgressEntry,
   type FocoSection,
 } from "./tools/foco-cal.js";
+import { fetchAsUser } from "./tools/fetch-as-user.js";
+import { readPersistedOutput } from "./tools/read-persisted.js";
+import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
@@ -337,6 +340,49 @@ export function buildSdkTools(deps: ToolDeps) {
           kpisViewUrl: FOCO_KPIS_VIEW_URL,
           tareaViewUrl: FOCO_TAREAS_VIEW_URL,
         });
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "readPersistedOutput",
+      "Lee el contenido completo de un archivo persisted-output del SDK (tool result demasiado grande para el contexto). " +
+      "Usar EXCLUSIVAMENTE cuando un tool result anterior devuelva un bloque <persisted-output> con un path a ~/.claude/projects/*/tool-results/toolu_*.json. " +
+      "Extrae el path del mensaje y pásalo aquí para obtener el contenido completo.",
+      { path: z.string().describe("Ruta absoluta al archivo .json del persisted-output") },
+      async ({ path }) => asText(readPersistedOutput(path)),
+      READ_ONLY,
+    ),
+    tool(
+      "fetchAsUser",
+      "Hace fetch de una URL usando las cookies de Safari de Cal, permitiendo acceder a contenido paywalled (NYT, FT, The Economist, Substack, El País, etc.) donde Cal tiene suscripción activa. " +
+      "Devuelve el texto extraído del HTML (scripts/estilos removidos, máx 50K chars). " +
+      "Si no puede leer las cookies (TCC), indica el paso exacto para otorgar permiso. " +
+      "Usar cuando Cal comparte un link de un artículo que requiere login o suscripción.",
+      { url: z.string().url().describe("URL completa del artículo o página a leer") },
+      async ({ url }) => asText(await fetchAsUser(url)),
+      READ_ONLY,
+    ),
+    tool(
+      "fetchAndSummarize",
+      "Descarga una URL usando las cookies de Safari de Cal y genera un resumen/análisis en background " +
+      "(proceso separado — no afecta el contexto de Jano). " +
+      "Usar cuando Cal comparte un link con instrucción de resumir, analizar, extraer puntos clave, etc. " +
+      "Envía progress updates y el resultado final como mensajes nuevos en Telegram. " +
+      "NO usar fetchAsUser directamente para artículos largos — usar esta tool.",
+      {
+        url: z.string().url().describe("URL del artículo a procesar"),
+        instruction: z.string().describe(
+          "Instrucción específica: 'resume los puntos principales', 'extrae las citas más importantes', " +
+          "'dame un resumen ejecutivo de 300 palabras', etc."
+        ),
+      },
+      async ({ url, instruction }) => {
+        const result = await fetchAndSummarize(
+          { botToken: deps.botToken },
+          deps.getCurrentChatId(),
+          { url, instruction },
+        );
+        return asText(result);
       },
       READ_ONLY,
     ),
