@@ -60,8 +60,7 @@ El resto del sistema (cron agents, hooks globales, scripts standalone) sigue sie
    │  └────────────────────────────────────┘  │
    │                                          │
    │  Secretos: ~/.cos-agent/.env             │
-   │  Webhook secret: ~/.cos-agent/           │
-   │                  webhook-secret.txt      │
+   │   + shared: ~/.claude/secrets/apps.env   │
    └──────────────────────────────────────────┘
 
    External (Cloudflare Workers):
@@ -264,7 +263,7 @@ Cal tap ✅:
 - **Logs daemon:** `~/Library/Logs/cos-agent-v2.{out,err}.log`
 - **Logs hooks globales:** `~/.claude/logs/`
 - **Secretos daemon:** `~/.cos-agent/.env` (chmod 600). NO duplicar tokens en otros archivos.
-- **Webhook secret:** `~/.cos-agent/webhook-secret.txt` (one-way en wrangler).
+- **Webhook secret:** env var `COS_WEBHOOK_SECRET` en `~/.cos-agent/.env` (espejo en wrangler secret de CF). Archivo legacy `webhook-secret.txt` eliminado 2026-05-23.
 - **Plists:** `~/Library/LaunchAgents/com.claude.*.plist` (CoS crons) y `com.cal.*.plist` (daemons + Family crons)
 
 ## Referencias cruzadas

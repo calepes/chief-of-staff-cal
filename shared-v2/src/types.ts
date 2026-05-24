@@ -23,6 +23,7 @@ export interface TelegramMessage {
   caption?: string;
   location?: { latitude: number; longitude: number };
   reply_to_message?: TelegramMessage;
+  web_app_data?: { data: string; button_text: string };
 }
 
 export interface TelegramCallbackQuery {

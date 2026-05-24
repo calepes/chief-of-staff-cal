@@ -2,10 +2,11 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
+    "rootDir": "src",
     "rootDirs": ["src", "../../../../MCP Servers/mcp-servers/shared"],
     "lib": ["ES2022"],
     "moduleResolution": "Node",
     "module": "ESNext"
   },
-  "include": ["src/**/*", "../../../../MCP Servers/mcp-servers/shared/**/*"]
+  "include": ["src/**/*"]
 }
