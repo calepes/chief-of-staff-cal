@@ -27,6 +27,7 @@ import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import {
   formatFechaEs,
+  queryMeetingsByDate,
   tgSend,
   type MeetingNote,
 } from "./tools/meeting-notes.js";
@@ -466,6 +467,71 @@ export function buildSdkTools(deps: ToolDeps) {
         }
 
         return asText({ ok: true, sent });
+      },
+    ),
+    tool(
+      "reviewMeetings",
+      "Consulta las reuniones de un rango de fechas en la DB de Meetings de Notion y envía un " +
+      "mensaje de selección (Fase 1) al chat de Cal. " +
+      "Cal selecciona qué reuniones procesar con botones numerados o [Todas]. " +
+      "Args: { from, to } en formato YYYY-MM-DD — el LLM parsea lenguaje natural antes de llamar. " +
+      "Llamar cuando Cal pida 'revisa mis meetings de X a Y' o 'reuniones de esta semana'.",
+      {
+        from: z.string().describe("Fecha inicio YYYY-MM-DD"),
+        to: z.string().describe("Fecha fin YYYY-MM-DD"),
+      },
+      async ({ from, to }) => {
+        const notionToken = process.env.NOTION_TOKEN;
+        if (!notionToken) return asText({ error: "NOTION_TOKEN no configurado" });
+
+        const meetings = await queryMeetingsByDate({ from, to, notionToken });
+
+        if (meetings.length === 0) {
+          return asText({ ok: true, message: "No hay reuniones en ese rango.", count: 0 });
+        }
+
+        const chatId = deps.getCurrentChatId();
+
+        // Guardar lista completa en KV para cuando llegue callback msel:*
+        await deps.kv.set(`meeting-list:${chatId}`, meetings, 30 * 60);
+
+        // Guardar datos individuales también
+        for (const m of meetings) {
+          await deps.kv.set(`meeting:${chatId}:${m.id}`, m, 30 * 60);
+        }
+
+        // Construir mensaje de selección
+        const lines = meetings.map((m, i) => {
+          const flag = m.hasFocoCal ? " ✦" : "  ";
+          const dateStr = formatFechaEs(m.fecha);
+          return `${i + 1}.${flag} <b>${m.title}</b> · ${dateStr}`;
+        });
+
+        const text = [
+          `<b>📋 Meetings ${formatFechaEs(from)}–${formatFechaEs(to)}</b> (${meetings.length})`,
+          "",
+          lines.join("\n"),
+          "",
+          "<i>✦ = tiene análisis de Foco CAL</i>",
+          "",
+          "¿Cuáles cruzamos contra tu Foco?",
+        ].join("\n");
+
+        // Botones numerados (máx 5 por fila) + Todas
+        type TgButton = { text: string; callback_data: string };
+        const numButtons: TgButton[] = meetings.map((m, i) => ({
+          text: `${i + 1}`,
+          callback_data: `msel:${m.id}`,
+        }));
+        const rows: TgButton[][] = [];
+        for (let i = 0; i < numButtons.length; i += 5) {
+          rows.push(numButtons.slice(i, i + 5));
+        }
+        rows.push([{ text: "✅ Todas", callback_data: "msel:all" }]);
+
+        await tgSend(deps.botToken, chatId, text, { inline_keyboard: rows });
+
+        return asText({ ok: true, count: meetings.length });
       },
     ),
     tool(
