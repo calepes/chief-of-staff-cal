@@ -22,8 +22,9 @@
 - **Triggers para priorizar:** Eisenhower no actualiza prioridades en Apple, recurring/location/tags se vuelvan necesarios, o un MCP de la lista se vuelva mantenedor activo en npm.
 
 ### Hooks pendientes de revisar (2026-05-02)
-- [ ] **pre-compact-snapshot.sh** (Apr 19) — revisar y registrar como PreCompact hook si sigue siendo válido
-- [ ] **notion-audit.sh** (Apr 19) — revisar y registrar como PostToolUse hook si sigue siendo válido
+- [x] ✅ **pre-compact-snapshot.sh** — registrado como PreCompact hook en `settings.json` (activo)
+- [x] ✅ **notion-audit.sh** — registrado como PostToolUse(Notion) hook en `settings.json` (activo)
+- [x] ✅ **stop-telegram-notify.sh** — registrado como Stop hook en `settings.json` (activo, contrario a lo que decía este BACKLOG antes)
 - [x] ✅ **Limpiar `~/.claude/channels/telegram/.env`** (2026-05-04) — token de Jano removido (rotado vía BotFather, invalidó copias leakeadas en transcripts). Quedan solo `NOTION_TOKEN` y `HEALTH_API_KEY` en el .env. Como parte de la migración Jano+Vesta al modelo Pecunia (sin plugin interactivo), state dirs `telegram-cos/` y `telegram-family/` fueron eliminados completos.
 - [ ] **Validar setup de Yapito** (`@yapito_cal_bot`, `~/.yapito/.env`) — durante el inventario 2026-05-03 vimos que NO tiene webhook configurado y no aparece daemon en `launchctl list`. Confirmar si está activo en otra máquina, archivado, o si necesita setup completo (worker CF + queue + daemon Node estilo Pecunia).
 - [ ] **Revisar contenido y formato del nightly-report cron** (2026-05-04) → reporte 2026-05-03 22:00 mostró: (1) "GCal no disponible" pese a tener `mcp__claude_ai_Google_Calendar__list_events` en `--allowedTools` — el OAuth Max del cron no autoriza el MCP, ver log; (2) formato Markdown legacy con `**bold**` (revisar parse_mode usado vs HTML que usa el daemon Jano); (3) **validar con Cal qué secciones deben ir en el briefing** antes de tocar el script — el contenido actual (Hoy/Pendientes/Mañana/Feedbin/Readwise/Sugerencia/Learnings) puede no ser el set ideal. Script: `~/.claude/hooks/nightly-report.sh`.
@@ -42,11 +43,34 @@
 - **Pedido Cal 2026-04-29:** integrar Spotify pero NO con callbacks dedicados — el agent interpreta "pausa", "skip", "qué suena" y llama una tool `spotifyControl` con lenguaje natural.
 - **Infra existente:** worker `spotify-auth.carlos-cb4.workers.dev` (OAuth flow). Pendiente: endpoint exacto para access token + crear `daemon-v2/src/tools/spotify.ts` con args `{ action, query? }`.
 
-### Migrar crons secundarios al daemon v2 (iteración futura)
-- 16 plists pausados en `disabled-2026-04-21/`. Candidatos a embeber con `node-cron` en daemon v2: briefings país, nightly-report, eisenhower-weekly, morning-build, skill-detector, proactive-ideas.
-- Alternativa: dejar como `claude -p` programado independiente (asume riesgo TCC reset en updates del binario).
-- **Briefings país (post 2026-04-29):** ya no es bloqueante el cron — el bot CoS puede generar on-demand via tool `runBriefing`. Re-habilitar `com.claude.daily-briefings` (mover de `disabled-2026-04-29/` a `~/Library/LaunchAgents/`) si se quiere briefing automático cada 5am como antes.
-- **Priorizar `eisenhower-weekly`** (2026-05-04): tres razones para migrar antes que otros crons. (a) Cold start `claude -p` ~30-60s + ~25 items secuenciales está al límite del timeout 600s actual; (b) cuando el MCP de apple-reminders migre a EventKit, un cron embebido en el daemon podrá actualizar priority real (hoy solo genera reporte visual); (c) el prompt del script duplica reglas FORMATO del system-prompt del daemon — mantener una sola fuente de verdad. Beneficio esperado: warm pool + MCPs ya cargados → ejecución <60s sin cold start.
+### Crons secundarios — Estado post-auditoría 2026-05-24
+
+**Activos (5):**
+- `com.claude.heartbeat` ✅ — cada 30min, 7am-22:30
+- `com.claude.nightly-report` ✅ — 22:00 diario
+- `com.claude.eisenhower-weekly` ✅ — Dom 21:00
+- `com.claude.outlook-cache` ✅ — cada 4h
+- `com.cal.jano-morning-build` ✅ — 22:30 diario (renombrado desde `com.claude.morning-build`)
+
+**Deshabilitados intencionalmente:**
+- `com.claude.daily-briefings` — `.disabled` en LaunchAgents. On-demand via `runBriefing` tool. Si se quiere 5am automático, renombrar quitando `.disabled`.
+
+**Sin cargar — requieren decisión:**
+- `com.claude.extract-learnings` — batch nocturno 21:55 que consolida learnings de transcripts. Nunca fue cargado. Verificar que `extract-learnings.sh` apunte a `~/.npm-global/bin/claude` antes de activar.
+- `com.claude.sync-learnings` — sync semanal Dom 21:00 de learnings al repo. Nunca fue cargado.
+- `com.claude.skill-detector` — Dom 21:30, escanea transcripts y propone skills. Nunca fue cargado (BACKLOG decía "cargado 2026-04-20" — era incorrecto). Mismo check de CLI path antes de activar.
+
+**Bloqueado por tokens externos:**
+- `com.claude.proactive-ideas` — requiere `X_BEARER_TOKEN`, `X_THREADS_TOKEN`, `NOTION_IDEAS_DB_ID` en `~/.cos-agent/.env`.
+
+**Obsoletos — candidatos a eliminar:**
+- `disabled-2026-04-21/com.cal.cos-health-check.plist` — reemplazado por heartbeat engine
+- `disabled-2026-04-21/com.claude.morning-build.plist` — reemplazado por `com.cal.jano-morning-build`
+- `disabled-2026-04-29/com.cal.cos-agent.plist` — reemplazado por `com.cal.cos-agent-v2`
+
+**Deuda de docs en heartbeat-tasks/:**
+- `overdue-reminders.md` — CLAUDE.md lo menciona como `overdue-tasks.md` (nombre viejo, actualizar)
+- `usage-morning.md` y `usage-evening.md` — sin documentar en CLAUDE.md
 
 ### Migrar Family/Vesta de MarkdownV2 a HTML (Fase 3 - 2026-04-29)
 - **Bug compartido con CoS pre-fix:** Family/Vesta system-prompt instruye MarkdownV2 al LLM, pero el `shared-v2/src/telegram.ts` ya tiene default `HTML`. Resultado: LLM genera `*texto*`, `\.`, `\!` y al mandar como HTML → Cal/Noe ven los caracteres literales (asteriscos, backslashes en puntos).
@@ -64,7 +88,7 @@
 ### ✅ Deshacer integración Spotify completa (2026-04-20)
 - **Removido:** `telegram-plugin/spotify-client.ts`, handlers `spotify:*` en `callback-router.ts`, carpetas `spotify-miniapp-worker/` + `spotify-auth-worker/`, secrets `.env` (`SPOTIFY_AUTH_WORKER_URL`), workers Cloudflare (`spotify-auth` + `spotify-miniapp`), KV `spotify-auth-SPOTIFY_TOKENS`, secciones CLAUDE.md
 - **Mantenido:** Spotify Developer App en console.spotify.com (eliminar es irreversible), CHANGELOG + specs históricos
-- **Pendiente manual Cal:** reset `setChatMenuButton` a default (Telegram API connection reset desde sesión; copy-paste listo en commit)
+- ~~**Pendiente manual Cal:** reset `setChatMenuButton` a default~~ — ✅ reseteado 2026-05-24 a `type: commands` (estaba como `web_app` apuntando a Panini album)
 
 ### Referencia: Filesystem-based knowledge system (alt RAG) — @soyabraham.ia
 - **Fuente:** Post de Threads — https://www.threads.com/@soyabraham.ia/post/DXUxwD3jVX6
@@ -202,7 +226,7 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 
 **Fase 3: Heartbeat — Trabajo proactivo** (implementado 2026-04-19)
 - [x] 3.1 Heartbeat cada 30min → `~/.claude/hooks/heartbeat.sh` + launchd `com.claude.heartbeat` (cargado, 7am-22:30 cada 30min). Razona sobre contexto, agrupa alerts por prioridad (high/medium/low), buffer único a Telegram, contador de fallos consecutivos (≥3 → alerta). Log rotation 5MB. Status script: `heartbeat-status.sh`. Spec: `2026-04-19-heartbeat-fase3-design.md`. Plan: `2026-04-19-heartbeat-fase3.md`
-- [x] 3.2 Heartbeat tasks como Markdown → `~/.claude/heartbeat-tasks/` con frontmatter (`name`, `schedule: every|morning-only|afternoon-only|midday-only`, `priority: high|medium|low`). Checks creados: `overdue-tasks.md` (Notion vencidas), `flight-checkin.md` (Google Calendar AntoCataNoeCal), `incomplete-tasks.md` (sin asignado/deadline, morning-only), `midday-steps.md` (Health worker, alerta si <3000 al mediodía). Cada check responde `HEARTBEAT_OK` o `ALERT\n<mensaje>`
+- [x] 3.2 Heartbeat tasks como Markdown → `~/.claude/heartbeat-tasks/` con frontmatter (`name`, `schedule: every|morning-only|afternoon-only|midday-only`, `priority: high|medium|low`). Checks actuales (2026-05-24): `overdue-reminders.md` (antes llamado `overdue-tasks.md`), `incomplete-tasks.md`, `midday-steps.md`, 7 health checks, `usage-morning.md`, `usage-evening.md`. `flight-checkin.md` movido al daemon (2026-05-10). Cada check responde `HEARTBEAT_OK` o `ALERT\n<mensaje>`
 - [x] 3.3 "Proactive ideas" (3x/día) → `~/.claude/hooks/proactive-ideas.sh` + plist `com.claude.proactive-ideas` (creado, NO cargado hasta que Cal configure tokens X/Threads + NOTION_IDEAS_DB_ID). Slots: 9am=foco 🎯, 14:00=tactical ⚡, 19:00=lookahead 🔮. Lee posts propios X+Threads últimas 24h + tareas activas Notion → JSON {title, body, source} → Notion DB "Ideas Proactivas (CoS)" (id `59e0439d7fe0483ab735575b9e0c1007`, anidada bajo "💡 Ideas") + Telegram. Graceful degradation si falta cualquier API.
 
 **Fase 4: Webhooks — Reaccionar al mundo**
@@ -212,9 +236,9 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 - ~~4.4 Notion changes~~ — descartado (no relevante)
 
 **Fase 5: Auto-mejora continua** (1 día)
-- [x] 5.1 Self-improving (2026-04-20) — sistema captura learnings en `~/.claude/learnings/cos/` (filesystem-RAG indexado), review diario en nightly-report con botones, sync semanal a repo. Tipos: correction/error/decision/idea/pattern. Componentes: skill `/learn`, hook PostToolUse `learn-error.sh`, batch nocturno `extract-learnings.sh`, callbacks `learn:*` mecánicos. Plist `sync-learnings` cargado 2026-04-20 (domingo 21:00). Plist `extract-learnings` (21:55) creado pero no cargado aún. Spec/plan en `docs/superpowers/`
-- [x] 5.2 Morning builds (2026-04-20) — cron 22:30 genera propuesta via `claude -p` con contexto del día (git log, learnings, heartbeat, tareas mañana), manda a Telegram con botones ✅/❌. Al aprobar, executor corre en background con scope estricto (commands/, heartbeat-tasks/, hooks/, docs/, CLAUDE.md, BACKLOG.md, CHANGELOG.md — NO plugin, NO workers, NO plists) y auto-commitea. Callbacks `build:approve|reject:<id>` mecánicos en plugin fork. Plist cargado 2026-04-20
-- [x] 5.3 Skills auto-instalables (2026-04-20) — cron domingo 21:30 escanea transcripts de la semana (últimos 7 días) buscando patrones conductuales con frecuencia ≥3/sem. Genera propuesta con JSON completo (skill body incluido), envía a Telegram con botones. Al aprobar, installer mecánico escribe `commands/<name>.md` + copia a `~/.claude/commands/` + commit + push. Detecta duplicados contra skills existentes. Callbacks `skill:approve|reject:<id>` mecánicos. Plist cargado 2026-04-20
+- [x] 5.1 Self-improving (2026-04-20) — sistema captura learnings en `~/.claude/learnings/cos/` (filesystem-RAG indexado), review diario en nightly-report con botones, sync semanal a repo. Tipos: correction/error/decision/idea/pattern. Componentes: skill `/learn`, hook PostToolUse `learn-error.sh`, batch nocturno `extract-learnings.sh`, callbacks `learn:*` mecánicos. **Estado 2026-05-24:** captura individual activa (hook registrado). Plists `sync-learnings` y `extract-learnings` en `disabled-2026-04-21/` — nunca fueron cargados. Batch nocturno y sync semanal NO están corriendo. Spec/plan en `docs/superpowers/`
+- [x] 5.2 Morning builds (2026-04-20) — activo como `com.cal.jano-morning-build` (renombrado desde `com.claude.morning-build`). Cron 22:30, genera propuesta, manda a Telegram con botones ✅/❌, executor corre en background con scope estricto. Plist `com.claude.morning-build` en `disabled-2026-04-21/` es obsoleto — limpiar.
+- [x] 5.3 Skills auto-instalables (2026-04-20) — script y plist creados. **Estado 2026-05-24:** plist `com.claude.skill-detector` en `disabled-2026-04-21/` — NUNCA fue cargado en producción (documentación anterior decía "cargado 2026-04-20" — incorrecto). Pendiente: verificar path CLI + decidir si activar.
 
 **Fase 6: Multi-agente** (1 día)
 - [ ] 6.1 Agentes especializados → `notion-agent`, `research-agent`, `spotify-agent` con sesión aislada. Ref: proyecto `openclaw-agents` instala 9 agentes especializados con un comando + routing por grupo Telegram. Performance: 4 subagentes paralelos = 5min vs 20min secuencial.

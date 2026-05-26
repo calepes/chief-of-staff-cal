@@ -437,6 +437,36 @@ Al completar los 4: sintetizar en bloque SCQA, confirmar con Cal, avanzar a step
 
 **Respuesta en Telegram:** el wizard es conversacional. Cada turno: una pregunta o una confirmación para avanzar. Los bloques SCQA, STORYLINE y SLIDES van en \`<pre>...</pre>\` para que sean fáciles de copiar.
 
+## Fraternidad Peruana (Achoradazos)
+
+La Fraternidad Peruana es el grupo de amigos peruanos de Cal en Santa Cruz. Se reúnen en juntes mensuales. Cal es el tesorero — gestiona cuotas, eventos y pagos.
+
+**Tools disponibles (prefijo \`mcp__achoradazos__\`):**
+- \`searchFraterno({ query })\` — busca fraterno por nombre/apellido. Retorna id, nombre, categoría (Fraterno/Invitado), estado (Activo/Inactivo/Retirado).
+- \`listPendingPayments()\` — fraternos activos sin pagar cuota activa. Retorna listas "pagaron" / "pendientes" + resumen.
+- \`registerDeposit({ fraternoId, conceptoId, junteId, valor, fecha, constanciaUrl?, observacion? })\` — registra pago en Airtable. Usar IDs de las tools de búsqueda.
+- \`uploadReceipt({ imagePath })\` — comprime imagen y sube a litterbox (URL temporal 24h para adjuntar a Airtable).
+- \`createEvento({ nombre, fecha, lugar? })\` — crea junte/reunión en Calendario Eventos.
+- \`createConceptoCobro({ nombre, valorUnitario, cantidad })\` — crea concepto de cuota mensual.
+- \`getActiveEvento()\` — retorna el junte más reciente (id + nombre + fecha + lugar).
+- \`getActiveConcepto()\` — retorna el concepto con Activos=true (id + nombre + valor).
+- \`getPendingPaymentMessage()\` — genera el mensaje WhatsApp con pendientes, monto y cuenta destino.
+
+**Workflow al recibir comprobante de pago:**
+1. Extraer del comprobante: nombre, monto, fecha, motivo, Nro transacción
+2. \`searchFraterno\` por apellido → verificar categoría/estado
+3. \`getActiveConcepto\` y \`getActiveEvento\` para obtener IDs (en paralelo)
+4. \`uploadReceipt({ imagePath })\` con el path de la imagen del comprobante
+5. \`registerDeposit\` con todos los datos + URL de constancia
+6. Confirmar a Cal: # depósito creado + datos clave
+
+**Workflow al armar mensaje de cobro pendiente:**
+→ \`getPendingPaymentMessage()\` — ya genera el mensaje WhatsApp listo para copiar/pegar.
+
+**Cuenta destino:** BCP 70152191938316 (Carlos Lepesqueur). Cuota estándar: Bs 250 por fraterno activo.
+
+**Triggers:** "quién debe la cuota", "registra este pago", "crea el evento", "nuevo junte", "manda recordatorio de pago", "cuántos han pagado", "cuota de [mes]".
+
 ## Aprendizajes
 
 - \`mcp__agent-learnings__addLearning({ agent: "jano", text })\` — guarda un aprendizaje persistente para futuras sesiones.

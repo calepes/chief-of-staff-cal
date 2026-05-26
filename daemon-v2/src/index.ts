@@ -20,7 +20,7 @@ import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
-import { analyzePhoto } from "./tools/vision.js";
+import { analyzePhoto, analyzePdf } from "./tools/vision.js";
 import { buildMainMenu, handleMenuCallback } from "./menu.js";
 
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
@@ -43,7 +43,7 @@ const env = {
   NOTION_PEOPLE_DB_ID: requireEnv("NOTION_PEOPLE_DB_ID"),
   HEALTH_API_KEY: process.env.HEALTH_API_KEY ?? "",
   SERPAPI_KEY: process.env.SERPAPI_KEY ?? "",
-  ANTHROPIC_API_KEY: requireEnv("ANTHROPIC_API_KEY"),
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
   READWISE_TOKEN: process.env.READWISE_TOKEN ?? "",
   KUBERA_AUTH_TOKEN: process.env.KUBERA_AUTH_TOKEN ?? "",
   AIRTABLE_TOKEN: process.env.AIRTABLE_TOKEN ?? "",
@@ -54,6 +54,7 @@ const env = {
   ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID ?? "",
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? "",
   HOME_PIN: process.env.HOME_PIN ?? "",
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY ?? "",
 };
 
 // Force SDK to use OAuth Max instead of API key (Tier 1 rate limited).
@@ -155,6 +156,8 @@ const INVERSIONES_QUERY_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/inversiones-query/dist/index.js";
 const SPARK_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/spark/dist/index.js";
+const ACHORADAZOS_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/achoradazos/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -229,6 +232,12 @@ const BASE_OPTIONS: Options = {
       command: "node",
       args: [SPARK_DIST],
     },
+    "achoradazos": {
+      type: "stdio",
+      command: "node",
+      args: [ACHORADAZOS_DIST],
+      env: { AIRTABLE_TOKEN: env.AIRTABLE_TOKEN },
+    },
     // Readwise MCP remoto — bridge stdio via mcp-remote
     "readwise": {
       type: "stdio",
@@ -278,19 +287,18 @@ async function processPhoto(
   token: string,
   fileId: string,
   caption: string | undefined,
-  apiKey: string,
-): Promise<string | null> {
+): Promise<{ analysis: string; localPath: string } | null> {
   try {
     const file = await downloadTelegramFile(token, fileId);
-    const analysis = await analyzePhoto({
-      apiKey,
+    const result = await analyzePhoto({
       imagePath: file.path,
       mimeType: file.mimeType,
       caption,
       task: "describe",
     });
-    log({ msg: "photo_analyzed", chars: analysis.text.length });
-    return analysis.text;
+    log({ msg: "photo_analyzed", chars: result.text.length, path: file.path });
+    // No borramos el archivo — el agente puede necesitarlo para uploadReceipt
+    return { analysis: result.text, localPath: file.path };
   } catch (err) {
     log({ msg: "photo_analyze_error", err: String(err) });
     return null;
@@ -301,23 +309,59 @@ async function processDocument(
   token: string,
   doc: { file_id: string; file_name?: string; mime_type?: string; file_size?: number },
   caption: string | undefined,
-): Promise<string | null> {
+  onStatus?: (msg: string) => void,
+): Promise<{ text: string; localPath?: string } | null> {
   try {
     const file = await downloadTelegramFile(token, doc.file_id);
     const mime = doc.mime_type ?? file.mimeType ?? "";
     const name = (doc.file_name ?? "").toLowerCase();
+    const { unlink } = await import("node:fs/promises");
 
-    let text: string | null = null;
+    // ── Image files sent as document (PNG, JPG, HEIC, WebP, etc.) ──
+    if (mime.startsWith("image/")) {
+      const result = await analyzePhoto({ imagePath: file.path, mimeType: mime, caption, task: "describe" });
+      log({ msg: "document_image_analyzed", chars: result.text.length, mime });
+      // Keep file alive — agent may need it for uploadReceipt
+      return { text: result.text, localPath: file.path };
+    }
 
+    // ── PDF ──────────────────────────────────────────────────────────
     if (mime.includes("pdf") || name.endsWith(".pdf")) {
-      const require = createRequire(import.meta.url);
-      const { PDFParse } = require("pdf-parse") as { PDFParse: new (opts: { data: Uint8Array }) => { getText(): Promise<{ text: string }> } };
-      const { readFile } = await import("node:fs/promises");
-      const buf = await readFile(file.path);
-      const parser = new PDFParse({ data: new Uint8Array(buf) });
-      const data = await parser.getText();
-      text = data.text;
-    } else if (
+      // Try text extraction first (works for text-based PDFs)
+      let text: string | null = null;
+      try {
+        const require = createRequire(import.meta.url);
+        const pdfParse = require("pdf-parse");
+        const { readFile } = await import("node:fs/promises");
+        const buf = await readFile(file.path);
+        const data = await pdfParse(buf);
+        text = data.text?.trim() || null;
+      } catch {
+        // pdf-parse failed — fall through to vision
+      }
+
+      if (!text) {
+        // Image-based PDF (scanned) → convert pages to images and OCR with vision
+        onStatus?.("🔍 PDF escaneado — leyendo con IA...");
+        const result = await analyzePdf({ imagePath: file.path, caption, task: "ocr" });
+        text = result.text?.trim() || null;
+        log({ msg: "pdf_vision_ocr", chars: text?.length ?? 0 });
+      } else {
+        const MAX = 50_000;
+        if (text.length > MAX) text = text.slice(0, MAX) + "\n\n[... truncado a 50.000 chars ...]";
+        log({ msg: "pdf_text_extracted", chars: text.length });
+      }
+
+      if (!text) {
+        await unlink(file.path).catch(() => {});
+        return null;
+      }
+      // Keep file alive — agent may need it for uploadReceipt
+      return { text, localPath: file.path };
+    }
+
+    // ── Word / DOCX ──────────────────────────────────────────────────
+    if (
       mime.includes("wordprocessingml") ||
       mime.includes("msword") ||
       name.endsWith(".docx") ||
@@ -325,21 +369,17 @@ async function processDocument(
     ) {
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ path: file.path });
-      text = result.value;
+      const text = result.value?.trim();
+      await unlink(file.path).catch(() => {});
+      if (!text) return null;
+      const MAX = 50_000;
+      const truncated = text.length > MAX ? text.slice(0, MAX) + "\n\n[... truncado a 50.000 chars ...]" : text;
+      log({ msg: "docx_extracted", chars: truncated.length });
+      return { text: truncated };
     }
 
-    // Clean up temp file
-    const { unlink } = await import("node:fs/promises");
     await unlink(file.path).catch(() => {});
-
-    if (!text?.trim()) return null;
-
-    const MAX = 50_000;
-    if (text.length > MAX) {
-      text = text.slice(0, MAX) + "\n\n[... documento truncado a 50.000 caracteres ...]";
-    }
-    log({ msg: "document_extracted", chars: text.length, mime, fileName: doc.file_name });
-    return text.trim();
+    return null;
   } catch (err) {
     log({ msg: "document_process_error", err: String(err) });
     return null;
@@ -468,6 +508,10 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
 
   let voiceTranscript: string | undefined;
 
+  // Fire startup() immediately — runs in parallel with vision/transcription preprocessing.
+  // We don't await here; we'll await it only when the agent is ready to run.
+  const warmPromise = takeWarm();
+
   try {
     // Fecha/hora en runtime con tz America/La_Paz — se calcula aquí para que sea
     // siempre el momento exacto del mensaje, nunca cacheado desde turnos anteriores.
@@ -475,6 +519,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
 
     // Multimodal preprocessing
     let contextHeader: string | undefined;
+    let photoLocalPath: string | undefined;
     if (voice) {
       const transcript = await processVoice(env.COS_TELEGRAM_BOT_TOKEN, voice.file_id);
       if (!transcript) {
@@ -498,8 +543,9 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         "HTML",
       );
     } else if (photo) {
-      const analysis = await processPhoto(env.COS_TELEGRAM_BOT_TOKEN, photo.file_id, caption, env.ANTHROPIC_API_KEY);
-      if (!analysis) {
+      void editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, "📸 Analizando foto con IA...").catch(() => {});
+      const photoData = await processPhoto(env.COS_TELEGRAM_BOT_TOKEN, photo.file_id, caption);
+      if (!photoData) {
         await editMessage(
           env.COS_TELEGRAM_BOT_TOKEN,
           chatId,
@@ -509,11 +555,22 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         );
         return;
       }
-      text = caption ? `${caption}\n\n[Foto adjunta — análisis: ${analysis}]` : `[Foto adjunta — análisis: ${analysis}]`;
-      contextHeader = `${dateCtx}\n(Foto recibida — análisis ya hecho) chat_type=${chatType}`;
+      photoLocalPath = photoData.localPath;
+      text = caption
+        ? `${caption}\n\n[Foto adjunta — análisis: ${photoData.analysis}]`
+        : `[Foto adjunta — análisis: ${photoData.analysis}]`;
+      contextHeader = `${dateCtx}\n(Foto recibida — análisis ya hecho) chat_type=${chatType}\nfoto_local_path=${photoData.localPath}`;
     } else if (document) {
-      const docText = await processDocument(env.COS_TELEGRAM_BOT_TOKEN, document, caption);
-      if (!docText) {
+      const mime = document.mime_type ?? "";
+      const isPdf = mime.includes("pdf") || (document.file_name ?? "").toLowerCase().endsWith(".pdf");
+      const isImg = mime.startsWith("image/");
+      const statusMsg = isPdf ? "📄 Leyendo PDF..." : isImg ? "🖼️ Analizando imagen con IA..." : "📄 Extrayendo texto del documento...";
+      void editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, statusMsg).catch(() => {});
+      const docResult = await processDocument(
+        env.COS_TELEGRAM_BOT_TOKEN, document, caption,
+        (msg) => void editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, msg).catch(() => {}),
+      );
+      if (!docResult) {
         await editMessage(
           env.COS_TELEGRAM_BOT_TOKEN,
           chatId,
@@ -523,11 +580,15 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         );
         return;
       }
+      if (docResult.localPath) photoLocalPath = docResult.localPath;
       const label = document.file_name ?? "documento";
+      const docText = docResult.text;
       text = caption
         ? `${caption}\n\n[Documento adjunto: ${label}]\n\n${docText}`
         : `[Documento adjunto: ${label}]\n\n${docText}`;
-      contextHeader = `${dateCtx}\n(Documento adjunto leído — texto ya extraído) chat_type=${chatType}`;
+      contextHeader = docResult.localPath
+        ? `${dateCtx}\n(Documento adjunto analizado) chat_type=${chatType}\nfoto_local_path=${docResult.localPath}`
+        : `${dateCtx}\n(Documento adjunto leído — texto ya extraído) chat_type=${chatType}`;
     } else {
       contextHeader = `${dateCtx}\nchat_type=${chatType}`;
     }
@@ -558,8 +619,10 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     const kvLoadMs = Date.now() - t0;
 
     const t1 = Date.now();
-    const warm = await takeWarm();
+    const warm = await warmPromise;
     const warmAcquireMs = Date.now() - t1;
+
+    void editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, "💭 Pensando...").catch(() => {});
 
     log({
       msg: "agent_run_start",
@@ -582,6 +645,12 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         },
       });
       const totalAgentMs = Date.now() - t2;
+
+      // Limpiar el archivo temporal de la foto una vez que el agente terminó
+      if (photoLocalPath) {
+        const { unlink } = await import("node:fs/promises");
+        await unlink(photoLocalPath).catch(() => {});
+      }
 
       const t3 = Date.now();
       if (wantsVoice) {

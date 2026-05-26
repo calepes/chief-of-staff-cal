@@ -31,6 +31,7 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__logFocoProgress":    "✅ Loggeando avance en Foco CAL...",
   "mcp__cos-tools__pptWizardSave":       "📊 Guardando avance de la presentación...",
   "mcp__cos-tools__pptWizardLoad":       "📊 Cargando estado de la presentación...",
+  "mcp__cos-tools__addDigestSource":     "📰 Agregando fuente al Digest...",
   // MCPs externos
   "mcp__youtube-transcribe__transcribeYoutube":        "🎬 Transcribiendo video...",
   "mcp__apple-reminders__addReminder":                 "🔔 Agregando recordatorio...",
@@ -80,6 +81,22 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__inversiones-query__kuberaCashFlow":             "📊 Registrando cash flow en Kubera...",
   "mcp__inversiones-query__kuberaUpdateShares":         "📊 Actualizando shares en Kubera...",
   "mcp__inversiones-query__kuberaFindCustodian":        "🔍 Buscando custodian en Kubera...",
+  // Achoradazos (Fraternidad Peruana)
+  "mcp__achoradazos__searchFraterno":                  "🔍 Buscando fraterno en Airtable...",
+  "mcp__achoradazos__listPendingPayments":              "📊 Consultando pagos pendientes...",
+  "mcp__achoradazos__registerDeposit":                 "💾 Registrando depósito en Airtable...",
+  "mcp__achoradazos__uploadReceipt":                   "📤 Subiendo comprobante...",
+  "mcp__achoradazos__getActiveConcepto":               "📋 Verificando concepto de cobro activo...",
+  "mcp__achoradazos__getActiveEvento":                 "📅 Verificando evento activo...",
+  "mcp__achoradazos__createEvento":                    "📅 Creando evento...",
+  "mcp__achoradazos__createConceptoCobro":             "💰 Creando concepto de cobro...",
+  "mcp__achoradazos__getPendingPaymentMessage":        "💬 Generando mensaje de cobros...",
+  // Notion tasks
+  "mcp__cos-tools__getNotionTasks":                    "📋 Leyendo tareas en Notion...",
+  "mcp__cos-tools__createNotionTask":                  "📋 Creando tarea en Notion...",
+  "mcp__cos-tools__updateNotionTask":                  "✏️ Actualizando tarea en Notion...",
+  // Notifications
+  "mcp__notifications__sendNotification":              "🔔 Enviando notificación...",
 };
 
 export async function runAgent(userMessage: string, deps: AgentDeps): Promise<AgentResult> {

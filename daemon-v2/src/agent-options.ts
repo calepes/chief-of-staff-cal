@@ -215,6 +215,16 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__spark__postComment",
   "mcp__spark__emailAction",
   "mcp__spark__contactAction",
+  // Fraternidad Peruana (Achoradazos) — gestión de fraternos, eventos, pagos
+  "mcp__achoradazos__searchFraterno",
+  "mcp__achoradazos__listPendingPayments",
+  "mcp__achoradazos__registerDeposit",
+  "mcp__achoradazos__uploadReceipt",
+  "mcp__achoradazos__createEvento",
+  "mcp__achoradazos__createConceptoCobro",
+  "mcp__achoradazos__getActiveEvento",
+  "mcp__achoradazos__getActiveConcepto",
+  "mcp__achoradazos__getPendingPaymentMessage",
   // inversiones-query — portfolio de inversiones de Cal (Kubera + Yahoo Finance + Airtable)
   "mcp__inversiones-query__getPortfolioSummary",
   "mcp__inversiones-query__getDailyMovers",
