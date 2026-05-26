@@ -176,6 +176,10 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Foco CAL — check-ins proactivos y revisión on-demand
   "mcp__cos-tools__getFocoCalStatus",
   "mcp__cos-tools__logFocoProgress",
+  // Meetings → Foco Log — tarjetas por meeting, revisión on-demand, análisis
+  "mcp__cos-tools__showMeetingCards",
+  "mcp__cos-tools__reviewMeetings",
+  "mcp__cos-tools__analyzeMeeting",
   // Readwise Reader + Highlights — 22 tools (confirmados 2026-05-02)
   "mcp__readwise__reader_list_documents",
   "mcp__readwise__reader_search_documents",
