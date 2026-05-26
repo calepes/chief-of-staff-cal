@@ -28,8 +28,10 @@ import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import {
   formatFechaEs,
   queryMeetingsByDate,
+  parseFocoCalTopics,
   tgSend,
   type MeetingNote,
+  type FocoTopic,
 } from "./tools/meeting-notes.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
@@ -532,6 +534,95 @@ export function buildSdkTools(deps: ToolDeps) {
         await tgSend(deps.botToken, chatId, text, { inline_keyboard: rows });
 
         return asText({ ok: true, count: meetings.length });
+      },
+    ),
+    tool(
+      "analyzeMeeting",
+      "Procesa una reunión para extraer temas del Foco CAL y presentarlos para validación (Nivel 2). " +
+      "Llamar cuando llegue callback mlog:{meetingId}:{mode}. " +
+      "mode='focoCal': usa el campo Resumen Foco CAL pre-computado (rápido). " +
+      "mode='resumen': devuelve el Resumen para que el LLM analice. " +
+      "mode='transcript': devuelve instrucciones para que el LLM use notion-fetch. " +
+      "Después de llamar este tool con mode='focoCal', usar buildApprovalFlow con los topics " +
+      "retornados y confirmVerb='✅ Sí', rejectVerb='⏭ No'. " +
+      "Mapping de callbacks jano-wiz-ok: stepApprovalWizard({ action: 'ok' }) → logFocoProgress({ itemText: topic.text, section: topic.section }).",
+      {
+        meetingId: z.string().describe("Notion page ID de la reunión"),
+        mode: z
+          .enum(["focoCal", "resumen", "transcript"])
+          .describe("Fuente de análisis"),
+      },
+      async ({ meetingId, mode }) => {
+        const chatId = deps.getCurrentChatId();
+        const meeting = await deps.kv.get<MeetingNote>(
+          `meeting:${chatId}:${meetingId}`,
+        );
+
+        if (!meeting) {
+          return asText({
+            error:
+              "Reunión no encontrada en caché. Intenta con reviewMeetings o showMeetingCards primero.",
+          });
+        }
+
+        if (mode === "focoCal") {
+          if (!meeting.resumenFocoCal) {
+            return asText({
+              error:
+                "Esta reunión no tiene Resumen Foco CAL. Usa mode='resumen' o mode='transcript'.",
+            });
+          }
+          const topics: FocoTopic[] = parseFocoCalTopics(meeting.resumenFocoCal);
+          return asText({
+            ok: true,
+            meetingTitle: meeting.title,
+            topics,
+            instruction:
+              `Llama buildApprovalFlow con: ` +
+              `title="${meeting.title} — ¿qué logueamos?", ` +
+              `items=topics.map(t => ({ id: t.text, label: t.text, meta: t.section })), ` +
+              `confirmVerb="✅ Sí", rejectVerb="⏭ No". ` +
+              `Cuando llegue jano-wiz-ok, llama stepApprovalWizard({ action: "ok" }) ` +
+              `y luego logFocoProgress({ itemText: item.label, section: item.meta }).`,
+          });
+        }
+
+        if (mode === "resumen") {
+          if (!meeting.resumen) {
+            return asText({
+              error:
+                "Esta reunión no tiene Resumen. Usa mode='transcript'.",
+            });
+          }
+          return asText({
+            ok: true,
+            meetingTitle: meeting.title,
+            contentForAnalysis: meeting.resumen,
+            instruction:
+              `Analiza el contenido de la reunión "${meeting.title}" y extrae qué temas ` +
+              `del Foco CAL de Cal se avanzaron (Foco CAL tiene secciones: CAL personal, ` +
+              `Prioridades, Rufino, Christian, KPIs, Tareas). ` +
+              `Luego llama buildApprovalFlow con los temas encontrados para que Cal valide. ` +
+              `confirmVerb="✅ Sí", rejectVerb="⏭ No". ` +
+              `Cuando llegue jano-wiz-ok: stepApprovalWizard({ action: "ok" }) → logFocoProgress.`,
+          });
+        }
+
+        // mode === "transcript"
+        return asText({
+          ok: true,
+          meetingTitle: meeting.title,
+          meetingPageId: meetingId,
+          instruction:
+            `Llama mcp__claude_ai_Notion__notion-fetch con id="${meetingId}" ` +
+            `para obtener el body completo de la reunión "${meeting.title}". ` +
+            `Extrae el bloque de transcript (máx 8000 caracteres). ` +
+            `Analiza qué temas del Foco CAL se avanzaron (secciones: CAL, Prioridades, ` +
+            `Rufino, Christian, KPIs, Tareas). ` +
+            `Luego llama buildApprovalFlow para validación. ` +
+            `confirmVerb="✅ Sí", rejectVerb="⏭ No". ` +
+            `Cuando llegue jano-wiz-ok: stepApprovalWizard({ action: "ok" }) → logFocoProgress.`,
+        });
       },
     ),
     tool(
