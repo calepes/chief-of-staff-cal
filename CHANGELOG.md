@@ -1,5 +1,12 @@
 # CHANGELOG — Jano
 
+## 2026-05-26
+
+### Bugfix — Morning Build callbacks y duplicados en Apple Reminders
+
+- **Fix: `build:approve` siempre descartaba propuestas:** `"build:approve:id".split(":")` + destructuring `const [action, , id]` daba `action="build"` (no `"build:approve"`), cayendo siempre al branch reject. Corregido usando `parts[1]` como subaction en `index.ts`.
+- **Fix: `addReminder` creaba duplicados:** el MCP `apple-reminders` ahora verifica si ya existe un reminder activo con el mismo título (case-insensitive) antes de crear. Retorna `{ ok: false, duplicate: true, externalId }` en lugar de crear un segundo reminder con el mismo nombre.
+
 ## 2026-05-24
 
 ### Cleanup — Álbum Panini FIFA World Cup 2026 eliminado

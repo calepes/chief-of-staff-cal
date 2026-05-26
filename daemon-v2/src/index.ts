@@ -410,11 +410,13 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
 
     // build:approve:<id> / build:reject:<id> — mecánico, sin LLM
     if (cb.data?.startsWith("build:approve:") || cb.data?.startsWith("build:reject:")) {
-      const [action, , id] = cb.data.split(":");
+      const parts = cb.data.split(":");
+      const subaction = parts[1]; // "approve" | "reject"
+      const id = parts[2];
       const proposalsDir = path.join(process.env.HOME!, ".cos-agent", "morning-builds", "proposals");
       const rejectedDir  = path.join(process.env.HOME!, ".cos-agent", "morning-builds", "rejected");
       const proposalFile = path.join(proposalsDir, `${id}.json`);
-      if (action === "build:approve") {
+      if (subaction === "approve") {
         await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "🔨 Ejecutando...");
         await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId: cb.message.chat.id, text: "🔨 Ejecutando morning build..." });
         const executor = path.join(process.env.HOME!, ".cos-agent", "morning-build-execute.sh");

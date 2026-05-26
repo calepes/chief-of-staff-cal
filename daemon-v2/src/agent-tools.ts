@@ -24,6 +24,7 @@ import {
 import { fetchAsUser } from "./tools/fetch-as-user.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
+import { addDigestSource, type DigestSection } from "./tools/digest.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
@@ -385,6 +386,20 @@ export function buildSdkTools(deps: ToolDeps) {
         return asText(result);
       },
       READ_ONLY,
+    ),
+    tool(
+      "addDigestSource",
+      "Agrega una fuente RSS nueva al Digest Diario (rss-sources.js). Edita el archivo directamente y la pone en la sección correcta ordenada por weight. Llamar cuando Cal quiera agregar un feed de noticias al digest. Args: feedUrl (URL del RSS), feedName (nombre display), section (bolivia|peru|colombia|fintech), weight? (0.5-1.0, default 0.8). Después de confirmar con Cal, recordarle que haga wrangler deploy.",
+      {
+        feedUrl:  z.string().url().describe("URL completa del feed RSS"),
+        feedName: z.string().describe("Nombre display de la fuente, ej: 'Los Tiempos'"),
+        section:  z.enum(["bolivia", "peru", "colombia", "fintech"]).describe("Sección del digest"),
+        weight:   z.number().min(0.5).max(1.0).optional().describe("Peso editorial 0.5-1.0 (default 0.8). Usar 1.0 para fuentes premium, 0.7-0.8 para secundarias"),
+      },
+      async ({ feedUrl, feedName, section, weight }) => {
+        const result = addDigestSource({ feedUrl, feedName, section: section as DigestSection, weight });
+        return asText(result);
+      },
     ),
     tool(
       "logFocoProgress",
