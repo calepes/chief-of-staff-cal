@@ -475,14 +475,17 @@ La Fraternidad Peruana es el grupo de amigos peruanos de Cal en Santa Cruz. Se r
 
 ## Meetings → Foco Log
 
+**Regla de comunicación:** \`reviewMeetings\` y \`showMeetingCards\` ya envían mensajes directamente a Telegram. NO generes texto de respuesta antes ni después de llamarlos — Cal ya recibió la información vía el tool. Devuelve el turno silenciosamente.
+
 ### Callbacks de tarjetas de reunión (Nivel 1)
 
 Cuando llegue \`[callback] mlog:{meetingId}:{mode}\`:
 1. Llama \`analyzeMeeting({ meetingId, mode })\`
 2. Si mode="focoCal": el tool retorna topics → llama \`buildApprovalFlow\` con los topics
-3. Si mode="resumen" o "transcript": sigue las \`instruction\` del tool result
-4. buildApprovalFlow: title="{meetingTitle} — ¿qué logueamos?", confirmVerb="✅ Sí", rejectVerb="⏭ No"
-5. Cuando llegue \`jano-wiz-ok\` del flow de topics:
+3. Si mode="resumen": el tool retorna contentForAnalysis → analiza y llama \`buildApprovalFlow\`
+4. Si mode="transcript": llama \`mcp__claude_ai_Notion__notion-fetch\` con el meetingPageId. IMPORTANTE: usa solo los primeros 3000 caracteres del resultado para el análisis — si es más largo, trunca antes de procesar para evitar context overflow.
+5. buildApprovalFlow: title="{meetingTitle} — ¿qué logueamos?", confirmVerb="✅ Sí", rejectVerb="⏭ No"
+6. Cuando llegue \`jano-wiz-ok\` del flow de topics:
    - \`stepApprovalWizard({ action: "ok" })\` → retorna item con label=tema, meta=sección
    - \`logFocoProgress({ itemText: item.label, section: item.meta, note: null })\`
 
@@ -495,12 +498,12 @@ Cuando llegue \`[callback] msel:{meetingId}\`:
 1. Llama \`analyzeMeeting({ meetingId, mode: "focoCal" })\` para leer el meeting del KV
 2. Si tiene topics → llama \`buildApprovalFlow\` directamente (saltar Nivel 1, Cal ya seleccionó)
 3. Si no tiene Resumen Foco CAL → llama \`analyzeMeeting({ meetingId, mode: "resumen" })\` (no envíes otra tarjeta Nivel 1 — Cal ya eligió este meeting)
-4. Si tampoco tiene resumen → llama \`analyzeMeeting({ meetingId, mode: "transcript" })\`
+4. Si tampoco tiene resumen → responde a Cal: "Esta reunión no tiene Resumen ni análisis de Foco CAL. ¿Quieres que analice el transcript? (puede ser lento)" — NO llames transcript automáticamente.
 Nota: no modifiques el campo meta del item al pasar a logFocoProgress — pásalo literal como section.
 
 Cuando llegue \`[callback] msel:all\`:
 - Cal seleccionó todas las reuniones
-- Responde: "Procesando todas las reuniones..." y usa el rango de fechas del mensaje anterior para llamar \`reviewMeetings\` de nuevo
-- El mensaje de selección incluye las fechas en el header — usarlo para recuperar from/to
-- Luego llama \`showMeetingCards\` con las primeras 5 reuniones de la lista
+- Llama \`reviewMeetings\` de nuevo con el mismo rango de fechas del mensaje de selección (está en el header del mensaje)
+- Luego llama \`showMeetingCards\` con las primeras 5 reuniones
+- NO generes texto de respuesta adicional
 `;
