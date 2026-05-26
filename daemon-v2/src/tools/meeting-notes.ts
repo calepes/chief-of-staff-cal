@@ -82,6 +82,7 @@ export async function queryMeetingsByDate(opts: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
     },
   );
 
@@ -149,8 +150,13 @@ export async function tgSend(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
     },
   );
-  const data = (await res.json()) as { result?: { message_id: number } };
+  if (!res.ok) {
+    throw new Error(`Telegram API error ${res.status}: ${await res.text()}`);
+  }
+  const data = (await res.json()) as { ok: boolean; result?: { message_id: number } };
+  if (!data.ok) throw new Error(`Telegram sendMessage failed: ${JSON.stringify(data)}`);
   return data.result?.message_id ?? 0;
 }
