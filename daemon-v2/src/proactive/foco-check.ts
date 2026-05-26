@@ -147,7 +147,7 @@ Mapping al recibir callbacks jano-wiz-ok:
 
 function buildMeetingsBlock(meetings: MeetingNote[]): string {
   const lines = meetings.map((m) => {
-    const flag = m.hasFocoCal ? " ✦" : "";
+    const flag = m.hasFocoCal ? " 🎯" : "";
     const dateStr = formatFechaEs(m.fecha);
     return `  - ${m.title}${flag} (${dateStr}) [id: ${m.id}]`;
   });

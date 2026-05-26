@@ -441,7 +441,7 @@ export function buildSdkTools(deps: ToolDeps) {
             4 * 3600,
           );
 
-          const flag = m.hasFocoCal ? " ✦" : "";
+          const flag = m.hasFocoCal ? " 🎯" : "";
           const dateStr = formatFechaEs(m.fecha);
           const text = `📋 <b>${escapeHtml(m.title)}</b> · ${dateStr}${flag}`;
 
@@ -505,7 +505,7 @@ export function buildSdkTools(deps: ToolDeps) {
 
         // Construir mensaje de selección
         const lines = meetings.map((m, i) => {
-          const flag = m.hasFocoCal ? " ✦" : "";
+          const flag = m.hasFocoCal ? " 🎯" : "";
           const dateStr = formatFechaEs(m.fecha);
           return `${i + 1}. <b>${escapeHtml(m.title)}</b> · <i>${dateStr}</i>${flag}`;
         });
@@ -515,7 +515,7 @@ export function buildSdkTools(deps: ToolDeps) {
           "",
           lines.join("\n"),
           "",
-          "<i>✦ = tiene análisis de Foco CAL</i>",
+          "<i>🎯 = tiene análisis de Foco CAL</i>",
           "",
           "¿Cuáles cruzamos contra tu Foco?",
         ].join("\n");
