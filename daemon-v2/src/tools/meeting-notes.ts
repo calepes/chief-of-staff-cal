@@ -2,6 +2,10 @@
 import type { FocoSection } from "./foco-cal.js";
 
 export const MEETINGS_DB_ID = "3b294b96a99347f2945d32a5399a8ce0";
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 const NOTION_VERSION = "2022-06-28";
 
 export interface MeetingNote {

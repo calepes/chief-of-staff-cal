@@ -494,11 +494,13 @@ Cuando llegue \`[callback] mskip:{meetingId}\`:
 Cuando llegue \`[callback] msel:{meetingId}\`:
 1. Llama \`analyzeMeeting({ meetingId, mode: "focoCal" })\` para leer el meeting del KV
 2. Si tiene topics → llama \`buildApprovalFlow\` directamente (saltar Nivel 1, Cal ya seleccionó)
-3. Si no tiene Resumen Foco CAL → llama \`showMeetingCards\` con ese meeting para mostrar Nivel 1
+3. Si no tiene Resumen Foco CAL → llama \`analyzeMeeting({ meetingId, mode: "resumen" })\` (no envíes otra tarjeta Nivel 1 — Cal ya eligió este meeting)
+4. Si tampoco tiene resumen → llama \`analyzeMeeting({ meetingId, mode: "transcript" })\`
+Nota: no modifiques el campo meta del item al pasar a logFocoProgress — pásalo literal como section.
 
 Cuando llegue \`[callback] msel:all\`:
 - Cal seleccionó todas las reuniones
-- Llama \`reviewMeetings\` nuevamente con el mismo rango de fechas para refrescar la lista
-- Luego llama \`showMeetingCards\` con las primeras 5 reuniones
-- (El LLM no puede leer el KV directamente — usar reviewMeetings para recuperar la lista)
+- Responde: "Procesando todas las reuniones..." y usa el rango de fechas del mensaje anterior para llamar \`reviewMeetings\` de nuevo
+- El mensaje de selección incluye las fechas en el header — usarlo para recuperar from/to
+- Luego llama \`showMeetingCards\` con las primeras 5 reuniones de la lista
 `;

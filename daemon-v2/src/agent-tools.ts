@@ -29,6 +29,7 @@ import {
   formatFechaEs,
   queryMeetingsByDate,
   parseFocoCalTopics,
+  escapeHtml,
   tgSend,
   type MeetingNote,
   type FocoTopic,
@@ -442,7 +443,7 @@ export function buildSdkTools(deps: ToolDeps) {
 
           const flag = m.hasFocoCal ? " ✦" : "";
           const dateStr = formatFechaEs(m.fecha);
-          const text = `📋 <b>${m.title}</b> · ${dateStr}${flag}`;
+          const text = `📋 <b>${escapeHtml(m.title)}</b> · ${dateStr}${flag}`;
 
           const keyboard = m.hasFocoCal
             ? {
@@ -495,18 +496,18 @@ export function buildSdkTools(deps: ToolDeps) {
         const chatId = deps.getCurrentChatId();
 
         // Guardar lista completa en KV para cuando llegue callback msel:*
-        await deps.kv.set(`meeting-list:${chatId}`, meetings, 30 * 60);
+        await deps.kv.set(`meeting-list:${chatId}`, meetings, 4 * 3600);
 
-        // Guardar datos individuales también
+        // Guardar datos individuales también (mismo TTL que showMeetingCards para consistencia)
         for (const m of meetings) {
-          await deps.kv.set(`meeting:${chatId}:${m.id}`, m, 30 * 60);
+          await deps.kv.set(`meeting:${chatId}:${m.id}`, m, 4 * 3600);
         }
 
         // Construir mensaje de selección
         const lines = meetings.map((m, i) => {
           const flag = m.hasFocoCal ? " ✦" : "  ";
           const dateStr = formatFechaEs(m.fecha);
-          return `${i + 1}.${flag} <b>${m.title}</b> · ${dateStr}`;
+          return `${i + 1}.${flag} <b>${escapeHtml(m.title)}</b> · ${dateStr}`;
         });
 
         const text = [
@@ -580,7 +581,7 @@ export function buildSdkTools(deps: ToolDeps) {
             instruction:
               `Llama buildApprovalFlow con: ` +
               `title="${meeting.title} — ¿qué logueamos?", ` +
-              `items=topics.map(t => ({ id: t.text, label: t.text, meta: t.section })), ` +
+              `items=topics.map((t, i) => ({ id: \`t\${i}\`, label: t.text, meta: t.section })), ` +
               `confirmVerb="✅ Sí", rejectVerb="⏭ No". ` +
               `Cuando llegue jano-wiz-ok, llama stepApprovalWizard({ action: "ok" }) ` +
               `y luego logFocoProgress({ itemText: item.label, section: item.meta }).`,
