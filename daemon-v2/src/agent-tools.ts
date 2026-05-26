@@ -457,8 +457,12 @@ export function buildSdkTools(deps: ToolDeps) {
                 ]],
               };
 
-          await tgSend(deps.botToken, chatId, text, keyboard);
-          sent++;
+          try {
+            await tgSend(deps.botToken, chatId, text, keyboard);
+            sent++;
+          } catch (err) {
+            console.error(`showMeetingCards: tgSend failed for ${m.id}:`, err);
+          }
         }
 
         return asText({ ok: true, sent });
