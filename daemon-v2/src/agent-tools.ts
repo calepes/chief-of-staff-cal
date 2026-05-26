@@ -25,6 +25,11 @@ import { fetchAsUser } from "./tools/fetch-as-user.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
+import {
+  formatFechaEs,
+  tgSend,
+  type MeetingNote,
+} from "./tools/meeting-notes.js";
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
@@ -399,6 +404,64 @@ export function buildSdkTools(deps: ToolDeps) {
       async ({ feedUrl, feedName, section, weight }) => {
         const result = addDigestSource({ feedUrl, feedName, section: section as DigestSection, weight });
         return asText(result);
+      },
+    ),
+    tool(
+      "showMeetingCards",
+      "Envía una tarjeta Telegram (Nivel 1) por cada reunión recibida. " +
+      "Cada tarjeta muestra título + fecha y botones para loguear, analizar o saltar. " +
+      "También almacena los datos de cada reunión en CF KV para uso posterior por analyzeMeeting. " +
+      "Llamar cuando el prompt de check-in o un callback de selección (msel:*) requiera presentar meetings. " +
+      "Máximo 5 reuniones por llamada.",
+      {
+        meetings: z.array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            fecha: z.string().describe("YYYY-MM-DD"),
+            hasFocoCal: z.boolean(),
+            resumenFocoCal: z.string().nullable().optional(),
+            resumen: z.string().nullable().optional(),
+          }),
+        ).max(5),
+      },
+      async ({ meetings }) => {
+        const chatId = deps.getCurrentChatId();
+        let sent = 0;
+
+        for (const m of meetings.slice(0, 5)) {
+          // Guardar datos en KV para analyzeMeeting
+          await deps.kv.set(
+            `meeting:${chatId}:${m.id}`,
+            m as MeetingNote,
+            4 * 3600,
+          );
+
+          const flag = m.hasFocoCal ? " ✦" : "";
+          const dateStr = formatFechaEs(m.fecha);
+          const text = `📋 <b>${m.title}</b> · ${dateStr}${flag}`;
+
+          const keyboard = m.hasFocoCal
+            ? {
+                inline_keyboard: [[
+                  { text: "✅ Loguear", callback_data: `mlog:${m.id}:focoCal` },
+                  { text: "⏭ Saltar", callback_data: `mskip:${m.id}` },
+                  { text: "🔍 Transcript", callback_data: `mlog:${m.id}:transcript` },
+                ]],
+              }
+            : {
+                inline_keyboard: [[
+                  { text: "📄 Analizar", callback_data: `mlog:${m.id}:resumen` },
+                  { text: "🎙 Transcript", callback_data: `mlog:${m.id}:transcript` },
+                  { text: "⏭ Saltar", callback_data: `mskip:${m.id}` },
+                ]],
+              };
+
+          await tgSend(deps.botToken, chatId, text, keyboard);
+          sent++;
+        }
+
+        return asText({ ok: true, sent });
       },
     ),
     tool(
