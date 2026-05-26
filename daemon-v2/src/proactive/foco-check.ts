@@ -11,6 +11,11 @@ import {
   readFocoProgress,
   type FocoSection,
 } from "../tools/foco-cal.js";
+import {
+  queryMeetingsByDate,
+  formatFechaEs,
+  type MeetingNote,
+} from "../tools/meeting-notes.js";
 
 export interface FocoCheckinOpts {
   kv: CfKv;
@@ -56,6 +61,20 @@ async function runFocoCheckin(opts: FocoCheckinOpts, slot: Slot): Promise<void> 
     .map((e) => `${e.date} [${e.section}] ${e.itemText}`)
     .join("\n");
 
+  // Para el slot pm, consultar meetings de hoy
+  let todayMeetings: MeetingNote[] = [];
+  if (slot === "pm") {
+    const notionToken = process.env.NOTION_TOKEN;
+    if (notionToken) {
+      try {
+        const all = await queryMeetingsByDate({ from: today, to: today, notionToken });
+        todayMeetings = all.slice(0, 5);
+      } catch (err) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "foco_checkin_meetings_error", err: String(err) }));
+      }
+    }
+  }
+
   // Set currentChatId para que buildApprovalFlow sepa a quién enviar
   setCurrentChatId(chatId);
 
@@ -67,18 +86,23 @@ async function runFocoCheckin(opts: FocoCheckinOpts, slot: Slot): Promise<void> 
     return;
   }
 
-  const prompt = buildPrompt(section, slot, recentItems);
+  const prompt = buildPrompt(section, slot, recentItems, todayMeetings);
 
   try {
     await runAgent(prompt, { warm, history: [] });
     await kv.set(dedupKey, true, 25 * 3600);
-    console.log(JSON.stringify({ ts: Date.now(), msg: "foco_checkin_sent", slot, section }));
+    console.log(JSON.stringify({ ts: Date.now(), msg: "foco_checkin_sent", slot, section, meetingCount: todayMeetings.length }));
   } catch (err) {
     console.log(JSON.stringify({ ts: Date.now(), msg: "foco_checkin_agent_error", slot, section, err: String(err) }));
   }
 }
 
-function buildPrompt(section: FocoSection, slot: Slot, recentItems: string): string {
+function buildPrompt(
+  section: FocoSection,
+  slot: Slot,
+  recentItems: string,
+  todayMeetings: MeetingNote[] = [],
+): string {
   const greeting = SLOT_GREETING[slot];
   const tone = SLOT_TONE[slot];
   const isKpis = section === "KPIs";
@@ -94,6 +118,12 @@ function buildPrompt(section: FocoSection, slot: Slot, recentItems: string): str
     ? `\nEl title del approval flow debe incluir los números reales de KPIs (ej: "KPIs · Afil: 4.2K ↑3% · DAU: 1.05M ↓1%").`
     : "";
 
+  // Bloque de meetings para el slot pm
+  const meetingsBlock =
+    slot === "pm" && todayMeetings.length > 0
+      ? buildMeetingsBlock(todayMeetings)
+      : "";
+
   return `Eres Jano, CoS digital de Cal. Formato: Telegram HTML. Español neutro. Sin acks genéricos.
 
 Contexto: check-in proactivo. Tono: ${tone}. Sección de hoy: ${section}.
@@ -101,8 +131,8 @@ Contexto: check-in proactivo. Tono: ${tone}. Sección de hoy: ${section}.
 Progreso reciente de Cal (últimos 14 días):
 ${recentItems || "(sin registros recientes)"}
 
-Tu tarea en ESTE turno (sin desviarte):
-1. ${notionStep}
+${meetingsBlock}Tu tarea en ESTE turno (sin desviarte):
+${meetingsBlock ? "0. PRIMERO procesa el bloque de meetings (ver arriba). DESPUÉS el check-in de Foco.\n" : ""}1. ${notionStep}
 2. Con los datos obtenidos, filtra los items que ya aparecen en el progreso reciente (arriba).
 3. Construye el check-in con mcp__cos-tools__buildApprovalFlow:
    - title: "${greeting} Foco CAL · ${section}"${kpiContext}
@@ -113,6 +143,40 @@ Tu tarea en ESTE turno (sin desviarte):
 
 Mapping al recibir callbacks jano-wiz-ok:
 - stepApprovalWizard({ action: "ok" }) → recibe item.id → preguntar nota opcional → logFocoProgress({ itemText: item.label, section: "${section}", note? })`;
+}
+
+function buildMeetingsBlock(meetings: MeetingNote[]): string {
+  const lines = meetings.map((m) => {
+    const flag = m.hasFocoCal ? " ✦" : "";
+    const dateStr = formatFechaEs(m.fecha);
+    return `  - ${m.title}${flag} (${dateStr}) [id: ${m.id}]`;
+  });
+
+  return `
+## Meetings de hoy (${meetings.length}):
+${lines.join("\n")}
+
+INSTRUCCIONES para meetings — ejecutar ANTES del check-in de Foco:
+1. Llama mcp__cos-tools__showMeetingCards con el array meetings de abajo.
+   Incluir en cada objeto: id, title, fecha, hasFocoCal (y resumenFocoCal si está disponible).
+   Esto envía tarjetas Telegram para que Cal seleccione qué loguear.
+2. Después de showMeetingCards, continúa inmediatamente con el check-in de Foco normal.
+3. Los callbacks mlog/mskip de las tarjetas llegarán por separado — no los esperes aquí.
+
+Datos de meetings para showMeetingCards:
+${JSON.stringify(
+  meetings.map((m) => ({
+    id: m.id,
+    title: m.title,
+    fecha: m.fecha,
+    hasFocoCal: m.hasFocoCal,
+    resumenFocoCal: m.resumenFocoCal,
+    resumen: m.resumen,
+  })),
+  null,
+  2,
+)}
+`;
 }
 
 export function scheduleFocoCheckins(opts: FocoCheckinOpts): void {
