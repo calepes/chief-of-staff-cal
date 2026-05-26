@@ -41,8 +41,12 @@ function extractText(richText: NotionRichText[]): string {
 }
 
 function pageToMeeting(page: NotionPage): MeetingNote {
+  // Strip ISO datetimes that some calendar-synced meetings embed in the title
+  // e.g. "Check Gonzo 2026-05-19T16:37:00.000-04:00" → "Check Gonzo"
   const title =
-    extractText(page.properties["Descripción"]?.title ?? []) || "Sin título";
+    (extractText(page.properties["Descripción"]?.title ?? []) || "Sin título")
+      .replace(/\s*\d{4}-\d{2}-\d{2}T[\d:.+\-Z]+/g, "")
+      .trim() || "Sin título";
   const fecha =
     page.properties["Fecha"]?.date?.start?.slice(0, 10) ?? "";
   const resumenFocoCal =

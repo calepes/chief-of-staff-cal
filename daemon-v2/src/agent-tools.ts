@@ -505,9 +505,9 @@ export function buildSdkTools(deps: ToolDeps) {
 
         // Construir mensaje de selección
         const lines = meetings.map((m, i) => {
-          const flag = m.hasFocoCal ? " ✦" : "  ";
+          const flag = m.hasFocoCal ? " ✦" : "";
           const dateStr = formatFechaEs(m.fecha);
-          return `${i + 1}.${flag} <b>${escapeHtml(m.title)}</b> · ${dateStr}`;
+          return `${i + 1}. <b>${escapeHtml(m.title)}</b> · <i>${dateStr}</i>${flag}`;
         });
 
         const text = [
