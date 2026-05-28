@@ -1,5 +1,14 @@
 # CHANGELOG — Jano
 
+## 2026-05-27
+
+### Fix — Mensajes largos y TTS chunking en Jano
+
+- **Fix: MESSAGE_TOO_LONG en respuestas largas:** `editMessage` de Telegram tiene límite de 4096 chars. Agregado `chunkText()` en `daemon-v2/src/index.ts` — primer chunk edita el placeholder, chunks adicionales se envían como mensajes nuevos.
+- **Fix: TTS cortaba a 900 chars:** `tools/tts.ts` tenía un hard cap de 900 chars. Reemplazado por `textToVoiceOggChunks()` que parte el texto en chunks de 4800 chars y envía un audio por chunk via `sendVoice`.
+- **Fix: regex TTS demasiado estrecho:** añadidas frases "como audio", "léemelo", "cuéntamelo" al trigger de TTS (antes solo "en audio"/"en voz").
+- **Docs:** `CLAUDE.md` actualizado — gotcha 4096 chars y sección Audio reescrita (STT ElevenLabs vs whisper-cli, triggers TTS).
+
 ## 2026-05-26
 
 ### Bugfix — Morning Build callbacks y duplicados en Apple Reminders

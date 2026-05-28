@@ -354,6 +354,7 @@ Worker e infraestructura viven en el agente Health: `~/Claude Projects/Personal/
 - **SDK persisted-output loop (2026-05-23):** tool result >~25KB → SDK persiste a `~/.claude/projects/*/tool-results/toulu_*.json` y muestra preview 2KB. El LLM ignora instrucción de system prompt de usar `readPersistedOutput` y reintenta el tool original. Solución real: `fetchAndSummarize` — el texto nunca entra al contexto de Jano.
 - **Playwright heredado de OAuth Max (2026-05-23):** `mcp__plugin_playwright_playwright__*` estaba disponible en Jano aunque no estuviera en `CLAUDE_AI_COS_TOOLS` (herencia OAuth Max). Jano intentó usarlo para leer `file://` paths de persisted-output. Bloqueado en `DISALLOWED_BUILTINS`.
 - **`build:approve:<id>` callback split (2026-05-26):** `cb.data.split(":")` sobre `"build:approve:abc"` produce `["build","approve","abc"]`. Destructurar `const [action, , id]` da `action="build"` (NO `"build:approve"`). Usar `const parts = cb.data.split(":"); const subaction = parts[1]` para el subaction. Bug original: todas las aprobaciones del morning build se trataban como reject (`"🗑️ Propuesta descartada."`).
+- **Telegram editMessage/sendMessage 4096 char limit (2026-05-27):** respuestas largas (resúmenes, análisis) causan `MESSAGE_TOO_LONG` silencioso. `daemon-v2/src/index.ts` tiene `chunkText()` que parte en chunks ≤4096 preferiendo saltos de párrafo/línea. Primer chunk: `editMessage` del placeholder; chunks siguientes: `sendMessage` nuevos. El fallback de TTS también usa chunking si ElevenLabs falla.
 - **Webhook drift histórico (2026-05-02 / 2026-05-03):** RESUELTO de raíz al migrar al modelo Pecunia (2026-05-03). Causa original: cualquier proceso que cargara el plugin Telegram con un state dir cuyo `.env` tuviera el token de Jano arrancaba grammY → `bot.start()` → `deleteWebhook()` automático → loop de 60s con el watchdog del daemon. Fix definitivo: token rotado, eliminados todos los state dirs y hooks de channel — Jano ahora opera SOLO via webhook + daemon (sin canal interactivo). Imposible reincidir salvo que alguien re-cree manualmente un state dir con el token. Si el daemon falla, restauración manual del webhook: `TOKEN=$(grep ^COS_TELEGRAM_BOT_TOKEN ~/.cos-agent/.env | cut -d= -f2-) && SECRET=$(grep ^COS_WEBHOOK_SECRET ~/.cos-agent/.env | cut -d= -f2-) && curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" -H "Content-Type: application/json" -d "{\"url\":\"https://cos-agent-worker.carlos-cb4.workers.dev/telegram/webhook\",\"secret_token\":\"${SECRET}\"}"`
 
 ## Comandos operativos
@@ -420,12 +421,9 @@ echo 0 > ~/.claude/state/heartbeat-failures
 - **Secciones:** scope (proyecto vs panorama), calendario (Outlook + Google), salud (health worker), tareas Notion (semana actual agrupadas por asignado)
 
 ## Audio
-- whisper-cli: `/opt/homebrew/bin/whisper-cli` · modelo: `/opt/homebrew/share/whisper-cpp/models/ggml-base.bin`
-- Flujo transcripción nota de voz Telegram (OGA):
-  ```
-  ffmpeg -hide_banner -loglevel error -y -i IN.oga -ar 16000 -ac 1 OUT.wav
-  whisper-cli -m /opt/homebrew/share/whisper-cpp/models/ggml-base.bin -l es -nt -f OUT.wav
-  ```
+- **STT (voz → texto):** ElevenLabs `scribe_v1` cuando `ELEVENLABS_API_KEY` set; whisper-cli fallback. Log: `voice_transcribed` con `"stt":"elevenlabs"|"whisper"`.
+- **TTS (texto → voz):** ElevenLabs `eleven_multilingual_v2` + FFMPEG MP3→OGG. `tools/tts.ts::textToVoiceOggChunks()` — chunks de 4800 chars, un `sendVoice` por chunk. **NO automático** en mensajes de voz — requiere trigger explícito: "en audio", "como audio", "en voz", "léemelo", "cuéntamelo", o prefijo 🎤.
+- whisper-cli: `/opt/homebrew/bin/whisper-cli` · modelo: `ggml-small.bin` (preferred) o `ggml-base.bin`
 
 ## Specs y Planes
 - **Specs:** `docs/superpowers/specs/` — diseños aprobados
