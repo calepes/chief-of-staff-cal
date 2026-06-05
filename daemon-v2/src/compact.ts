@@ -17,7 +17,7 @@ export async function compactHistory(msgs: ConversationMessage[]): Promise<strin
 
   let summary = "";
   for await (const event of handle.query(
-    `Resume esta conversación en máximo 150 palabras. Usa bullets cortos. ` +
+    `Resume esta conversación en máximo 150 palabras. Sin Markdown, sin bullets con guión — texto plano o frases cortas separadas por punto. ` +
     `Incluye: decisiones tomadas, temas tratados, entidades mencionadas ` +
     `(nombres, cifras, proyectos), y contexto que el asistente necesite ` +
     `para continuar coherentemente.\n\n${transcript}`,

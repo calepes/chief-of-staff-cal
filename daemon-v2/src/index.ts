@@ -11,6 +11,7 @@ import { CLAUDE_AI_COS_TOOLS, DISALLOWED_BUILTINS } from "./agent-options.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { buildLearningsSection } from "./learnings.js";
 import { compactHistory } from "./compact.js";
+import { sanitizeForTelegram } from "./format.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
@@ -87,6 +88,32 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+const TG_MAX = 4096;
+
+// Splits text into chunks ≤ maxLen, preferring paragraph/line/word boundaries.
+function chunkText(text: string, maxLen = TG_MAX): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  let rem = text;
+  while (rem.length > 0) {
+    if (rem.length <= maxLen) { chunks.push(rem); break; }
+    let cut = maxLen;
+    const para = rem.lastIndexOf("\n\n", maxLen);
+    if (para > maxLen / 2) { cut = para + 2; }
+    else {
+      const line = rem.lastIndexOf("\n", maxLen);
+      if (line > maxLen / 2) { cut = line + 1; }
+      else {
+        const space = rem.lastIndexOf(" ", maxLen);
+        if (space > maxLen / 2) { cut = space + 1; }
+      }
+    }
+    chunks.push(rem.slice(0, cut).trimEnd());
+    rem = rem.slice(cut).trimStart();
+  }
+  return chunks.filter(Boolean);
+}
+
 /**
  * Genera una línea de contexto de fecha/hora en runtime con timezone America/La_Paz.
  * Se inyecta al inicio de cada turno para evitar que el LLM infiera la fecha
@@ -126,12 +153,21 @@ const sdkTools = buildSdkTools({
   gmapsApiKey: env.GOOGLE_MAPS_API_KEY || undefined,
   homePin: env.HOME_PIN || undefined,
   kv,
+  getOptions: () => BASE_OPTIONS,
 });
-const mcpServer = createSdkMcpServer({
-  name: "cos-tools",
-  version: "0.1.0",
-  tools: sdkTools,
-});
+
+// sdkTools is shared (pure function handlers pointing to stable shared state).
+// mcpServer must be created fresh per startup() call — the SDK deregisters the
+// in-process MCP server when the WarmQuery is consumed, so a single shared
+// mcpServer instance breaks concurrent agents ("No such tool available").
+// We expose a factory and call it inside takeWarm() to get an isolated instance.
+function createFreshMcpServer() {
+  return createSdkMcpServer({
+    name: "cos-tools",
+    version: "0.1.0",
+    tools: sdkTools,
+  });
+}
 
 const YT_TRANSCRIBE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
@@ -162,7 +198,8 @@ const ACHORADAZOS_DIST =
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
   mcpServers: {
-    "cos-tools": mcpServer,
+    // "cos-tools" is NOT here — injected fresh per startup() call in takeWarm()
+    // to avoid shared MCP server deregistration issues with concurrent agents.
     // External stdio MCPs — el SDK librería NO lee ~/.claude/.mcp.json automáticamente,
     // hay que registrar custom MCPs aquí explícitamente.
     "youtube-transcribe": {
@@ -259,10 +296,22 @@ const BASE_OPTIONS: Options = {
 // MCP custom" — if we reuse a WarmQuery prefetched from a previous startup(),
 // the in-process MCP server gets unregistered when the handle is consumed.
 // Fix: fresh startup() per invocation. Cost ~3-5s per turn, tools register reliably.
+//
+// Fresh mcpServer per startup(): the in-process cos-tools MCP server is deregistered
+// when the WarmQuery is consumed. Sharing one instance across concurrent agents causes
+// "No such tool available" errors. Fix: create a new mcpServer per takeWarm() call so
+// each agent gets an isolated server lifecycle.
 async function takeWarm(): Promise<WarmQuery> {
   const t0 = Date.now();
+  const options: Options = {
+    ...BASE_OPTIONS,
+    mcpServers: {
+      ...BASE_OPTIONS.mcpServers,
+      "cos-tools": createFreshMcpServer(),
+    },
+  };
   try {
-    const warm = await startup({ options: BASE_OPTIONS });
+    const warm = await startup({ options });
     log({ msg: "warm_startup", ms: Date.now() - t0 });
     return warm;
   } catch (err) {
@@ -600,15 +649,15 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
       return;
     }
 
-    // Keyword-triggered TTS: prefijo 🎤 o "en audio"/"en voz" en el texto
+    // Keyword-triggered TTS: prefijo 🎤 o frases de audio/voz en el texto
     let wantsVoice = false;
     if (env.ELEVENLABS_API_KEY && env.ELEVENLABS_VOICE_ID) {
       if (text.trimStart().startsWith("🎤")) {
         wantsVoice = true;
         text = text.replace(/^\s*🎤\s*/, "").trim();
-      } else if (/\ben (audio|voz)\b/i.test(text)) {
+      } else if (/\b(?:en|como|de forma|de manera)\s+(?:audio|voz)\b|l[ée]emelo|cu[eé]ntamelo\b/i.test(text)) {
         wantsVoice = true;
-        text = text.replace(/\s*\ben (audio|voz)\b\s*/gi, " ").trim();
+        text = text.replace(/\s*\b(?:en|como|de forma|de manera)\s+(?:audio|voz)\b\s*/gi, " ").trim();
       }
     }
     if (wantsVoice) {
@@ -638,7 +687,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
 
     try {
       const t2 = Date.now();
-      const { reply, sdkMs, firstEventMs } = await runAgent(text, {
+      const { reply: rawReply, sdkMs, firstEventMs } = await runAgent(text, {
         warm,
         history,
         contextHeader,
@@ -646,6 +695,8 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
           await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, progressText).catch(() => {});
         },
       });
+      // Safety net: convert Markdown → HTML before sending and storing.
+      const reply = wantsVoice ? rawReply : sanitizeForTelegram(rawReply);
       const totalAgentMs = Date.now() - t2;
 
       // Limpiar el archivo temporal de la foto una vez que el agente terminó
@@ -657,30 +708,57 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
       const t3 = Date.now();
       if (wantsVoice) {
         try {
-          const { textToVoiceOgg } = await import("./tools/tts.js");
-          const ogg = await textToVoiceOgg(reply, env.ELEVENLABS_API_KEY, env.ELEVENLABS_VOICE_ID);
+          const { textToVoiceOggChunks } = await import("./tools/tts.js");
+          const oggs = await textToVoiceOggChunks(reply, env.ELEVENLABS_API_KEY, env.ELEVENLABS_VOICE_ID);
           await deleteMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId).catch(() => {});
-          await sendVoice(env.COS_TELEGRAM_BOT_TOKEN, chatId, ogg);
-          log({ msg: "tts_sent", chatId, replyLen: reply.length });
+          for (const ogg of oggs) {
+            await sendVoice(env.COS_TELEGRAM_BOT_TOKEN, chatId, ogg);
+          }
+          log({ msg: "tts_sent", chatId, replyLen: reply.length, chunks: oggs.length });
         } catch (ttsErr) {
           log({ msg: "tts_error", chatId, err: String(ttsErr) });
-          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, "HTML").catch(() =>
-            editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, null),
-          );
+          const textChunks = chunkText(reply);
+          for (let i = 0; i < textChunks.length; i++) {
+            const chunk = textChunks[i];
+            if (i === 0) {
+              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML").catch(() =>
+                editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null),
+              );
+            } else {
+              await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk, parseMode: "HTML" }).catch(() =>
+                sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk }).catch(() => {}),
+              );
+            }
+          }
         }
+      } else if (!reply) {
+        // LLM devolvió vacío — las tools ya manejaron el output (showMeetingCards, buildApprovalFlow, etc.)
+        await deleteMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId).catch(() => {});
       } else {
-        try {
-          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, "HTML");
-        } catch (parseErr) {
-          log({ msg: "html_parse_failed", err: String(parseErr) });
-          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, null);
+        const chunks = chunkText(reply);
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          if (i === 0) {
+            try {
+              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML");
+            } catch (parseErr) {
+              log({ msg: "html_parse_failed", err: String(parseErr) });
+              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null);
+            }
+          } else {
+            try {
+              await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk, parseMode: "HTML" });
+            } catch {
+              await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk }).catch(() => {});
+            }
+          }
         }
       }
       const sendMs = Date.now() - t3;
 
       const t4 = Date.now();
       await state.append(chatId, { role: "user", content: text });
-      await state.append(chatId, { role: "assistant", content: reply });
+      if (reply) await state.append(chatId, { role: "assistant", content: reply });
       const stateSaveMs = Date.now() - t4;
 
       log({
@@ -748,7 +826,7 @@ function scheduleFlightCheckin(): void {
       kv,
       botToken: env.COS_TELEGRAM_BOT_TOKEN,
       chatId: ALERT_CHAT_ID,
-      options: BASE_OPTIONS,
+      takeWarm,
     });
   }, { timezone: "America/La_Paz" });
   log({ msg: "flight_checkin_scheduled", interval: "every 30min 7-22h" });
@@ -759,7 +837,7 @@ function scheduleFocoCheckinsLocal(): void {
     kv,
     botToken: env.COS_TELEGRAM_BOT_TOKEN,
     chatId: ALERT_CHAT_ID,
-    options: BASE_OPTIONS,
+    takeWarm,
     setCurrentChatId: (id) => {
       currentChatId = id;
     },

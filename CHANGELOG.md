@@ -1,5 +1,13 @@
 # CHANGELOG — Jano
 
+## 2026-06-01
+
+### UX — Markdown → HTML sanitizer
+
+- **Fix**: `compact.ts` generaba summaries con bullets Markdown que Sonnet replicaba en respuestas. Reemplazado por texto plano sin guiones.
+- **Fix**: `daemon-v2/src/format.ts` — `sanitizeForTelegram()` post-processor (mismo módulo que Pecunia). Para voice (TTS) se usa el texto raw sin sanitizar.
+- **Fix**: `system-prompt.ts` — bloque ⛔ VERIFICACIÓN OBLIGATORIA con tabla de patrones Markdown prohibidos vs HTML correcto.
+
 ## 2026-05-27
 
 ### Fix — Mensajes largos y TTS chunking en Jano
