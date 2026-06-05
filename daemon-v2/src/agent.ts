@@ -29,9 +29,10 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__fetchAndSummarize":   "🔄 Descargando y resumiendo en background...",
   "mcp__cos-tools__getFocoCalStatus":   "🎯 Revisando Foco CAL...",
   "mcp__cos-tools__logFocoProgress":    "✅ Loggeando avance en Foco CAL...",
-  "mcp__cos-tools__showMeetingCards":   "📋 Enviando tarjetas de reuniones...",
-  "mcp__cos-tools__reviewMeetings":     "🔍 Consultando reuniones en Notion...",
-  "mcp__cos-tools__analyzeMeeting":     "🧠 Analizando reunión...",
+  "mcp__cos-tools__showMeetingCards":          "📋 Enviando tarjetas de reuniones...",
+  "mcp__cos-tools__reviewMeetings":            "🔍 Consultando reuniones en Notion...",
+  "mcp__cos-tools__analyzeMeeting":            "🧠 Analizando reunión...",
+  "mcp__cos-tools__analyzeTranscriptAgent":    "🤖 Lanzando subagente de transcript...",
   "mcp__cos-tools__pptWizardSave":       "📊 Guardando avance de la presentación...",
   "mcp__cos-tools__pptWizardLoad":       "📊 Cargando estado de la presentación...",
   "mcp__cos-tools__addDigestSource":     "📰 Agregando fuente al Digest...",
@@ -100,6 +101,12 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__updateNotionTask":                  "✏️ Actualizando tarea en Notion...",
   // Notifications
   "mcp__notifications__sendNotification":              "🔔 Enviando notificación...",
+  // Libros (Notion BD)
+  "mcp__cos-tools__searchBooks":                       "📚 Buscando libros...",
+  "mcp__cos-tools__addBook":                           "📖 Creando libro en Notion...",
+  "mcp__cos-tools__updateBook":                        "✏️ Actualizando libro...",
+  "mcp__cos-tools__logReadingProgress":                "📊 Registrando progreso de lectura...",
+  "mcp__cos-tools__setBookCover":                      "🖼️ Buscando cover del libro...",
 };
 
 export async function runAgent(userMessage: string, deps: AgentDeps): Promise<AgentResult> {
@@ -192,7 +199,43 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
   console.log(JSON.stringify({ ts: Date.now(), msg: "turn_summary", toolCalls }));
 
   return {
-    reply: finalText.trim() || "(sin respuesta)",
+    reply: finalText.trim(),
+    sdkMs: Date.now() - sdkStart,
+    firstEventMs,
+  };
+}
+
+export async function runSubAgent(
+  warm: WarmQuery,
+  prompt: string,
+): Promise<AgentResult> {
+  const sdkStart = Date.now();
+  const q = warm.query(prompt);
+  let firstEventMs = 0;
+  let finalText = "";
+
+  for await (const message of q) {
+    if (firstEventMs === 0) firstEventMs = Date.now() - sdkStart;
+
+    if (message.type === "assistant") {
+      const content =
+        (message as { message?: { content?: Array<{ type?: string; name?: string }> } })
+          .message?.content ?? [];
+      for (const block of content) {
+        if (block.type === "tool_use" && block.name) {
+          console.log(JSON.stringify({ ts: Date.now(), msg: "subagent_tool_use", name: block.name }));
+        }
+      }
+    }
+
+    if (message.type === "result" && message.subtype === "success") {
+      finalText = (message as { result?: string }).result ?? "";
+      break;
+    }
+  }
+
+  return {
+    reply: finalText.trim() || "[]",
     sdkMs: Date.now() - sdkStart,
     firstEventMs,
   };

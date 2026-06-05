@@ -57,6 +57,9 @@ export const DISALLOWED_BUILTINS: string[] = [
   // mcp__youtube-transcribe en su lugar (caption fast-path + whisper fallback).
   // El viejo solo lee captions y rompe con videos sin captions.
   "mcp__youtube-transcript__get_transcripts",
+  // Notion tools que el LLM intenta usar pero no están en allowlist y confunden el loop
+  // de msel:all (LLM ve "permissions not granted" y reintenta reviewMeetings en loop)
+  "mcp__claude_ai_Notion__notion-query-meeting-notes",
   // Playwright — bloqueado: Jano no necesita control de navegador. Fue visto
   // intentando leer file:// paths de persisted-output (2026-05-23) — no es el patrón correcto.
   "mcp__plugin_playwright_playwright__browser_navigate",
@@ -180,6 +183,7 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__cos-tools__showMeetingCards",
   "mcp__cos-tools__reviewMeetings",
   "mcp__cos-tools__analyzeMeeting",
+  "mcp__cos-tools__analyzeTranscriptAgent",
   // Readwise Reader + Highlights — 22 tools (confirmados 2026-05-02)
   "mcp__readwise__reader_list_documents",
   "mcp__readwise__reader_search_documents",
@@ -242,4 +246,10 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__inversiones-query__kuberaCashFlow",
   "mcp__inversiones-query__kuberaUpdateShares",
   "mcp__inversiones-query__kuberaFindCustodian",
+  // Libros (Notion BD) — gestión de la biblioteca personal de Cal
+  "mcp__cos-tools__searchBooks",
+  "mcp__cos-tools__addBook",
+  "mcp__cos-tools__updateBook",
+  "mcp__cos-tools__logReadingProgress",
+  "mcp__cos-tools__setBookCover",
 ];

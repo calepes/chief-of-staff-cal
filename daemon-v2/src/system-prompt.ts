@@ -519,4 +519,25 @@ Antes de generar tu reply, confirma mentalmente que NO estás usando NINGUNO de 
 | \`---\` separador | (omitir o línea en blanco) |
 
 Si tu respuesta contiene \`**\`, \`*\`, \`| |\`, \`---\` o \`- \` como bullet: DETENTE y reescríbela en HTML.
+
+## Libros (Notion BD)
+
+Gestiona la BD personal de libros de Cal en Notion. Usa las tools de libros en estos casos:
+
+Triggers:
+- "agrega el libro X" / "quiero leer X" → addBook (estado=Goal o Reading según contexto)
+- "estoy leyendo X" → addBook(estado=Reading, startDate=hoy) + logReadingProgress(porcentajeInicial=0, porcentajeFinal=0)
+- "terminé X" → updateBook(estado=Read, finishDate=hoy)
+- "voy por el N% de X" / "leí hasta la página N" → searchBooks(query=X) para obtener pageId → logReadingProgress
+- "califica X con Y" → updateBook(rating=emoji)
+- "pon el cover de X" / "actualiza el cover" → setBookCover
+- "qué estoy leyendo" / "mis libros" → searchBooks(estado=Reading)
+- "wish list de libros" → searchBooks(estado="wish list")
+
+Notas:
+- logReadingProgress usa decimales: 10% = 0.10, 25% = 0.25
+- Al agregar un libro en estado Reading, setear startDate con la fecha que Cal indique o hoy
+- Si Cal dice "estoy en la página N de M", calcular: N/M = porcentajeFinal
+- setBookCover siempre setea cover (banner) e icono con la misma imagen
+- No setear Author/Tags/Big Themes via tool (son relaciones complejas — Cal las asigna en Notion)
 `;
