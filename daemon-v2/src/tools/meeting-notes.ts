@@ -31,7 +31,7 @@ interface NotionPage {
   properties: {
     "Descripción"?: { title: NotionRichText[] };
     "Fecha"?: { date: { start: string } | null };
-    "Resumen Foco CAL"?: { rich_text: NotionRichText[] };
+    "Autofoco CAL"?: { rich_text: NotionRichText[] };
     "Resumen"?: { rich_text: NotionRichText[] };
   };
 }
@@ -50,7 +50,7 @@ function pageToMeeting(page: NotionPage): MeetingNote {
   const fecha =
     page.properties["Fecha"]?.date?.start?.slice(0, 10) ?? "";
   const resumenFocoCal =
-    extractText(page.properties["Resumen Foco CAL"]?.rich_text ?? []) || null;
+    extractText(page.properties["Autofoco CAL"]?.rich_text ?? []) || null;
   const resumen =
     extractText(page.properties["Resumen"]?.rich_text ?? []) || null;
   return {
@@ -138,6 +138,24 @@ export function formatFechaEs(isoDate: string): string {
   const day = DAY_ES[d.getUTCDay()];
   const month = MONTH_ES[d.getUTCMonth()];
   return `${day} ${d.getUTCDate()} ${month}`;
+}
+
+export async function tgEdit(
+  token: string,
+  chatId: number,
+  messageId: number,
+  text: string,
+): Promise<void> {
+  const res = await fetch(
+    `https://api.telegram.org/bot${token}/editMessageText`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: "HTML" }),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!res.ok) throw new Error(`Telegram API error ${res.status}: ${await res.text()}`);
 }
 
 export async function tgSend(

@@ -70,9 +70,12 @@ function buildSummaryKeyboard(n: number, confirmVerb: string, rejectVerb: string
   return { inline_keyboard: rows };
 }
 
-function buildWizardText(item: ApprovalItem, idx: number, total: number, title: string): string {
+function buildWizardText(item: ApprovalItem, doneCount: number, remainingCount: number, title: string): string {
   const meta = item.meta ? `\n<i>${item.meta}</i>` : "";
-  return `📋 <b>${idx + 1} de ${total}</b> — ${title}\n\n<b>${item.label}</b>${meta}`;
+  const progress = doneCount > 0
+    ? `✅ ${doneCount} listo${doneCount === 1 ? "" : "s"} · `
+    : "";
+  return `📋 ${progress}<b>${remainingCount} restante${remainingCount === 1 ? "" : "s"}</b> — ${title}\n\n<b>${item.label}</b>${meta}`;
 }
 
 function buildWizardKeyboard(confirmVerb: string, rejectVerb: string, hasPrev: boolean): { inline_keyboard: InlineRow[] } {
@@ -173,7 +176,6 @@ export async function stepApprovalWizardImpl(
   }
 
   const { items, processed, confirmVerb, rejectVerb, title, summaryMsgId } = wizState;
-  const total = items.length;
   const processedSet = () => new Set(wizState.processed);
   const remaining = () => items.filter((it) => !processedSet().has(it.id));
 
@@ -212,10 +214,11 @@ export async function stepApprovalWizardImpl(
     wizState.currentIdx = firstIdx;
     await deps.kv.set(wizKey(chatId), wizState, WIZ_TTL);
     const item = items[firstIdx];
+    const rem0 = remaining().length;
     await editMsg(deps.botToken, chatId, summaryMsgId,
-      buildWizardText(item, firstIdx, total, title),
+      buildWizardText(item, processed.length, rem0, title),
       buildWizardKeyboard(confirmVerb, rejectVerb, false));
-    return { action: "start", item, remaining: remaining().length };
+    return { action: "start", item, remaining: rem0 };
   }
 
   const currentIdx = wizState.currentIdx;
@@ -229,20 +232,22 @@ export async function stepApprovalWizardImpl(
 
     if (targetIdx < 0) {
       const hasPrev = prevUnprocessed(items, processed, currentIdx - 1) >= 0;
+      const remCur = remaining().length;
       await editMsg(deps.botToken, chatId, summaryMsgId,
-        buildWizardText(currentItem, currentIdx, total, title),
+        buildWizardText(currentItem, processed.length, remCur, title),
         buildWizardKeyboard(confirmVerb, rejectVerb, hasPrev));
-      return { action: args.action, item: currentItem, remaining: remaining().length };
+      return { action: args.action, item: currentItem, remaining: remCur };
     }
 
     wizState.currentIdx = targetIdx;
     await deps.kv.set(wizKey(chatId), wizState, WIZ_TTL);
     const nextItem = items[targetIdx];
     const hasPrev = prevUnprocessed(items, processed, targetIdx - 1) >= 0;
+    const remNav = remaining().length;
     await editMsg(deps.botToken, chatId, summaryMsgId,
-      buildWizardText(nextItem, targetIdx, total, title),
+      buildWizardText(nextItem, processed.length, remNav, title),
       buildWizardKeyboard(confirmVerb, rejectVerb, hasPrev));
-    return { action: args.action, item: nextItem, remaining: remaining().length };
+    return { action: args.action, item: nextItem, remaining: remNav };
   }
 
   // ---- ok / no ----
@@ -261,10 +266,10 @@ export async function stepApprovalWizardImpl(
 
   const nextItem = items[nextIdx];
   const hasPrev = prevUnprocessed(items, newProcessed, nextIdx - 1) >= 0;
+  const remOkNo = items.filter((it) => !new Set(newProcessed).has(it.id)).length;
   await editMsg(deps.botToken, chatId, summaryMsgId,
-    buildWizardText(nextItem, nextIdx, total, title),
+    buildWizardText(nextItem, newProcessed.length, remOkNo, title),
     buildWizardKeyboard(confirmVerb, rejectVerb, hasPrev));
 
-  const rem = items.filter((it) => !new Set(newProcessed).has(it.id)).length;
-  return { action: args.action, item: currentItem, remaining: rem };
+  return { action: args.action, item: currentItem, remaining: remOkNo };
 }

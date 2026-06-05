@@ -1,5 +1,4 @@
-import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { startup } from "@anthropic-ai/claude-agent-sdk";
+import type { WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import cron from "node-cron";
 import type { CfKv } from "../cf-kv.js";
 import { runAgent } from "../agent.js";
@@ -21,7 +20,7 @@ export interface FocoCheckinOpts {
   kv: CfKv;
   botToken: string;
   chatId: number;
-  options: Options;
+  takeWarm: () => Promise<WarmQuery>;
   setCurrentChatId: (id: number) => void;
 }
 
@@ -40,7 +39,7 @@ const SLOT_GREETING: Record<Slot, string> = {
 };
 
 async function runFocoCheckin(opts: FocoCheckinOpts, slot: Slot): Promise<void> {
-  const { kv, chatId, options, setCurrentChatId } = opts;
+  const { kv, chatId, takeWarm, setCurrentChatId } = opts;
 
   // Deduplication — evita doble envío si el daemon se reinicia en el mismo slot
   const today = new Date().toISOString().slice(0, 10);
@@ -80,7 +79,7 @@ async function runFocoCheckin(opts: FocoCheckinOpts, slot: Slot): Promise<void> 
 
   let warm;
   try {
-    warm = await startup({ options });
+    warm = await takeWarm();
   } catch (err) {
     console.log(JSON.stringify({ ts: Date.now(), msg: "foco_checkin_startup_error", slot, err: String(err) }));
     return;

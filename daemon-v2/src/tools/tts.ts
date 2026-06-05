@@ -53,12 +53,80 @@ function prepareForSpeech(text: string): string {
   return s;
 }
 
+const TTS_CHUNK = 4800;
+
+function chunkForSpeech(text: string, maxLen = TTS_CHUNK): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  let rem = text;
+  while (rem.length > 0) {
+    if (rem.length <= maxLen) { chunks.push(rem); break; }
+    let cut = maxLen;
+    const para = rem.lastIndexOf(". ", maxLen);
+    if (para > maxLen / 2) { cut = para + 2; }
+    else {
+      const space = rem.lastIndexOf(" ", maxLen);
+      if (space > maxLen / 2) cut = space + 1;
+    }
+    chunks.push(rem.slice(0, cut).trimEnd());
+    rem = rem.slice(cut).trimStart();
+  }
+  return chunks.filter(Boolean);
+}
+
+async function synthesizeChunk(chunk: string, apiKey: string, voiceId: string): Promise<Buffer> {
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text: chunk,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    },
+  );
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`ElevenLabs ${res.status}: ${err.slice(0, 200)}`);
+  }
+  const mp3 = Buffer.from(await res.arrayBuffer());
+  const id = randomBytes(6).toString("hex");
+  const mp3Path = `/tmp/tts-${id}.mp3`;
+  const oggPath = `/tmp/tts-${id}.ogg`;
+  await writeFile(mp3Path, mp3);
+  await execFileAsync(FFMPEG, ["-y", "-i", mp3Path, "-c:a", "libopus", "-b:a", "64k", oggPath]);
+  const ogg = await readFile(oggPath);
+  await Promise.allSettled([unlink(mp3Path), unlink(oggPath)]);
+  return ogg;
+}
+
+// Returns one OGG buffer per chunk (multiple voice messages for long text).
+export async function textToVoiceOggChunks(
+  text: string,
+  apiKey: string,
+  voiceId: string,
+): Promise<Buffer[]> {
+  const clean = prepareForSpeech(text);
+  const chunks = chunkForSpeech(clean);
+  const buffers: Buffer[] = [];
+  for (const chunk of chunks) {
+    buffers.push(await synthesizeChunk(chunk, apiKey, voiceId));
+  }
+  return buffers;
+}
+
 export async function textToVoiceOgg(
   text: string,
   apiKey: string,
   voiceId: string,
 ): Promise<Buffer> {
-  const clean = prepareForSpeech(text).slice(0, 900);
+  const clean = prepareForSpeech(text).slice(0, TTS_CHUNK);
 
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,

@@ -50,7 +50,35 @@ export async function searchCover(
   title?: string,
   author?: string
 ): Promise<string | null> {
-  // Primary: Open Library by ISBN
+  const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+
+  // Primary: Google Books API (higher quality, reliable)
+  const gbQuery = isbn
+    ? `isbn:${isbn}`
+    : title
+    ? `intitle:${title}${author ? `+inauthor:${author}` : ""}`
+    : null;
+
+  if (gbQuery && apiKey) {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(gbQuery)}&maxResults=3&key=${apiKey}`,
+        { signal: AbortSignal.timeout(8_000) }
+      );
+      const data = (await res.json()) as {
+        items?: Array<{ volumeInfo: { imageLinks?: { thumbnail?: string } } }>;
+      };
+      const thumb = data?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
+      if (thumb) {
+        // zoom=6 = large image; strip curl effect. Replace https fallback (Notion blocks HTTP).
+        return thumb.replace("zoom=1", "zoom=6").replace("&edge=curl", "").replace("http://", "https://");
+      }
+    } catch {
+      // fall through to Open Library
+    }
+  }
+
+  // Fallback: Open Library by ISBN
   if (isbn) {
     const url = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
     try {
@@ -59,26 +87,6 @@ export async function searchCover(
         signal: AbortSignal.timeout(5_000),
       });
       if (res.ok || res.status === 302 || res.redirected) return url;
-    } catch {
-      // fall through
-    }
-  }
-
-  // Fallback: Google Books by title + author
-  if (title) {
-    const q = encodeURIComponent(
-      `intitle:${title}${author ? `+inauthor:${author}` : ""}`
-    );
-    try {
-      const res = await fetch(
-        `https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=3`,
-        { signal: AbortSignal.timeout(8_000) }
-      );
-      const data = (await res.json()) as {
-        items?: Array<{ volumeInfo: { imageLinks?: { thumbnail?: string } } }>;
-      };
-      const thumb = data?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
-      if (thumb) return thumb;
     } catch {
       // fall through
     }

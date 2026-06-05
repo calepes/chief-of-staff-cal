@@ -1,5 +1,4 @@
-import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { startup } from "@anthropic-ai/claude-agent-sdk";
+import type { WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { CfKv } from "../cf-kv.js";
 import { runAgent } from "../agent.js";
 import { sendMessage } from "@cos/shared";
@@ -8,7 +7,7 @@ interface FlightCheckinOpts {
   kv: CfKv;
   botToken: string;
   chatId: number;
-  options: Options;
+  takeWarm: () => Promise<WarmQuery>;
 }
 
 interface Flight {
@@ -19,7 +18,7 @@ interface Flight {
 }
 
 export async function checkFlightCheckin(opts: FlightCheckinOpts): Promise<void> {
-  const { kv, botToken, chatId, options } = opts;
+  const { kv, botToken, chatId, takeWarm } = opts;
 
   const today = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();
@@ -27,7 +26,7 @@ export async function checkFlightCheckin(opts: FlightCheckinOpts): Promise<void>
 
   let warm;
   try {
-    warm = await startup({ options });
+    warm = await takeWarm();
   } catch (err) {
     console.log(JSON.stringify({ ts: Date.now(), msg: "flight_checkin_startup_error", err: String(err) }));
     return;
