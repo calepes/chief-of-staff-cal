@@ -1,4 +1,5 @@
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { tool, startup } from "@anthropic-ai/claude-agent-sdk";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
@@ -26,11 +27,25 @@ import { readPersistedOutput } from "./tools/read-persisted.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import {
+  searchBooks,
+  addBook,
+  updateBook,
+  logReadingProgress,
+  setBookCover,
+  type EstadoLibro,
+  type AddBookParams,
+  type UpdateBookParams,
+  type LogProgressParams,
+  type SetCoverParams,
+} from "./tools/books.js";
+import { runSubAgent } from "./agent.js";
+import {
   formatFechaEs,
   queryMeetingsByDate,
   parseFocoCalTopics,
   escapeHtml,
   tgSend,
+  tgEdit,
   type MeetingNote,
   type FocoTopic,
 } from "./tools/meeting-notes.js";
@@ -51,6 +66,7 @@ export interface ToolDeps {
   gmapsApiKey?: string;
   homePin?: string;
   kv: CfKv;
+  getOptions: () => Options;
 }
 
 export function buildSdkTools(deps: ToolDeps) {
@@ -412,10 +428,11 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "showMeetingCards",
-      "Envía una tarjeta Telegram (Nivel 1) por cada reunión recibida. " +
+      "Envía una tarjeta Telegram (Nivel 1) por cada reunión. " +
+      "Si meetings se omite o está vacío, lee la lista del KV guardada por reviewMeetings (usar para msel:all). " +
+      "Si meetings se pasa explícito, usa esos datos directamente (usar para foco-check pm). " +
       "Cada tarjeta muestra título + fecha y botones para loguear, analizar o saltar. " +
       "También almacena los datos de cada reunión en CF KV para uso posterior por analyzeMeeting. " +
-      "Llamar cuando el prompt de check-in o un callback de selección (msel:*) requiera presentar meetings. " +
       "Máximo 5 reuniones por llamada.",
       {
         meetings: z.array(
@@ -427,13 +444,26 @@ export function buildSdkTools(deps: ToolDeps) {
             resumenFocoCal: z.string().nullable().optional(),
             resumen: z.string().nullable().optional(),
           }),
-        ).max(5),
+        ).max(5).optional().describe(
+          "Omitir cuando viene de msel:all — la tool lee del KV. " +
+          "Pasar solo cuando el prompt incluye los datos directamente (foco-check pm).",
+        ),
       },
       async ({ meetings }) => {
         const chatId = deps.getCurrentChatId();
+
+        const toShow: MeetingNote[] =
+          meetings && meetings.length > 0
+            ? (meetings as MeetingNote[]).slice(0, 5)
+            : ((await deps.kv.get<MeetingNote[]>(`meeting-list:${chatId}`)) ?? []).slice(0, 5);
+
+        if (toShow.length === 0) {
+          return asText({ error: "No hay meetings en caché. Llama reviewMeetings primero." });
+        }
+
         let sent = 0;
 
-        for (const m of meetings.slice(0, 5)) {
+        for (const m of toShow) {
           // Guardar datos en KV para analyzeMeeting
           await deps.kv.set(
             `meeting:${chatId}:${m.id}`,
@@ -441,11 +471,12 @@ export function buildSdkTools(deps: ToolDeps) {
             4 * 3600,
           );
 
-          const flag = m.hasFocoCal ? " 🎯" : "";
+          const hasFoco = m.hasFocoCal ?? false;
+          const flag = hasFoco ? " 🎯" : "";
           const dateStr = formatFechaEs(m.fecha);
           const text = `📋 <b>${escapeHtml(m.title)}</b> · ${dateStr}${flag}`;
 
-          const keyboard = m.hasFocoCal
+          const keyboard = hasFoco
             ? {
                 inline_keyboard: [[
                   { text: "✅ Loguear", callback_data: `mlog:${m.id}:focoCal` },
@@ -615,15 +646,164 @@ export function buildSdkTools(deps: ToolDeps) {
           meetingTitle: meeting.title,
           meetingPageId: meetingId,
           instruction:
-            `Llama mcp__claude_ai_Notion__notion-fetch con id="${meetingId}" ` +
-            `para obtener el body completo de la reunión "${meeting.title}". ` +
-            `Extrae el bloque de transcript (máx 8000 caracteres). ` +
-            `Analiza qué temas del Foco CAL se avanzaron (secciones: CAL, Prioridades, ` +
-            `Rufino, Christian, KPIs, Tareas). ` +
-            `Luego llama buildApprovalFlow para validación. ` +
-            `confirmVerb="✅ Sí", rejectVerb="⏭ No". ` +
-            `Cuando llegue jano-wiz-ok: stepApprovalWizard({ action: "ok" }) → logFocoProgress.`,
+            `Llama analyzeTranscriptAgent({ meetingId: "${meetingId}", meetingTitle: "${meeting.title.replace(/"/g, "'")}" }). ` +
+            `El subagente lee el transcript en un contexto aislado, envía mensajes de estado a Telegram, ` +
+            `y retorna los topics directamente. ` +
+            `NO uses mcp__claude_ai_Notion__notion-fetch directamente — el transcript llenaría este contexto.`,
         });
+      },
+    ),
+    tool(
+      "analyzeTranscriptAgent",
+      "Analiza una reunión para extraer temas del Foco CAL. Auto-selecciona el modo más rápido: " +
+      "(1) si tiene Resumen Foco CAL → parse local inmediato, " +
+      "(2) si tiene Resumen → devuelve texto para análisis inline del LLM, " +
+      "(3) si ninguno → subagente aislado lee el transcript en Notion. " +
+      "El título se busca en KV (no lo pase el LLM). Incluye dedup para evitar doble análisis. " +
+      "Retorna { ok, topics, instruction } para llamar buildApprovalFlow.",
+      {
+        meetingId: z.string().describe("Notion page ID de la reunión"),
+      },
+      async ({ meetingId }) => {
+        const chatId = deps.getCurrentChatId();
+        const botToken = deps.botToken;
+
+        // Title siempre desde KV — nunca confiar en el LLM para esto
+        const meeting = await deps.kv.get<MeetingNote>(`meeting:${chatId}:${meetingId}`);
+        const meetingTitle = meeting?.title ?? meetingId;
+
+        const mkInstruction = (topics: FocoTopic[]) => {
+          if (topics.length === 0) return `Sin temas del Foco CAL. Informa brevemente a Cal.`;
+          const safeTitle = meetingTitle.replace(/"/g, "'");
+          return (
+            `Llama buildApprovalFlow con: title="${safeTitle} — ¿qué logueamos?", ` +
+            `items=topics.map((t, i) => ({ id: \`t\${i}\`, label: t.text, meta: t.section })), ` +
+            `confirmVerb="✅ Sí", rejectVerb="⏭ No". ` +
+            `Cuando llegue jano-wiz-ok: stepApprovalWizard({ action: "ok" }) → logFocoProgress({ itemText: item.label, section: item.meta }).`
+          );
+        };
+
+        // Fast path 1: tiene resumenFocoCal → parse local, sin API
+        if (meeting?.resumenFocoCal) {
+          const topics = parseFocoCalTopics(meeting.resumenFocoCal);
+          if (topics.length > 0) {
+            return asText({ ok: true, meetingTitle, topics, instruction: mkInstruction(topics) });
+          }
+        }
+
+        // Fast path 2: tiene resumen → devuelve para análisis inline del LLM
+        if (meeting?.resumen) {
+          return asText({
+            ok: true,
+            meetingTitle,
+            mode: "resumen",
+            contentForAnalysis: meeting.resumen,
+            instruction:
+              `Analiza el resumen de "${escapeHtml(meetingTitle)}" y extrae temas del Foco CAL ` +
+              `(secciones: CAL, Prioridades, Rufino, Christian, KPIs, Tareas). ` +
+              `Llama buildApprovalFlow con los temas. confirmVerb="✅ Sí", rejectVerb="⏭ No". ` +
+              `Cuando llegue jano-wiz-ok: stepApprovalWizard → logFocoProgress.`,
+          });
+        }
+
+        // Dedup: evita que el subagente se lance dos veces para el mismo meeting
+        const dedupKey = `transcript_analyzed:${chatId}:${meetingId}`;
+        const alreadyDone = await deps.kv.get<boolean>(dedupKey);
+        if (alreadyDone) {
+          return asText({
+            ok: false,
+            error: `Transcript de "${meetingTitle}" ya fue analizado en este ciclo. Usa el resultado anterior.`,
+          });
+        }
+        await deps.kv.set(dedupKey, true, 4 * 3600);
+
+        // Slow path: subagente aislado con notion-fetch.
+        // Un solo mensaje de estado que se edita en cada fase (no pila de mensajes nuevos).
+        const statusMsgId = await tgSend(botToken, chatId,
+          `🔍 Leyendo transcript de <b>${escapeHtml(meetingTitle)}</b>...`,
+        ).catch(() => 0);
+
+        let subResult = "[]";
+        try {
+          const subOptions: Options = {
+            ...deps.getOptions(),
+            allowedTools: ["mcp__claude_ai_Notion__notion-fetch"],
+            maxTurns: 6,
+            systemPrompt: [
+              "You are Cal's Foco CAL analyzer. Cal leads Yape Bolivia (mobile payment app).",
+              "Fetch the Notion meeting page, read the transcript/notes, and extract ACTIONABLE items.",
+              "",
+              "Cal's Foco CAL has 6 sections — map every item to exactly one:",
+              "• CAL — Cal's own strategic objectives, personal leadership decisions, things only Cal can decide",
+              "• Prioridades — What must be prioritized this week/sprint: key trade-offs, scope decisions, focus shifts",
+              "• Rufino — Topics involving Rufino Arribas (BCP Bolivia stakeholder): commitments, asks, follow-ups",
+              "• Christian — Topics involving Christian Hausher (BCP Bolivia): decisions, dependencies, action items",
+              "• KPIs — Yape Bolivia metrics: DAU, TRX (transactions), Afiliaciones (new users). Include specific numbers or targets when mentioned.",
+              "• Tareas — Concrete tasks: who does what by when. Must be specific and actionable.",
+              "",
+              "EXTRACTION RULES:",
+              "1. Only extract ACTIONABLE items — something to DO, DECIDE, or FOLLOW UP on",
+              "2. Skip pure FYI/status items unless they trigger a required action",
+              "3. Be specific: 'Definir roadmap Q3 con Gonzo' NOT 'discuss strategy'",
+              "4. Section mapping priority: if it mentions Rufino → Rufino; if it mentions Christian → Christian; if KPI number → KPIs; if concrete task → Tareas; if strategic decision → CAL or Prioridades",
+              "5. Max 8 items. Prefer quality over quantity.",
+              "",
+              'Return ONLY a valid JSON array, no other text: [{"text": "item in Spanish", "section": "SectionName"}, ...]',
+              "If no actionable items found, return: []",
+            ].join("\n"),
+          };
+
+          const subWarm = await startup({ options: subOptions });
+
+          if (statusMsgId) {
+            await tgEdit(botToken, chatId, statusMsgId, "🧠 Analizando temas del Foco CAL...").catch(() => {});
+          }
+
+          const subPrompt =
+            `Fetch the Notion page with id="${meetingId}". ` +
+            `Read the full content — focus on transcript, notas, acuerdos, and follow-up sections. ` +
+            `Extract actionable Foco CAL items following the system prompt rules. ` +
+            `Return ONLY the JSON array.`;
+
+          const { reply } = await runSubAgent(subWarm, subPrompt);
+          subResult = reply;
+        } catch (err) {
+          console.error("analyzeTranscriptAgent: sub-agent error:", err);
+          if (statusMsgId) {
+            await tgEdit(botToken, chatId, statusMsgId, `⚠️ Error leyendo transcript de <b>${escapeHtml(meetingTitle)}</b>.`).catch(() => {});
+          }
+          return asText({ ok: false, error: String(err).slice(0, 200), topics: [] });
+        }
+
+        const VALID_SECTIONS = new Set(["CAL", "Prioridades", "Rufino", "Christian", "KPIs", "Tareas"]);
+        let topics: FocoTopic[] = [];
+        try {
+          const jsonMatch = subResult.match(/\[[\s\S]*?\]/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]) as Array<{ text?: unknown; section?: unknown }>;
+            topics = parsed
+              .filter((t) => typeof t.text === "string" && (t.text as string).length > 5)
+              .map((t) => ({
+                text: (t.text as string).trim(),
+                section: (VALID_SECTIONS.has(String(t.section)) ? String(t.section) : "CAL") as FocoSection,
+              }))
+              .slice(0, 8);
+          }
+        } catch {
+          // Keep empty on parse error
+        }
+
+        const finalStatusText = topics.length === 0
+          ? `⚠️ <b>${escapeHtml(meetingTitle)}</b> — sin temas accionables del Foco CAL`
+          : `✅ <b>${escapeHtml(meetingTitle)}</b> — ${topics.length} tema${topics.length === 1 ? "" : "s"}`;
+
+        if (statusMsgId) {
+          await tgEdit(botToken, chatId, statusMsgId, finalStatusText).catch(() => {});
+        } else {
+          await tgSend(botToken, chatId, finalStatusText).catch(() => {});
+        }
+
+        return asText({ ok: true, meetingTitle, topics, instruction: mkInstruction(topics) });
       },
     ),
     tool(
@@ -651,6 +831,73 @@ export function buildSdkTools(deps: ToolDeps) {
         appendFocoProgress(entry);
         return asText(`Progreso loggeado: ${itemText}`);
       },
+    ),
+    tool(
+      "searchBooks",
+      "Busca libros en la BD de Notion de Cal. Filtra por nombre y/o estado. Devuelve lista con título, estado, % avance y link.",
+      {
+        query:  z.string().optional().describe("Texto a buscar en el título del libro"),
+        estado: z.enum(["Goal","Reading","Read","Focus","Stand-By","Reference","wish list"]).optional(),
+      },
+      async ({ query, estado }) =>
+        asText(await searchBooks(query, estado as EstadoLibro | undefined)),
+      READ_ONLY,
+    ),
+    tool(
+      "addBook",
+      "Agrega un libro nuevo a la BD de Notion. Busca y setea el cover automáticamente si hay ISBN o título. Setea cover e icono con la misma imagen.",
+      {
+        name:           z.string().describe("Título del libro"),
+        subtitle:       z.string().optional(),
+        isbn:           z.string().optional(),
+        estado:         z.enum(["Goal","Reading","Read","Focus","Stand-By","Reference","wish list"]),
+        planningToRead: z.enum(["2021","2022","2023","2024","2025","2026"]).optional(),
+        totalPaginas:   z.number().int().positive().optional(),
+        startDate:      z.string().optional().describe("ISO date YYYY-MM-DD"),
+        finishDate:     z.string().optional().describe("ISO date YYYY-MM-DD"),
+        url:            z.string().optional().describe("URL del libro (Apple Books, Amazon, etc.)"),
+        fetchCover:     z.boolean().optional().describe("Buscar y setear cover automáticamente. Default true."),
+      },
+      async (params) => asText(await addBook(params as AddBookParams)),
+    ),
+    tool(
+      "updateBook",
+      "Actualiza propiedades de un libro existente en la BD de Notion. Solo actualiza los campos provistos.",
+      {
+        pageId:         z.string().describe("ID de la página Notion del libro"),
+        estado:         z.enum(["Goal","Reading","Read","Focus","Stand-By","Reference","wish list"]).optional(),
+        rating:         z.enum(["🥱","😶","😊","😍"]).optional(),
+        startDate:      z.string().optional().describe("ISO date YYYY-MM-DD"),
+        finishDate:     z.string().optional().describe("ISO date YYYY-MM-DD"),
+        totalPaginas:   z.number().int().positive().optional(),
+        isbn:           z.string().optional(),
+        subtitle:       z.string().optional(),
+        url:            z.string().optional(),
+        planningToRead: z.enum(["2021","2022","2023","2024","2025","2026"]).optional(),
+      },
+      async (params) => asText(await updateBook(params as UpdateBookParams)),
+    ),
+    tool(
+      "logReadingProgress",
+      "Registra una sesión de lectura en el tracking de libros. Los porcentajes son decimales: 0.10 = 10%, 0.25 = 25%.",
+      {
+        pageId:            z.string().describe("ID de la página Notion del libro"),
+        porcentajeInicial: z.number().min(0).max(1).describe("% al inicio de la sesión (0.0–1.0)"),
+        porcentajeFinal:   z.number().min(0).max(1).describe("% al final de la sesión (0.0–1.0)"),
+        fecha:             z.string().optional().describe("ISO date YYYY-MM-DD. Default: hoy."),
+      },
+      async (params) => asText(await logReadingProgress(params as LogProgressParams)),
+    ),
+    tool(
+      "setBookCover",
+      "Busca el cover del libro en internet (Open Library por ISBN, Google Books como fallback) y lo aplica como banner e ícono de la página en Notion.",
+      {
+        pageId: z.string().describe("ID de la página Notion del libro"),
+        isbn:   z.string().optional(),
+        title:  z.string().optional().describe("Título del libro para búsqueda si no hay ISBN"),
+        author: z.string().optional().describe("Autor para refinar la búsqueda"),
+      },
+      async (params) => asText(await setBookCover(params as SetCoverParams)),
     ),
   ];
 }
