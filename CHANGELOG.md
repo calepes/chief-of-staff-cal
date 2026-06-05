@@ -1,5 +1,13 @@
 # CHANGELOG — Jano
 
+## 2026-06-05
+
+### Fix — Books tools: gotchas de covers descubiertos en uso real
+
+- **Fix docs**: Google Books API `zoom=0` devuelve imágenes pequeñas/placeholder — usar `zoom=6`. Corregido en CLAUDE.md.
+- **Docs**: Covers en Notion requieren HTTPS (HTTP bloqueado). ISBN puede mapear a edición incorrecta — validar título del resultado; fallback `intitle:X inauthor:Y`.
+- **Docs**: `ntn` file upload 3-pasos para hostear covers directamente en Notion: `POST /v1/file_uploads` → `send --file` → PATCH con `file_upload.id`.
+
 ## 2026-06-04
 
 ### Tools — BD de Libros (Notion)
@@ -10,7 +18,7 @@
   - `updateBook` — actualiza propiedades (estado, rating, fechas, páginas)
   - `logReadingProgress` — registra sesión de lectura en BD tracking (porcentajes decimales)
   - `setBookCover` — busca cover en Google Books (primario) / Open Library (fallback) y setea cover + ícono con la misma URL
-- **Feature**: Cover search usa Google Books API (`GOOGLE_BOOKS_API_KEY` en `apps.env`) con imagen zoom=0 para mejor calidad. Open Library como fallback por ISBN.
+- **Feature**: Cover search usa Google Books API (`GOOGLE_BOOKS_API_KEY` en `apps.env`) con imagen `zoom=6` para imágenes de tamaño completo. Open Library como fallback por ISBN.
 - **Infra**: `ntn` CLI (`/opt/homebrew/bin/ntn`) usado via `spawnSync` para todas las operaciones Notion — funciona en daemon launchd user-level via Keychain macOS sin config adicional.
 
 ## 2026-06-01

@@ -18,7 +18,8 @@
 - **BD de Libros:** `daemon-v2/src/tools/books.ts` — 5 tools: `searchBooks`, `addBook`, `updateBook`, `logReadingProgress`, `setBookCover`. Usan `ntn` CLI via `spawnSync`.
 - **ntn CLI:** `/opt/homebrew/bin/ntn` — Notion CLI oficial. Autenticado vía Keychain macOS (funciona en daemon launchd user-level). Patrón: `callNtn(path, {method?, body?})` en `books.ts`. POST auto al pasar body; PATCH requiere `-X PATCH` explícito.
 - **BD IDs libros:** DB page `b9222a76-e940-4e22-9091-b1c0e26c29dd` · Data source `901dba51-1d00-4e3f-95b1-17ba628a0915` · Tracking DB `70b1e190-8547-4813-b918-43ce59071d3e`.
-- **Cover search:** `searchCover()` usa Google Books API (primario, imagen zoom=0) → Open Library por ISBN (fallback). Requiere `GOOGLE_BOOKS_API_KEY` en `apps.env`. Cover e ícono siempre se setean con la misma URL.
+- **Cover search:** `searchCover()` usa Google Books API (primario, imagen `zoom=6`) → Open Library por ISBN (fallback). Requiere `GOOGLE_BOOKS_API_KEY` en `apps.env`. Cover e ícono siempre se setean con la misma URL. ⚠️ Usar HTTPS (no HTTP) — Notion bloquea imágenes no-HTTPS. Validar título del resultado vs esperado: ISBN puede mapear a edición incorrecta; fallback: búsqueda `intitle:X inauthor:Y`.
+- **ntn file upload (covers hosted en Notion):** 3 pasos — `POST /v1/file_uploads` → id; `ntn api /v1/file_uploads/{id}/send --file img.jpg`; PATCH page con `{"type":"file_upload","file_upload":{"id":"..."}}`. Más confiable que URLs externas.
 - **Tracking porcentajes:** decimales — 10% = 0.10, 59% = 0.59. Rollup `Avance Tracking` en la BD principal hace `max` de `% Final`.
 - **Gotcha duplicados al crear libros:** verificar si ya existen antes de crear. Si hay duplicados, preferir el que tenga más campos completos; migrar tracking entries con restore→patch relation→re-trash.
 - **Google Books API key:** `GOOGLE_MAPS_API_KEY` tiene restricciones de API y NO sirve para Books. Clave dedicada `GOOGLE_BOOKS_API_KEY` en `apps.env`.
