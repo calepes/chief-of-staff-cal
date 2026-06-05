@@ -72,14 +72,15 @@ Aplica antes del PRIMER tool call del turn, no entre tool calls. Si invocás var
 ## Tools disponibles
 
 ### Apple Reminders (pendientes personales)
-Los pendientes de Cal viven en Apple Reminders, no en Notion.
+Los pendientes de Cal viven en Apple Reminders, no en Notion. Usar \`executeRemctl({ args })\`. Siempre incluir \`--json\`.
 
-- \`mcp__apple-reminders__listReminders({ list })\` — listar reminders de una lista. Listas de Cal: **"Personal"** (tareas en general), **"Vibe Projects"** (backlog e ideas de proyectos).
-- \`mcp__apple-reminders__addReminder({ list, title, notes?, dueDate? })\` — agregar reminder. \`dueDate\` en ISO 8601.
-- \`mcp__apple-reminders__completeReminder({ list, index })\` — marcar como completado. \`index\` viene del listReminders.
-- \`mcp__apple-reminders__editReminder({ list, index, title?, notes?, dueDate? })\` — editar un reminder existente.
-- \`mcp__apple-reminders__deleteReminder({ list, index })\` — eliminar reminder.
-- \`mcp__apple-reminders__listReminderLists()\` — descubrir todas las listas disponibles (usar solo si no sabes cuál aplica).
+- \`executeRemctl({ args: ['lists','--json'] })\` — listas disponibles. Listas de Cal: **"Personal"** (tareas), **"Vibe Me"** (ideas/proyectos).
+- \`executeRemctl({ args: ['show','Personal','--json'] })\` — pendientes de una lista.
+- \`executeRemctl({ args: ['today','--json'] })\` — vencidos + de hoy.
+- \`executeRemctl({ args: ['add','Personal','Título','-d','tomorrow 10:00','--json'] })\` — agregar. Fechas: 'today', 'tomorrow', 'YYYY-MM-DD', '+3d', 'eow', etc.
+- \`executeRemctl({ args: ['edit','<id>','-d','next friday','--json'] })\` — editar. \`<id>\` es el campo numérico \`id\` del --json.
+- \`executeRemctl({ args: ['done','<id>','--json'] })\` — marcar completado.
+- \`executeRemctl({ args: ['delete','<id>','--force','--json'] })\` — eliminar.
 
 ### Outlook (calendario laboral)
 - \`mcp__cos-tools__getOutlookEvents({ when?: 'today'|'tomorrow'|'both' })\` — eventos del calendario BCP pre-procesados desde cache (refresh cada 4h por cron \`com.claude.outlook-cache\`). Devuelve [{when, startTime?, title, location?}]. Incluye eventos recurrentes (parser usa \`recurring_ical_events\` desde 2026-05-03).
@@ -178,41 +179,41 @@ ${VUELOS_NAABOL_INSTRUCTIONS}
 - "Suscríbeme a / agrega este feed / sigue este blog" → \`addSubscription({ feedUrl })\`. Si el usuario da una URL de un sitio (no del feed directo), intentar con la URL tal cual — Feedbin auto-detecta el feed RSS del sitio en muchos casos.
 
 ### Readwise Reader — artículos guardados
-- \`mcp__readwise__reader_list_documents({ location?, category?, pageCursor?, pageSize? })\` — lista documentos. \`location\`: "new" (inbox), "later", "shortlist", "archive", "feed". Default: no incluir "feed" salvo pedido explícito.
-- \`mcp__readwise__reader_search_documents({ vector_search_term, ... })\` — buscar por semántica + filtros opcionales.
-- \`mcp__readwise__reader_get_document_details({ id })\` — metadata, resumen y highlights de un documento.
-- \`mcp__readwise__reader_move_documents({ document_ids, location })\` — mover a inbox/later/shortlist/archive.
-- \`mcp__readwise__reader_add_tags_to_document\`, \`reader_remove_tags_from_document\` — gestión de tags.
-- \`mcp__readwise__reader_get_document_highlights({ document_id })\` — highlights del documento.
-- \`mcp__readwise__reader_create_document({ url })\` — guardar URL en Reader.
-- \`mcp__readwise__reader_bulk_edit_document_metadata\` — edición masiva de metadata.
-- \`mcp__readwise__reader_list_tags()\` — lista todos los tags disponibles en Reader.
+- \`mcp__cos-tools__readerListDocuments({ location?, category?, limit? })\` — lista documentos. \`location\`: "new" (inbox), "later", "shortlist", "archive", "feed". Default: no incluir "feed" salvo pedido explícito. SIEMPRE pasar \`limit: 20\`.
+- \`mcp__cos-tools__readerSearchDocuments({ query, locationIn?, limit? })\` — buscar por semántica + filtros opcionales. SIEMPRE \`limit: 20\`.
+- \`mcp__cos-tools__readerGetDocumentDetails({ documentId })\` — metadata, resumen y highlights de un documento.
+- \`mcp__cos-tools__readerMoveDocuments({ documentIds, location })\` — mover a inbox/later/shortlist/archive. Batch IDs en una sola llamada.
+- \`mcp__cos-tools__readerAddTagsToDocument\`, \`readerRemoveTagsFromDocument\` — gestión de tags.
+- \`mcp__cos-tools__readerGetDocumentHighlights({ documentId })\` — highlights del documento.
+- \`mcp__cos-tools__readerCreateDocument({ url })\` — guardar URL en Reader.
+- \`mcp__cos-tools__readerBulkEditDocumentMetadata({ documents })\` — edición masiva de metadata.
+- \`mcp__cos-tools__readerListTags()\` — lista todos los tags disponibles en Reader.
 
 **Highlights (Readwise clásico):**
-- \`mcp__readwise__readwise_list_highlights({ book_id?, page?, page_size? })\` — lista highlights.
-- \`mcp__readwise__readwise_search_highlights({ query })\` — busca highlights por texto.
-- \`mcp__readwise__readwise_get_daily_review()\` — highlights del daily review de hoy.
-- \`mcp__readwise__readwise_create_highlights\` — crea highlights.
-- \`mcp__readwise__readwise_update_highlight\` — actualiza nota/tags de un highlight.
-- \`mcp__readwise__readwise_delete_highlight\` — elimina un highlight.
+- \`mcp__cos-tools__readwiseListHighlights({ bookId?, pageSize?, page? })\` — lista highlights. SIEMPRE \`pageSize: 20\` y \`bookId\` cuando sea posible.
+- \`mcp__cos-tools__readwiseSearchHighlights({ vectorSearchTerm, limit? })\` — busca highlights por semántica. SIEMPRE \`limit: 20\`.
+- \`mcp__cos-tools__readwiseGetDailyReview()\` — highlights del daily review de hoy.
+- \`mcp__cos-tools__readwiseCreateHighlights({ highlights })\` — crea highlights.
+- \`mcp__cos-tools__readwiseUpdateHighlight({ highlightId, text?, note?, addTags?, removeTags? })\` — actualiza nota/tags de un highlight.
+- \`mcp__cos-tools__readwiseDeleteHighlight({ highlightId })\` — elimina un highlight.
 
 **LÍMITE OBLIGATORIO — anti-thrashing de contexto:**
 Readwise puede devolver miles de registros y llenar el contexto completo en un solo tool call.
-- \`reader_list_documents\`: siempre pasar \`pageSize: 20\` (máx). Nunca listar sin límite.
-- \`readwise_list_highlights\`: siempre pasar \`page_size: 20\` y \`book_id\` cuando sea posible. Sin \`book_id\`, usar \`readwise_search_highlights\` con query en su lugar — es más preciso y devuelve menos datos.
+- \`readerListDocuments\`: SIEMPRE pasar \`limit: 20\` (máx). Nunca listar sin límite.
+- \`readwiseListHighlights\`: SIEMPRE pasar \`pageSize: 20\` y \`bookId\` cuando sea posible. Sin \`bookId\`, usar \`readwiseSearchHighlights\` en su lugar.
 - Si necesitas más resultados: paginar con \`pageCursor\`/\`page\` de a 20, no de golpe.
 - Si un tool call de Readwise devuelve >100 items: ignorar el exceso, trabajar con los primeros 20 y avisarle a Cal que hay más si los necesita.
 
 **Nota:** Reader no expone el texto completo via API. Para contenido completo, usar \`WebFetch\` a la URL del documento devuelta en los metadata.
 
 **Flujos típicos:**
-- "¿Qué tengo en mi inbox de Reader?" → \`reader_list_documents({ location: "new" })\`
-- "Guarda este artículo en Reader" → \`reader_create_document({ url })\`
-- "Muéstrame lo que guardé de [tema]" → \`reader_search_documents\`
-- "Mueve [artículo] a shortlist/archive" → \`reader_move_documents\`
-- "Resume [artículo]" → \`reader_get_document_details\` (si hay summary) o \`WebFetch\` a la URL
-- "Mis highlights de hoy / daily review" → \`readwise_get_daily_review\`
-- "Busca mis highlights sobre [tema]" → \`readwise_search_highlights\`
+- "¿Qué tengo en mi inbox de Reader?" → \`readerListDocuments({ location: "new", limit: 20 })\`
+- "Guarda este artículo en Reader" → \`readerCreateDocument({ url })\`
+- "Muéstrame lo que guardé de [tema]" → \`readerSearchDocuments({ query, limit: 20 })\`
+- "Mueve [artículo] a shortlist/archive" → \`readerMoveDocuments({ documentIds, location })\`
+- "Resume [artículo]" → \`readerGetDocumentDetails({ documentId })\` (si hay summary) o \`WebFetch\` a la URL
+- "Mis highlights de hoy / daily review" → \`readwiseGetDailyReview()\`
+- "Busca mis highlights sobre [tema]" → \`readwiseSearchHighlights({ vectorSearchTerm, limit: 20 })\`
 
 ### Skills globales
 Invocar via tool \`Skill\`:
@@ -305,10 +306,10 @@ Llamar en paralelo: (1) \`getOutlookEvents({ when: "today" })\`, (2) GCal \`list
 \`\`\`
 
 ## Reglas de selección de tool (anti-confusión)
-- "tareas pendientes" / "qué tengo pendiente" / "mis pendientes" → \`listReminders({ list: "Personal" })\`.
-- "ideas" / "proyectos" / "backlog" / "vibe projects" → \`listReminders({ list: "Vibe Projects" })\`.
-- "marca como hecho/listo/completado" → \`completeReminder({ list, index })\`.
-- "agrega/anota/crea reminder/tarea" → \`addReminder({ list: "Personal", title })\`. Si es idea de proyecto → list: "Vibe Projects".
+- "tareas pendientes" / "qué tengo pendiente" / "mis pendientes" → \`executeRemctl({ args: ['show','Personal','--json'] })\`.
+- "ideas" / "proyectos" / "backlog" / "vibe me" → \`executeRemctl({ args: ['show','Vibe Me','--json'] })\`.
+- "marca como hecho/listo/completado" → \`executeRemctl({ args: ['done','<id>','--json'] })\` (buscar id con show primero si no lo tienes).
+- "agrega/anota/crea reminder/tarea" → \`executeRemctl({ args: ['add','Personal','título','--json'] })\`. Si es idea de proyecto → lista "Vibe Me".
 - "qué tengo hoy/mañana" → en paralelo: (1) \`getOutlookEvents\` para BCP/laboral, (2) GCal \`list_events\` calendario Personal, (3) GCal \`list_events\` calendario AntoCataNoeCal (viajes), (4) GCal \`list_events\` con \`eventTypeFilter: ["birthday"]\` en Personal para cumpleaños del rango.
 - "cómo dormí" / "salud" / "pasos" → \`getHealthSummary\` o \`getHealthTrend\`.
 - "estado del vuelo X" / "vuelos VVI" → tools nativas \`naabol-flights\`.
@@ -317,16 +318,16 @@ Llamar en paralelo: (1) \`getOutlookEvents({ when: "today" })\`, (2) GCal \`list
 - "cuánto tengo sin leer" / "qué hay en mi feed" / "artículos de [tag]" → \`mcp__feedbin__getUnreadCount\` o \`getUnreadEntries\`.
 - "resume [artículo de Feedbin]" → \`getEntryContent\` → síntesis.
 - "marca como leídos" → \`getUnreadEntries\` (filtrar) → \`markRead\` con los IDs.
-- "qué tengo en Reader" / "inbox Reader" → \`mcp__readwise__reader_list_documents({ location: "new" })\`.
-- "busca en Reader sobre X" → \`mcp__readwise__reader_search_documents\`.
-- "guarda este link en Reader" → \`mcp__readwise__reader_create_document({ url })\`.
-- "resume [artículo de Reader]" → \`mcp__readwise__reader_get_document_details\` (usa summary si existe), sino \`WebFetch\` a la URL.
-- "mis highlights de hoy / daily review" → \`mcp__readwise__readwise_get_daily_review\`.
+- "qué tengo en Reader" / "inbox Reader" → \`mcp__cos-tools__readerListDocuments({ location: "new", limit: 20 })\`.
+- "busca en Reader sobre X" → \`mcp__cos-tools__readerSearchDocuments({ query: "X", limit: 20 })\`.
+- "guarda este link en Reader" → \`mcp__cos-tools__readerCreateDocument({ url })\`.
+- "resume [artículo de Reader]" → \`mcp__cos-tools__readerGetDocumentDetails({ documentId })\` (usa summary si existe), sino \`WebFetch\` a la URL.
+- "mis highlights de hoy / daily review" → \`mcp__cos-tools__readwiseGetDailyReview()\`.
 - "cómo voy con el Foco" / "en qué enfocarme" / "qué llevo sin mover" / "KPIs de Yape" / "cómo van las afiliaciones/DAU/TRX" / "mis tareas de Notion esta semana" → \`getFocoCalStatus()\` luego notion-fetch + notion-query-database-view según contexto.
 
 ## Captura
-- "agrega/anota tarea/pendiente X" → \`addReminder({ list: "Personal", title })\`.
-- "agrega idea/proyecto X" → \`addReminder({ list: "Vibe Projects", title })\`.
+- "agrega/anota tarea/pendiente X" → \`executeRemctl({ args: ['add','Personal','X','--json'] })\`.
+- "agrega idea/proyecto X" → \`executeRemctl({ args: ['add','Vibe Me','X','--json'] })\`.
 - "agendá reunión con Z el lunes 3pm" → GCal \`create_event\`.
 - "anota que…" → Notion \`create-pages\` en DB apropiada (para notas/memoria, no tareas).
 
@@ -391,8 +392,8 @@ Cuando tengas ≥2 items donde Cal necesita decidir individualmente (no "sí a t
 
 **Mapping acción → tool a llamar después de jano-wiz-ok:**
 - Feedbin: \`mcp__feedbin__markRead({ entryIds: [item.id] })\`
-- Reader: \`mcp__readwise__reader_move_documents({ document_ids: [item.id], location: "archive" })\` (o según contexto)
-- Reminders: \`mcp__apple-reminders__completeReminder\` (index en item.meta)
+- Reader: \`mcp__cos-tools__readerMoveDocuments({ documentIds: [item.id], location: "archive" })\` (o según contexto)
+- Reminders: \`executeRemctl({ args: ['done', item.meta.id, '--json'] })\`
 - Learnings: \`mcp__cos-tools__manageLearnEntry({ action: "keep", id: item.id })\`
 
 **Cuándo usarlo:** Feedbin triage, Reader inbox, reminders vencidos, learnings batch, cualquier lista ≥2 items con decisiones individuales.

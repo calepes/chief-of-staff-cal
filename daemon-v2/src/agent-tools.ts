@@ -52,7 +52,30 @@ import {
 // getHealthSummary, getHealthTrend, getWorkouts migradas al MCP global `health`
 // (mcp__health__getHealthSummary / getHealthTrend / getWorkouts).
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
-// removidas 2026-05-02 — pendientes en Apple Reminders (Personal / Vibe Projects), no Notion.
+// removidas 2026-05-02 — pendientes en Apple Reminders (Personal / Vibe Me), no Notion.
+import { executeRemctl } from "./tools/reminders.js";
+import {
+  readerListDocuments,
+  readerSearchDocuments,
+  readerGetDocumentDetails,
+  readerCreateDocument,
+  readerMoveDocuments,
+  readerGetDocumentHighlights,
+  readerAddTagsToDocument,
+  readerRemoveTagsFromDocument,
+  readerBulkEditDocumentMetadata,
+  readerListTags,
+  readerAddTagsToHighlight,
+  readerRemoveTagsFromHighlight,
+  readerSetHighlightNotes,
+  readerCreateHighlight,
+  readwiseSearchHighlights,
+  readwiseListHighlights,
+  readwiseGetDailyReview,
+  readwiseCreateHighlights,
+  readwiseUpdateHighlight,
+  readwiseDeleteHighlight,
+} from "./tools/readwise.js";
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
 
@@ -898,6 +921,231 @@ export function buildSdkTools(deps: ToolDeps) {
         author: z.string().optional().describe("Autor para refinar la búsqueda"),
       },
       async (params) => asText(await setBookCover(params as SetCoverParams)),
+    ),
+    tool(
+      "executeRemctl",
+      "Lee y escribe Apple Reminders via remctl CLI. Usar --json siempre. Ejemplos: ['lists','--json'] listas disponibles · ['show','Personal','--json'] pendientes · ['today','--json'] vencidos+hoy · ['overdue','--json'] · ['search','query','--json'] · ['add','Personal','Título','-d','tomorrow 10:00','--json'] · ['edit','<id>','-d','next friday','--json'] · ['done','<id>','--json'] · ['delete','<id>','--force','--json']. El <id> es el campo numérico 'id' del --json. Listas de Cal: Personal (tareas) · Vibe Me (ideas/proyectos) · Tareas Familia · Mercado.",
+      { args: z.array(z.string()).describe("Array de argumentos para remctl, sin incluir el binario. Ej: ['show','Personal','--json']") },
+      async ({ args }) => ({ content: [{ type: "text" as const, text: await executeRemctl(args) }] }),
+    ),
+
+    // ── Readwise Reader ─────────────────────────────────────────────────────────
+    tool(
+      "readerListDocuments",
+      "Lista documentos en Readwise Reader. location: 'new'=inbox, 'later', 'shortlist', 'archive', 'feed' (solo si Cal pide feed/RSS explícitamente). SIEMPRE pasar limit≤20 para evitar thrashing de contexto. Devuelve {count, nextPageCursor, results:[]}.",
+      {
+        location: z.enum(["new", "later", "shortlist", "archive", "feed"]).optional(),
+        category: z.string().optional().describe("article|email|rss|pdf|epub|tweet|video|podcast|audiobook"),
+        limit: z.number().int().min(1).max(20).optional().describe("Máx 20. Default 20 — SIEMPRE incluir."),
+        pageCursor: z.string().optional().describe("Cursor de paginación devuelto por llamada anterior"),
+        id: z.string().optional().describe("ID de un documento específico"),
+        updatedAfter: z.string().optional().describe("ISO 8601 datetime"),
+        tag: z.string().optional().describe("Filtrar por tag"),
+        responseFields: z.string().optional().describe("Campos a incluir (comma-separated) — omitir para todos"),
+      },
+      async (p) => asText(readerListDocuments({ ...p, limit: p.limit ?? 20 })),
+      READ_ONLY,
+    ),
+    tool(
+      "readerSearchDocuments",
+      "Busca documentos en Readwise Reader por contenido (hybrid search). No busca en feed — solo library (new/later/shortlist/archive). SIEMPRE pasar limit≤20.",
+      {
+        query: z.string().describe("Texto a buscar (required)"),
+        limit: z.number().int().min(1).max(20).optional().describe("Máx 20. Default 20."),
+        locationIn: z.array(z.enum(["new", "later", "shortlist", "archive"])).optional().describe("Filtrar por ubicaciones"),
+        categoryIn: z.string().optional(),
+        authorSearch: z.string().optional(),
+        titleSearch: z.string().optional(),
+        tagsSearch: z.string().optional(),
+        tagsIn: z.string().optional(),
+      },
+      async (p) => asText(readerSearchDocuments({ ...p, limit: p.limit ?? 20 })),
+      READ_ONLY,
+    ),
+    tool(
+      "readerGetDocumentDetails",
+      "Obtiene detalles completos de un documento de Reader, incluyendo Markdown content, summary, highlights. Usar con el ID obtenido de readerListDocuments o readerSearchDocuments.",
+      { documentId: z.string().describe("ID del documento") },
+      async ({ documentId }) => asText(readerGetDocumentDetails(documentId)),
+      READ_ONLY,
+    ),
+    tool(
+      "readerCreateDocument",
+      "Guarda una URL en Readwise Reader. Reader intentará scraping si no se provee html/markdown. Usar cuando Cal quiere guardar un artículo para leer.",
+      {
+        url: z.string().url().describe("URL del documento a guardar"),
+        title: z.string().optional(),
+        author: z.string().optional(),
+        summary: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        notes: z.string().optional().describe("Nota top-level del documento"),
+        category: z.string().optional().describe("article|email|rss|pdf|epub|tweet|video|podcast|audiobook"),
+      },
+      async (p) => asText(readerCreateDocument(p)),
+    ),
+    tool(
+      "readerMoveDocuments",
+      "Mueve uno o más documentos de Reader a otra ubicación (inbox/later/shortlist/archive). Máx 50 por llamada. Rate limit: 20 llamadas/min — batch IDs en una sola llamada.",
+      {
+        documentIds: z.array(z.string()).min(1).max(50).describe("IDs de los documentos a mover"),
+        location: z.enum(["new", "later", "shortlist", "archive"]).describe("Destino"),
+      },
+      async ({ documentIds, location }) => asText(readerMoveDocuments(documentIds, location)),
+    ),
+    tool(
+      "readerGetDocumentHighlights",
+      "Obtiene los highlights de un documento de Reader.",
+      { documentId: z.string().describe("ID del documento") },
+      async ({ documentId }) => asText(readerGetDocumentHighlights(documentId)),
+      READ_ONLY,
+    ),
+    tool(
+      "readerAddTagsToDocument",
+      "Agrega tags a un documento de Reader.",
+      {
+        documentId: z.string().describe("ID del documento"),
+        tagNames: z.array(z.string()).min(1).describe("Tags a agregar"),
+      },
+      async ({ documentId, tagNames }) => asText(readerAddTagsToDocument(documentId, tagNames)),
+    ),
+    tool(
+      "readerRemoveTagsFromDocument",
+      "Elimina tags de un documento de Reader.",
+      {
+        documentId: z.string().describe("ID del documento"),
+        tagNames: z.array(z.string()).min(1).describe("Tags a eliminar"),
+      },
+      async ({ documentId, tagNames }) => asText(readerRemoveTagsFromDocument(documentId, tagNames)),
+    ),
+    tool(
+      "readerBulkEditDocumentMetadata",
+      "Edita metadata de múltiples documentos en una sola llamada. Máx 50 por llamada. Rate limit compartido con readerMoveDocuments.",
+      {
+        documents: z.array(z.object({
+          document_id: z.string(),
+          seen: z.boolean().optional(),
+          location: z.enum(["new","later","shortlist","archive"]).optional(),
+          tags: z.array(z.string()).optional(),
+        })).min(1).max(50),
+      },
+      async ({ documents }) => asText(readerBulkEditDocumentMetadata(documents)),
+    ),
+    tool(
+      "readerListTags",
+      "Lista todos los tags disponibles en Readwise Reader.",
+      {},
+      async () => asText(readerListTags()),
+      READ_ONLY,
+    ),
+    tool(
+      "readerAddTagsToHighlight",
+      "Agrega tags a un highlight de un documento de Reader.",
+      {
+        documentId: z.string().describe("ID del documento que contiene el highlight"),
+        highlightDocumentId: z.string().describe("ID del highlight"),
+        tagNames: z.array(z.string()).min(1),
+      },
+      async ({ documentId, highlightDocumentId, tagNames }) =>
+        asText(readerAddTagsToHighlight(documentId, highlightDocumentId, tagNames)),
+    ),
+    tool(
+      "readerRemoveTagsFromHighlight",
+      "Elimina tags de un highlight de un documento de Reader.",
+      {
+        documentId: z.string().describe("ID del documento que contiene el highlight"),
+        highlightDocumentId: z.string().describe("ID del highlight"),
+        tagNames: z.array(z.string()).min(1),
+      },
+      async ({ documentId, highlightDocumentId, tagNames }) =>
+        asText(readerRemoveTagsFromHighlight(documentId, highlightDocumentId, tagNames)),
+    ),
+    tool(
+      "readerSetHighlightNotes",
+      "Setea la nota de un highlight de Reader. Pasar notes=null para limpiar la nota.",
+      {
+        documentId: z.string().describe("ID del documento"),
+        highlightDocumentId: z.string().describe("ID del highlight"),
+        notes: z.string().nullable().describe("Nota a setear, o null para limpiar"),
+      },
+      async ({ documentId, highlightDocumentId, notes }) =>
+        asText(readerSetHighlightNotes(documentId, highlightDocumentId, notes)),
+    ),
+    tool(
+      "readerCreateHighlight",
+      "Crea un highlight en un documento de Reader especificando el fragmento HTML exacto a resaltar.",
+      {
+        documentId: z.string().describe("ID del documento"),
+        htmlContent: z.string().describe("Fragmento HTML exacto a resaltar — copiar verbatim del html_content del documento"),
+        tags: z.array(z.string()).optional(),
+        note: z.string().optional(),
+      },
+      async (p) => asText(readerCreateHighlight(p)),
+    ),
+
+    // ── Readwise classic highlights ─────────────────────────────────────────────
+    tool(
+      "readwiseSearchHighlights",
+      "Busca highlights de Readwise (libros, artículos) por semántica. SIEMPRE pasar limit≤20.",
+      {
+        vectorSearchTerm: z.string().describe("Término de búsqueda semántica (required)"),
+        fullTextQueries: z.string().optional().describe("Búsqueda adicional full-text (mejora precisión)"),
+        limit: z.number().int().min(1).max(20).optional().describe("Máx 20. Default 20."),
+      },
+      async (p) => asText(readwiseSearchHighlights({ ...p, limit: p.limit ?? 20 })),
+      READ_ONLY,
+    ),
+    tool(
+      "readwiseListHighlights",
+      "Lista highlights de Readwise. Siempre pasar bookId cuando sea posible y pageSize≤20. Sin bookId, preferir readwiseSearchHighlights.",
+      {
+        pageSize: z.number().int().min(1).max(20).optional().describe("Máx 20. Default 20."),
+        page: z.number().int().optional(),
+        bookId: z.string().optional().describe("Filtrar por libro — recomendado para reducir resultados"),
+        responseFields: z.string().optional().describe("Campos a incluir (comma-separated)"),
+      },
+      async (p) => asText(readwiseListHighlights({ ...p, pageSize: p.pageSize ?? 20 })),
+      READ_ONLY,
+    ),
+    tool(
+      "readwiseGetDailyReview",
+      "Obtiene el daily review de highlights de Readwise para hoy (selección por spaced repetition). Incluye URL para completar el review interactivamente.",
+      {},
+      async () => asText(readwiseGetDailyReview()),
+      READ_ONLY,
+    ),
+    tool(
+      "readwiseCreateHighlights",
+      "Crea uno o más highlights en Readwise (libros/artículos). Para highlights de documentos de Reader, usar readerCreateHighlight.",
+      {
+        highlights: z.array(z.object({
+          text: z.string().describe("Texto del highlight"),
+          title: z.string().optional().describe("Título del libro/artículo"),
+          author: z.string().optional(),
+          source_url: z.string().optional(),
+          note: z.string().optional(),
+          highlighted_at: z.string().optional().describe("ISO 8601 datetime"),
+        })).min(1),
+      },
+      async ({ highlights }) => asText(readwiseCreateHighlights(highlights)),
+    ),
+    tool(
+      "readwiseUpdateHighlight",
+      "Actualiza un highlight de Readwise: texto, nota, color y/o tags.",
+      {
+        highlightId: z.union([z.number(), z.string()]).describe("ID del highlight"),
+        text: z.string().optional().describe("Nuevo texto"),
+        note: z.string().optional().describe("Nueva nota"),
+        color: z.enum(["yellow","blue","pink","orange","green","purple"]).optional(),
+        addTags: z.array(z.string()).optional().describe("Tags a agregar"),
+        removeTags: z.array(z.string()).optional().describe("Tags a eliminar"),
+      },
+      async (p) => asText(readwiseUpdateHighlight(p)),
+    ),
+    tool(
+      "readwiseDeleteHighlight",
+      "Elimina un highlight de Readwise.",
+      { highlightId: z.union([z.number(), z.string()]).describe("ID del highlight") },
+      async ({ highlightId }) => asText(readwiseDeleteHighlight(highlightId)),
     ),
   ];
 }

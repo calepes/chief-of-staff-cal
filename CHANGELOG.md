@@ -2,6 +2,13 @@
 
 ## 2026-06-05
 
+### Refactor — Reminders: migración de MCP apple-reminders a remctl CLI
+
+- **Migración**: removido `mcp__apple-reminders__*` (6 tools) de `allowedTools`. Reemplazado por tool custom `executeRemctl({ args })` que invoca `/Users/calepes/bin/remctl` via spawn.
+- **Nuevo**: `daemon-v2/src/tools/reminders.ts` — wrapper remctl con env aislado (solo PATH) y timeout 10s.
+- **system-prompt**: actualizadas todas las referencias → `executeRemctl`. Lista "Vibe Projects" → "Vibe Me".
+- **Gotcha**: output de remctl es JSON string — NO usar `asText()` (double-encoding). Usar `{ content: [{ type: "text", text: rawString }] }`.
+
 ### Fix — Books tools: gotchas de covers descubiertos en uso real
 
 - **Fix docs**: Google Books API `zoom=0` devuelve imágenes pequeñas/placeholder — usar `zoom=6`. Corregido en CLAUDE.md.
