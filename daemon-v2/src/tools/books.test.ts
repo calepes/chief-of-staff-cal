@@ -45,3 +45,42 @@ describe("callNtn", () => {
     expect(result).toEqual({ ok: false, error: "auth error" });
   });
 });
+
+describe("searchCover", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+
+  it("returns Open Library URL when ISBN cover exists (302)", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 302, redirected: false });
+    const { searchCover } = await import("./books.js");
+    const url = await searchCover("9781578514373");
+    expect(url).toBe("https://covers.openlibrary.org/b/isbn/9781578514373-L.jpg");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://covers.openlibrary.org/b/isbn/9781578514373-L.jpg",
+      expect.objectContaining({ method: "HEAD" })
+    );
+  });
+
+  it("falls back to Google Books when no ISBN", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [{ volumeInfo: { imageLinks: { thumbnail: "https://books.google.com/thumb.jpg" } } }],
+      }),
+    });
+    const { searchCover } = await import("./books.js");
+    const url = await searchCover(undefined, "Leadership on the Line", "Heifetz");
+    expect(url).toBe("https://books.google.com/thumb.jpg");
+  });
+
+  it("returns null when no cover found", async () => {
+    fetchMock.mockRejectedValue(new Error("network error"));
+    const { searchCover } = await import("./books.js");
+    const url = await searchCover(undefined, "Unknown Book");
+    expect(url).toBeNull();
+  });
+});

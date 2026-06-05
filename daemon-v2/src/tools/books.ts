@@ -44,3 +44,45 @@ export function callNtn(
     return { ok: true, data: result.stdout.trim() };
   }
 }
+
+export async function searchCover(
+  isbn?: string,
+  title?: string,
+  author?: string
+): Promise<string | null> {
+  // Primary: Open Library by ISBN
+  if (isbn) {
+    const url = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
+    try {
+      const res = await fetch(url, {
+        method: "HEAD",
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (res.ok || res.status === 302 || res.redirected) return url;
+    } catch {
+      // fall through
+    }
+  }
+
+  // Fallback: Google Books by title + author
+  if (title) {
+    const q = encodeURIComponent(
+      `intitle:${title}${author ? `+inauthor:${author}` : ""}`
+    );
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=3`,
+        { signal: AbortSignal.timeout(8_000) }
+      );
+      const data = (await res.json()) as {
+        items?: Array<{ volumeInfo: { imageLinks?: { thumbnail?: string } } }>;
+      };
+      const thumb = data?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
+      if (thumb) return thumb;
+    } catch {
+      // fall through
+    }
+  }
+
+  return null;
+}
