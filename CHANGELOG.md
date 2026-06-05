@@ -8,6 +8,16 @@
 - **Docs**: Covers en Notion requieren HTTPS (HTTP bloqueado). ISBN puede mapear a edición incorrecta — validar título del resultado; fallback `intitle:X inauthor:Y`.
 - **Docs**: `ntn` file upload 3-pasos para hostear covers directamente en Notion: `POST /v1/file_uploads` → `send --file` → PATCH con `file_upload.id`.
 
+### Books — Cover Search (fallback chain)
+- **Fix**: Open Library usa `?default=false` para detectar ISBNs sin cover real (antes retornaba placeholder HTTP 200 → cover vacío en Notion)
+- **Feature**: Goodreads search como fallback final en `searchCover()` — imágenes vía Amazon CDN (`compressed.photo.goodreads.com`), alta calidad
+- **Fix**: Source display en `setBookCover` ahora detecta la fuente real por URL (Google Books / Open Library / Goodreads)
+
+### Books — Reading Tracker
+- **Feature**: `logReadingProgress` auto-detecta `% Inicial` del último registro existente — Cal solo declara el `% Final`
+- **Fix**: Query del tracking DB corregido: `ntn` no soporta `v1/databases/{id}/query`; usar `v1/data_sources/TRACKING_DS/query`. Agregado `TRACKING_DS = "908f96f0-f573-4945-8da8-172641151265"` a `books.ts`
+- **Feature**: Respuesta de confirmación incluye el título del libro (fetch del page en Notion)
+
 ## 2026-06-04
 
 ### Tools — BD de Libros (Notion)

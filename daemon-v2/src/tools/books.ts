@@ -4,6 +4,7 @@ const NTN_BIN = "/opt/homebrew/bin/ntn";
 export const BOOKS_DB    = "b9222a76e9404e229091b1c0e26c29dd";
 export const BOOKS_DS    = "901dba51-1d00-4e3f-95b1-17ba628a0915";
 export const TRACKING_DB = "70b1e190-8547-4813-b918-43ce59071d3e";
+export const TRACKING_DS = "908f96f0-f573-4945-8da8-172641151265";
 
 export type EstadoLibro =
   | "Goal" | "Reading" | "Read" | "Focus"
@@ -78,17 +79,41 @@ export async function searchCover(
     }
   }
 
-  // Fallback: Open Library by ISBN
+  // Fallback 1: Open Library by ISBN (?default=false devuelve 404 si no hay cover real)
   if (isbn) {
     const url = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
     try {
-      const res = await fetch(url, {
+      const res = await fetch(`${url}?default=false`, {
         method: "HEAD",
         signal: AbortSignal.timeout(5_000),
       });
-      if (res.ok || res.status === 302 || res.redirected) return url;
+      if (res.ok) return url;
     } catch {
-      // fall through
+      // fall through to Goodreads
+    }
+  }
+
+  // Fallback 2: Goodreads search — usa Amazon CDN, alta calidad
+  const grQuery = isbn ?? title;
+  if (grQuery) {
+    try {
+      const grRes = await fetch(
+        `https://www.goodreads.com/search?q=${encodeURIComponent(grQuery)}`,
+        {
+          signal: AbortSignal.timeout(10_000),
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          redirect: "follow",
+        }
+      );
+      const html = await grRes.text();
+      const match = html.match(
+        /https?:\/\/[^"'\s]*compressed\.photo\.goodreads\.com\/books\/\d+i\/\d+\.[a-z]+/i
+      );
+      if (match) return match[0].replace(/^http:/, "https:");
+    } catch {
+      // no cover found
     }
   }
 
@@ -284,16 +309,50 @@ export async function updateBook(params: UpdateBookParams): Promise<string> {
 
 // ── logReadingProgress ───────────────────────────────────────────────────────
 
+async function getLastReadingRecord(bookPageId: string): Promise<{ porcentajeFinal: number } | null> {
+  const res = callNtn(`v1/data_sources/${TRACKING_DS}/query`, {
+    body: {
+      filter: {
+        property: "Book",
+        relation: { contains: bookPageId },
+      },
+      sorts: [{ property: "Fecha", direction: "descending" }],
+      page_size: 1,
+    },
+  });
+
+  if (!res.ok) return null;
+  const data = res.data as {
+    results?: Array<{ properties: Record<string, { number?: number }> }>;
+  };
+  const last = data.results?.[0];
+  if (!last) return null;
+
+  const pctFinal = last.properties["% Final"]?.number;
+  if (pctFinal == null) return null;
+
+  return { porcentajeFinal: pctFinal };
+}
+
 export interface LogProgressParams {
   pageId: string;
-  porcentajeInicial: number;
+  porcentajeInicial?: number; // opcional: se auto-detecta del último registro existente
   porcentajeFinal: number;
   fecha?: string;
 }
 
 export async function logReadingProgress(params: LogProgressParams): Promise<string> {
-  const { pageId, porcentajeInicial, porcentajeFinal, fecha } = params;
+  const { pageId, porcentajeFinal, fecha } = params;
   const today = new Date().toISOString().slice(0, 10);
+
+  // Auto-detectar % Inicial del último registro; si no existe, arrancar en 0
+  let porcentajeInicial = params.porcentajeInicial;
+  let autoDetected = false;
+  if (porcentajeInicial == null) {
+    const last = await getLastReadingRecord(pageId);
+    porcentajeInicial = last?.porcentajeFinal ?? 0;
+    autoDetected = true;
+  }
 
   const body = {
     parent: { database_id: TRACKING_DB },
@@ -311,10 +370,16 @@ export async function logReadingProgress(params: LogProgressParams): Promise<str
   const delta = Math.round((porcentajeFinal - porcentajeInicial) * 100);
   const pctI  = Math.round(porcentajeInicial * 100);
   const pctF  = Math.round(porcentajeFinal * 100);
+  const autoLine = autoDetected ? ` <i>(inicio auto-detectado)</i>` : "";
+
+  const bookRes = callNtn(`v1/pages/${pageId}`);
+  const bookName = bookRes.ok
+    ? pageToBookResult(bookRes.data as NotionPage).name
+    : null;
 
   return (
-    `📊 Progreso registrado\n` +
-    `${pctI}% → ${pctF}% <i>(+${delta}%)</i>\n` +
+    `📊 Progreso registrado${bookName ? ` — <b>${esc(bookName)}</b>` : ""}\n` +
+    `${pctI}% → ${pctF}% <i>(+${delta}%)</i>${autoLine}\n` +
     `Fecha: ${fecha ?? today}`
   );
 }
@@ -349,7 +414,10 @@ export async function setBookCover(params: SetCoverParams): Promise<string> {
 
   if (!res.ok) return `❌ Error al actualizar cover: ${res.error}`;
 
-  const source = isbn ? "Open Library (ISBN)" : "Google Books";
+  const source = coverUrl.includes("googleapis.com") ? "Google Books"
+    : coverUrl.includes("openlibrary.org") ? "Open Library"
+    : coverUrl.includes("goodreads") ? "Goodreads"
+    : "web";
   return (
     `🖼️ Cover actualizado\n` +
     `Fuente: ${source}\n` +

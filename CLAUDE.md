@@ -3,7 +3,7 @@
 ## Qué es
 **Jano** — Chief of Staff digital para Cal. Claridad y foco operativo. AI copilot que conoce el contexto de Yape, el equipo, los stakeholders, y las iniciativas en curso para ayudar con decisiones, priorización, preparación de reuniones, y seguimiento. Se presenta como "Jano" (no "CoS").
 
-## Estado (2026-05-26)
+## Estado (2026-06-05)
 **ACTIVO — CoS v2** (Node + Agent SDK librería + webhook + CF Queue).
 - **Daemon activo:** `com.cal.cos-agent-v2` (Node 22, KeepAlive, plist en `~/Library/LaunchAgents/`). Bot `@cal_jano_bot` ahora opera vía webhook → `cos-agent-worker.carlos-cb4.workers.dev` → CF Queue `cos-events` → daemon Node polea cola.
 - **Activo (Vesta):** `com.cal.family-agent-v2` (mismo patrón). Bot `@antocatanoecal_bot`. Ver `Vesta/CLAUDE.md`.
@@ -14,13 +14,14 @@
 - Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
-## Cambios daemon (2026-06-04 — Tools de Libros)
+## Cambios daemon (2026-06-04/06-05 — Tools de Libros)
 - **BD de Libros:** `daemon-v2/src/tools/books.ts` — 5 tools: `searchBooks`, `addBook`, `updateBook`, `logReadingProgress`, `setBookCover`. Usan `ntn` CLI via `spawnSync`.
 - **ntn CLI:** `/opt/homebrew/bin/ntn` — Notion CLI oficial. Autenticado vía Keychain macOS (funciona en daemon launchd user-level). Patrón: `callNtn(path, {method?, body?})` en `books.ts`. POST auto al pasar body; PATCH requiere `-X PATCH` explícito.
-- **BD IDs libros:** DB page `b9222a76-e940-4e22-9091-b1c0e26c29dd` · Data source `901dba51-1d00-4e3f-95b1-17ba628a0915` · Tracking DB `70b1e190-8547-4813-b918-43ce59071d3e`.
-- **Cover search:** `searchCover()` usa Google Books API (primario, imagen `zoom=6`) → Open Library por ISBN (fallback). Requiere `GOOGLE_BOOKS_API_KEY` en `apps.env`. Cover e ícono siempre se setean con la misma URL. ⚠️ Usar HTTPS (no HTTP) — Notion bloquea imágenes no-HTTPS. Validar título del resultado vs esperado: ISBN puede mapear a edición incorrecta; fallback: búsqueda `intitle:X inauthor:Y`.
+- **BD IDs libros:** DB page `b9222a76-e940-4e22-9091-b1c0e26c29dd` · Data source `901dba51-1d00-4e3f-95b1-17ba628a0915` · Tracking DB `70b1e190-8547-4813-b918-43ce59071d3e` · Tracking DS `908f96f0-f573-4945-8da8-172641151265`.
+- **Cover search:** `searchCover()` usa 3 fuentes en orden: Google Books API (primario, `zoom=6`) → Open Library por ISBN con `?default=false` (fallback 1 — sin este flag retorna placeholder 200 para ISBNs sin cover, falso positivo) → Goodreads search scraping (fallback 2 — Amazon CDN `compressed.photo.goodreads.com`, alta calidad). Requiere `GOOGLE_BOOKS_API_KEY` en `apps.env`. Cover e ícono siempre se setean con la misma URL. ⚠️ Usar HTTPS (no HTTP) — Notion bloquea imágenes no-HTTPS.
 - **ntn file upload (covers hosted en Notion):** 3 pasos — `POST /v1/file_uploads` → id; `ntn api /v1/file_uploads/{id}/send --file img.jpg`; PATCH page con `{"type":"file_upload","file_upload":{"id":"..."}}`. Más confiable que URLs externas.
-- **Tracking porcentajes:** decimales — 10% = 0.10, 59% = 0.59. Rollup `Avance Tracking` en la BD principal hace `max` de `% Final`.
+- **Tracking porcentajes:** decimales — 10% = 0.10, 59% = 0.59. Rollup `Avance Tracking` en la BD principal hace `max` de `% Final`. `logReadingProgress` auto-detecta `% Inicial` del último registro (sort Fecha desc, page_size 1) — solo hay que pasar `% Final`. Si no hay registros previos, arranca en 0.
+- **⚠️ Gotcha `ntn` queries:** `ntn api` NO soporta `v1/databases/{id}/query` (devuelve 400 `invalid_request_url`). Para queries usar siempre `v1/data_sources/{ds_id}/query`. Tracking DS distinto al DB ID — usar `TRACKING_DS`, no `TRACKING_DB`.
 - **Gotcha duplicados al crear libros:** verificar si ya existen antes de crear. Si hay duplicados, preferir el que tenga más campos completos; migrar tracking entries con restore→patch relation→re-trash.
 - **Google Books API key:** `GOOGLE_MAPS_API_KEY` tiene restricciones de API y NO sirve para Books. Clave dedicada `GOOGLE_BOOKS_API_KEY` en `apps.env`.
 

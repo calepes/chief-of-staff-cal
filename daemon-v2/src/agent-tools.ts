@@ -879,18 +879,18 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "logReadingProgress",
-      "Registra una sesión de lectura en el tracking de libros. Los porcentajes son decimales: 0.10 = 10%, 0.25 = 25%.",
+      "Registra una sesión de lectura en el tracking de libros. El % inicial se auto-detecta del último registro existente (no pedir a Cal). Solo necesitas el % final y opcionalmente la fecha. Porcentajes decimales: 0.10 = 10%, 0.25 = 25%.",
       {
         pageId:            z.string().describe("ID de la página Notion del libro"),
-        porcentajeInicial: z.number().min(0).max(1).describe("% al inicio de la sesión (0.0–1.0)"),
         porcentajeFinal:   z.number().min(0).max(1).describe("% al final de la sesión (0.0–1.0)"),
+        porcentajeInicial: z.number().min(0).max(1).optional().describe("% al inicio — omitir para auto-detectar del último registro."),
         fecha:             z.string().optional().describe("ISO date YYYY-MM-DD. Default: hoy."),
       },
       async (params) => asText(await logReadingProgress(params as LogProgressParams)),
     ),
     tool(
       "setBookCover",
-      "Busca el cover del libro en internet (Open Library por ISBN, Google Books como fallback) y lo aplica como banner e ícono de la página en Notion.",
+      "Busca el cover del libro en internet y lo aplica como banner e ícono de la página en Notion. Orden de fuentes: Google Books (primario) → Open Library por ISBN → Goodreads search (fallback final).",
       {
         pageId: z.string().describe("ID de la página Notion del libro"),
         isbn:   z.string().optional(),
