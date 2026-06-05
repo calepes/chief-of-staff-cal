@@ -14,6 +14,15 @@
 - Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
+## Cambios daemon (2026-06-04 — Tools de Libros)
+- **BD de Libros:** `daemon-v2/src/tools/books.ts` — 5 tools: `searchBooks`, `addBook`, `updateBook`, `logReadingProgress`, `setBookCover`. Usan `ntn` CLI via `spawnSync`.
+- **ntn CLI:** `/opt/homebrew/bin/ntn` — Notion CLI oficial. Autenticado vía Keychain macOS (funciona en daemon launchd user-level). Patrón: `callNtn(path, {method?, body?})` en `books.ts`. POST auto al pasar body; PATCH requiere `-X PATCH` explícito.
+- **BD IDs libros:** DB page `b9222a76-e940-4e22-9091-b1c0e26c29dd` · Data source `901dba51-1d00-4e3f-95b1-17ba628a0915` · Tracking DB `70b1e190-8547-4813-b918-43ce59071d3e`.
+- **Cover search:** `searchCover()` usa Google Books API (primario, imagen zoom=0) → Open Library por ISBN (fallback). Requiere `GOOGLE_BOOKS_API_KEY` en `apps.env`. Cover e ícono siempre se setean con la misma URL.
+- **Tracking porcentajes:** decimales — 10% = 0.10, 59% = 0.59. Rollup `Avance Tracking` en la BD principal hace `max` de `% Final`.
+- **Gotcha duplicados al crear libros:** verificar si ya existen antes de crear. Si hay duplicados, preferir el que tenga más campos completos; migrar tracking entries con restore→patch relation→re-trash.
+- **Google Books API key:** `GOOGLE_MAPS_API_KEY` tiene restricciones de API y NO sirve para Books. Clave dedicada `GOOGLE_BOOKS_API_KEY` en `apps.env`.
+
 ## Cambios daemon (2026-05-21 — Foco CAL)
 - **Foco CAL check-ins proactivos:** `proactive/foco-check.ts` — 3 crons (`30 8 * * 1-5`, `30 12 * * 1-5`, `0 18 * * 1-5`, timezone `America/La_Paz`). Sección rotativa via KV counter `foco_checkin_counter` (mod 6). 6 secciones: CAL personal, Prioridades, Rufino Arribas, Christian Hausher, KPIs diarios, Tareas semana.
 - **Archivos nuevos:** `tools/foco-cal.ts` (helpers: `appendFocoProgress`, `readFocoProgress`, `getNextSection`, `sectionFromCounter`) + `proactive/foco-check.ts` (`scheduleFocoCheckins`, `runFocoCheckin`, `buildPrompt`). Tests en `tools/foco-cal.test.ts`.

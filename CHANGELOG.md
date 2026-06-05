@@ -1,5 +1,18 @@
 # CHANGELOG — Jano
 
+## 2026-06-04
+
+### Tools — BD de Libros (Notion)
+
+- **Feature**: `daemon-v2/src/tools/books.ts` — 5 nuevas tools para gestionar la BD personal de libros:
+  - `searchBooks` — busca/lista por nombre o estado
+  - `addBook` — crea libro con cover + ícono automático
+  - `updateBook` — actualiza propiedades (estado, rating, fechas, páginas)
+  - `logReadingProgress` — registra sesión de lectura en BD tracking (porcentajes decimales)
+  - `setBookCover` — busca cover en Google Books (primario) / Open Library (fallback) y setea cover + ícono con la misma URL
+- **Feature**: Cover search usa Google Books API (`GOOGLE_BOOKS_API_KEY` en `apps.env`) con imagen zoom=0 para mejor calidad. Open Library como fallback por ISBN.
+- **Infra**: `ntn` CLI (`/opt/homebrew/bin/ntn`) usado via `spawnSync` para todas las operaciones Notion — funciona en daemon launchd user-level via Keychain macOS sin config adicional.
+
 ## 2026-06-01
 
 ### UX — Markdown → HTML sanitizer
