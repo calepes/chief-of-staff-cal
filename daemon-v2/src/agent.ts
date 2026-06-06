@@ -38,12 +38,6 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__addDigestSource":     "📰 Agregando fuente al Digest...",
   // MCPs externos
   "mcp__youtube-transcribe__transcribeYoutube":        "🎬 Transcribiendo video...",
-  "mcp__apple-reminders__addReminder":                 "🔔 Agregando recordatorio...",
-  "mcp__apple-reminders__editReminder":                "🔔 Editando recordatorio...",
-  "mcp__apple-reminders__completeReminder":            "✅ Completando recordatorio...",
-  "mcp__apple-reminders__deleteReminder":              "🗑️ Eliminando recordatorio...",
-  "mcp__apple-reminders__listReminderLists":            "🔔 Leyendo listas...",
-  "mcp__apple-reminders__listReminders":               "🔔 Leyendo recordatorios...",
   "mcp__apple-notes__create-note":                     "📝 Creando nota...",
   "mcp__apple-notes__search-notes":                    "🔍 Buscando notas...",
   "mcp__apple-notes__get-note-content":                "📝 Leyendo nota...",
@@ -107,6 +101,9 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__updateBook":                        "✏️ Actualizando libro...",
   "mcp__cos-tools__logReadingProgress":                "📊 Registrando progreso de lectura...",
   "mcp__cos-tools__setBookCover":                      "🖼️ Buscando cover del libro...",
+  // Schedule CAL — Vacaciones
+  "mcp__cos-tools__listVacaciones":     "🏖️ Consultando vacaciones...",
+  "mcp__cos-tools__getVacacionDetail":  "📋 Leyendo detalle de vacaciones...",
 };
 
 export async function runAgent(userMessage: string, deps: AgentDeps): Promise<AgentResult> {

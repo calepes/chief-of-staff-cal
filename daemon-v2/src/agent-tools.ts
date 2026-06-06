@@ -76,6 +76,10 @@ import {
   readwiseUpdateHighlight,
   readwiseDeleteHighlight,
 } from "./tools/readwise.js";
+import {
+  listVacaciones,
+  getVacacionDetail,
+} from "./tools/schedule-cal.js";
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
 
@@ -1146,6 +1150,23 @@ export function buildSdkTools(deps: ToolDeps) {
       "Elimina un highlight de Readwise.",
       { highlightId: z.union([z.number(), z.string()]).describe("ID del highlight") },
       async ({ highlightId }) => asText(readwiseDeleteHighlight(highlightId)),
+    ),
+    tool(
+      "listVacaciones",
+      "Consulta las vacaciones de Cal en Schedule CAL (Notion). Filtros opcionales: año (ej. '2025 - 2026'), status. Devuelve lista con nombre, fechas, días disponibles, país, presupuesto. Llamar cuando Cal pregunte por sus vacaciones, días disponibles, viajes planeados, o quiera revisar el plan de vacaciones.",
+      {
+        year: z.string().optional(),
+        status: z.enum(["Not started", "In progress", "Done", "Canceled"]).optional(),
+      },
+      async (filters) => asText(listVacaciones(filters)),
+      READ_ONLY,
+    ),
+    tool(
+      "getVacacionDetail",
+      "Obtiene detalle completo de una entrada de vacaciones en Schedule CAL: propiedades + contenido de la página (notas, itinerario, checklist). Llamar cuando Cal pregunte por el contenido específico de unas vacaciones, quiera ver el itinerario, o cuando listVacaciones no tenga suficiente detalle.",
+      { pageId: z.string() },
+      async ({ pageId }) => asText(getVacacionDetail(pageId)),
+      READ_ONLY,
     ),
   ];
 }
