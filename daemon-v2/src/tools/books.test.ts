@@ -5,7 +5,7 @@ vi.mock("node:child_process", () => ({ spawnSync: vi.fn() }));
 
 const mockSpawn = vi.mocked(childProcess.spawnSync);
 
-import { callNtn } from "./books.js";
+import { callNtn } from "../shared/ntn.js";
 
 describe("callNtn", () => {
   beforeEach(() => vi.clearAllMocks());
