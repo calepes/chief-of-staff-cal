@@ -1,5 +1,17 @@
 # CHANGELOG — Jano
 
+## 2026-06-06
+
+### Feature — Schedule CAL: herramientas de vacaciones
+
+- **Feature**: `daemon-v2/src/tools/schedule-cal.ts` — 2 nuevas tools para consultar vacaciones de Cal vía Notion:
+  - `listVacaciones` — lista vacaciones con filtros opcionales (año, status); incluye `[pageId: ...]` en output para encadenar con `getVacacionDetail`
+  - `getVacacionDetail` — detalle completo de un viaje: propiedades + ítems de BDs interiores (Alojamiento, Pasajes, Plan de Viaje) + contenido de PDFs e imágenes adjuntos vía OpenRouter
+- **Infra**: PDFs analizados via `pdf-parse` (CJS/ESM interop con `createRequire`) → texto completo enviado a OpenRouter/Gemini para summarizar (~600 tokens) en vez de truncar. Protege context window.
+- **Infra**: Imágenes analizadas vía OpenRouter vision (`google/gemini-3.1-flash-lite`) — no Anthropic API directa (daemons usan OAuth Max, sin `ANTHROPIC_API_KEY`).
+- **Arquitectura Notion**: 3 BDs centrales con relación `Viaje` — Alojamiento (`44f70e0b`), Pasajes (`19201a50`), Plan de Viaje (`9769869a`). Queries vía `v1/data_sources/{id}/query` con `{ property: "Viaje", relation: { contains: pageId } }`.
+- **⚠️ Gotcha**: inline `child_database` en páginas Notion NO heredan permisos de la página padre — requieren conexión explícita al integration. Solución: BDs centrales con relación `Viaje`.
+
 ## 2026-06-05
 
 ### Refactor — Reminders: migración de MCP apple-reminders a remctl CLI
