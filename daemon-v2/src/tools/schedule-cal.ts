@@ -160,6 +160,39 @@ export function listVacaciones(filters?: {
   return `${header}\n\n${entries.map(formatEntryHtml).join("\n\n")}`;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractBlockText(b: any): string {
+  const type: string = b?.type ?? "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const richText: any[] = b?.[type]?.rich_text ?? b?.[type]?.text ?? [];
+  return richText.map((rt: any) => (rt?.plain_text as string) ?? "").join("");
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getItemTitle(page: any): string {
+  const props = page?.properties ?? {};
+  for (const prop of Object.values(props) as any[]) {
+    if (prop?.type === "title") {
+      return (prop?.title?.[0]?.plain_text as string) ?? "(sin nombre)";
+    }
+  }
+  return "(sin nombre)";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function readItemBlocks(itemId: string): string {
+  const res = callNtn(`v1/blocks/${itemId}/children`);
+  if (!res.ok) return "";
+  const data = res.data as { results?: unknown[] };
+  const lines: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const b of (data?.results ?? []) as any[]) {
+    const text = extractBlockText(b);
+    if (text.trim()) lines.push(`  ${text}`);
+  }
+  return lines.join("\n");
+}
+
 export function getVacacionDetail(pageId: string): string {
   const pageRes = callNtn(`v1/pages/${pageId}`);
   if (!pageRes.ok) return `❌ Error leyendo página: ${pageRes.error}`;
@@ -168,16 +201,22 @@ export function getVacacionDetail(pageId: string): string {
   const entry = parseVacacion(pageRes.data as any);
 
   const blocksRes = callNtn(`v1/blocks/${pageId}/children`);
-  let blocksText = "";
+  const textLines: string[] = [];
+  const childDbs: Array<{ id: string; title: string }> = [];
+
   if (blocksRes.ok) {
     const data = blocksRes.data as { results?: unknown[] };
-    const lines: string[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const b of (data?.results ?? []) as any[]) {
       const type: string = b?.type ?? "";
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const richText: any[] = b?.[type]?.rich_text ?? b?.[type]?.text ?? [];
-      const text = richText.map((rt: any) => (rt?.plain_text as string) ?? "").join("");
+      if (type === "child_database") {
+        childDbs.push({
+          id: b.id as string,
+          title: (b?.child_database?.title as string) ?? "Items",
+        });
+        continue;
+      }
+      const text = extractBlockText(b);
       if (!text.trim()) continue;
       const prefix =
         type === "bulleted_list_item" || type === "to_do"
@@ -185,11 +224,11 @@ export function getVacacionDetail(pageId: string): string {
           : type === "numbered_list_item"
           ? "- "
           : "";
-      lines.push(`${prefix}${text}`);
+      textLines.push(`${prefix}${text}`);
     }
-    blocksText = lines.join("\n").slice(0, 3000);
   }
 
+  // Build output
   const lines: string[] = [`📋 <b>${entry.name}</b>`, ""];
   if (entry.fecha) {
     const rango = formatFechaRango(entry.fecha);
@@ -201,7 +240,28 @@ export function getVacacionDetail(pageId: string): string {
   if (entry.registroVacaciones != null)
     lines.push(`✅ Registro vacaciones: ${entry.registroVacaciones ? "sí" : "no"}`);
   if (entry.anoVacaciones) lines.push(`Año: ${entry.anoVacaciones}`);
-  if (blocksText) lines.push("", "<b>Notas:</b>", blocksText);
 
-  return lines.join("\n");
+  if (textLines.length > 0) lines.push("", "<b>Notas:</b>", textLines.join("\n").slice(0, 1500));
+
+  // Query inline databases (child_database blocks)
+  for (const db of childDbs) {
+    const queryRes = callNtn(`v1/data_sources/${db.id}/query`);
+    if (!queryRes.ok) continue;
+    const qdata = queryRes.data as { results?: unknown[] };
+    const items = qdata?.results ?? [];
+    if (items.length === 0) continue;
+
+    lines.push("", `<b>${db.title}</b>`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const item of items as any[]) {
+      const name = getItemTitle(item);
+      lines.push(`• ${name}`);
+      const itemText = readItemBlocks(item.id as string);
+      if (itemText) lines.push(itemText);
+    }
+  }
+
+  lines.push("", `<a href="${entry.url}">Ver en Notion →</a>`);
+
+  return lines.join("\n").slice(0, 4000);
 }
