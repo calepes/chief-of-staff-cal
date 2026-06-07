@@ -1,5 +1,16 @@
 # CHANGELOG — Jano
 
+## 2026-06-07
+
+### Feature — YouTube: resumen estructurado con envío Telegram
+
+- **Feature**: sección `### YouTube` en `system-prompt.ts` expandida — flujo completo `transcribeYoutube` + resumen HTML (3-5 secciones, ≤15 bullets, takeaway) + envío automático al chat de Cal. Antes: transcripción cruda. Ahora: análisis estructurado en `<b>`, `<i>`, `<code>`.
+
+### Fix — Limpieza MCPs redundantes en daemon
+
+- **Fix**: removidos `apple-reminders` y Readwise remote de `BASE_OPTIONS.mcpServers` en `index.ts` — ambos heredados vía OAuth Max. Elimina duplicación y posibles conflictos de tool names.
+- **Fix**: `getVacacionDetail` — `await` faltante corregido; descripción de la tool actualizada.
+
 ## 2026-06-06
 
 ### Feature — Schedule CAL: herramientas de vacaciones

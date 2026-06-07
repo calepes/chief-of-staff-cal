@@ -1163,9 +1163,9 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "getVacacionDetail",
-      "Obtiene detalle completo de una entrada de vacaciones en Schedule CAL: propiedades + contenido de la página (notas, itinerario, checklist). Llamar cuando Cal pregunte por el contenido específico de unas vacaciones, quiera ver el itinerario, o cuando listVacaciones no tenga suficiente detalle.",
+      "Obtiene detalle completo de una entrada de vacaciones: propiedades + BD interior (items de alojamiento, pasajes, actividades) + contenido de PDFs e imágenes adjuntos. SIEMPRE llamar después de listVacaciones cuando Cal pregunte por un viaje específico. El pageId aparece en el output de listVacaciones como [pageId: ...].",
       { pageId: z.string() },
-      async ({ pageId }) => asText(getVacacionDetail(pageId)),
+      async ({ pageId }) => asText(await getVacacionDetail(pageId)),
       READ_ONLY,
     ),
   ];

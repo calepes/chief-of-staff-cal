@@ -14,6 +14,11 @@
 - Reactivar un cron secundario: `mv ~/Library/LaunchAgents/disabled-2026-04-2N/<plist> ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`
 - Antes de reactivar crons masivamente: confirmar con Cal si el rediseño ya sucedió
 
+## Cambios daemon (2026-06-07)
+- **YouTube resumen:** sección `### YouTube` en `system-prompt.ts` expandida con flujo completo — `transcribeYoutube` + resumen HTML 3-5 secciones + envío Telegram. Ver `system-prompt.ts` línea ~233.
+- **schedule-cal.ts:** `extractPdfUrl` usa `pdf-parse` vía CJS `createRequire`; `formatEntryHtml` incluye `[pageId: ...]` en output para que el LLM pueda hacer PATCH sobre la entrada de vacaciones.
+- **index.ts limpieza MCPs:** removidos `apple-reminders` de `BASE_OPTIONS.mcpServers` y config remoto Readwise (ya heredados vía OAuth Max).
+
 ## Cambios daemon (2026-06-04/06-05 — Tools de Libros)
 - **BD de Libros:** `daemon-v2/src/tools/books.ts` — 5 tools: `searchBooks`, `addBook`, `updateBook`, `logReadingProgress`, `setBookCover`. Usan `callNtn` de `shared/ntn.ts` (wrapper de `ntn` CLI).
 - **ntn CLI:** `/opt/homebrew/bin/ntn` — Notion CLI oficial. Autenticado vía Keychain macOS (funciona en daemon launchd user-level). Patrón: `callNtn(path, {method?, body?})` en `books.ts`. POST auto al pasar body; PATCH requiere `-X PATCH` explícito.
@@ -24,6 +29,7 @@
 - **⚠️ Gotcha `ntn` queries:** `ntn api` NO soporta `v1/databases/{id}/query` (devuelve 400 `invalid_request_url`). Para queries usar siempre `v1/data_sources/{ds_id}/query`. Tracking DS distinto al DB ID — usar `TRACKING_DS`, no `TRACKING_DB`.
 - **⚠️ ntn search filter:** `filter.value` acepta solo `"page"` o `"data_source"` — `"database"` devuelve 400.
 - **⚠️ ntn child_database:** BDs inline en páginas Notion NO heredan permisos de la página padre — requieren conexión explícita a "Notion CLI" en Connections. Preferir BDs centrales con relation filter.
+- **⚠️ Gotcha `ntn api` flags:** `-d '{"json":"body"}'` (NO `--body`) · `-X PATCH` (NO `--method PATCH`). Error con `--body`: "unexpected argument".
 - **Schedule CAL — vacaciones:** `tools/schedule-cal.ts` — 2 tools: `listVacaciones` (query Schedule CAL filtrado por `Tipo=Vacaciones`, incluye `[pageId: ...]` en output), `getVacacionDetail` (propiedades + 3 BDs centrales filtradas por `Viaje` relation). BDs centrales: Alojamiento (`44f70e0b-35eb-4b2f-bc9d-93c569d87831`), Pasajes (`19201a50-d4dd-44ff-93d6-b32d1c95b4de`), Plan de Viaje (`9769869a-df35-4a22-906b-436c0bd093d2`). Archivo compartido con Vesta — al editar, copiar a ambos agentes y rebuildar.
 - **PDF/imagen en schedule-cal:** `extractPdfUrl` extrae texto completo con `pdf-parse` y resume via OpenRouter (`OPENROUTER_API_KEY` + `google/gemini-3.1-flash-lite`). `describeImage` igual. NO usar Anthropic API directa — los daemons no tienen `ANTHROPIC_API_KEY`.
 - **Gotcha duplicados al crear libros:** verificar si ya existen antes de crear. Si hay duplicados, preferir el que tenga más campos completos; migrar tracking entries con restore→patch relation→re-trash.

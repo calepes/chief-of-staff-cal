@@ -1,4 +1,9 @@
+import { createRequire } from "node:module";
 import { callNtn } from "../shared/ntn.js";
+
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const PDFParse: any = require("pdf-parse");
 
 export const SCHEDULE_CAL_DS = "f66c31e7-a4c1-4b6e-9f65-c28ecaf50ce3";
 
@@ -119,6 +124,7 @@ function formatEntryHtml(v: VacacionEntry): string {
 
   if (v.status) lines.push(`Estado: ${v.status}`);
   lines.push(`<a href="${v.url}">Ver en Notion →</a>`);
+  lines.push(`[pageId: ${v.pageId}]`);
 
   return lines.join("\n");
 }
@@ -179,51 +185,165 @@ function getItemTitle(page: any): string {
   return "(sin nombre)";
 }
 
+async function summarizeTextWithLlm(text: string): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return text.slice(0, 3000);
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://github.com/calepes/jano",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3.1-flash-lite",
+        max_tokens: 600,
+        messages: [{
+          role: "user",
+          content: `Extrae los datos clave de este documento en español. Si es confirmación, reserva, ticket o factura, incluye: nombre, fechas, número de confirmación/reserva, precio, dirección, condiciones importantes. Sé conciso. Solo los datos relevantes, sin preámbulo.\n\n---\n${text}`,
+        }],
+      }),
+    });
+    if (!res.ok) return text.slice(0, 3000);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await res.json() as any;
+    return (data?.choices?.[0]?.message?.content as string) ?? text.slice(0, 3000);
+  } catch {
+    return text.slice(0, 3000);
+  }
+}
+
+async function extractPdfUrl(url: string): Promise<string> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return "[PDF — error al descargar]";
+    const buf = await res.arrayBuffer();
+    const parsed = await new PDFParse({ data: new Uint8Array(buf) });
+    const fullText = (parsed.text as string).trim();
+    if (!fullText) return "[PDF sin texto extraíble]";
+    return await summarizeTextWithLlm(fullText);
+  } catch {
+    return "[PDF — error al procesar]";
+  }
+}
+
+async function describeImage(url: string): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return "[imagen — sin clave OpenRouter]";
+  try {
+    const imgRes = await fetch(url);
+    if (!imgRes.ok) return "[imagen — error al descargar]";
+    const imgBuf = await imgRes.arrayBuffer();
+    const base64 = Buffer.from(imgBuf).toString("base64");
+    const mimeType = (imgRes.headers.get("content-type") ?? "image/jpeg").split(";")[0];
+    const apiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://github.com/calepes/jano",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3.1-flash-lite",
+        max_tokens: 600,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
+            { type: "text", text: "Describe el contenido de esta imagen en español. Si es una confirmación, reserva, ticket o documento, extrae los datos clave: nombre, fechas, número de confirmación, precio, dirección, etc. Responde solo con los datos relevantes, sin preámbulo." },
+          ],
+        }],
+      }),
+    });
+    if (!apiRes.ok) return "[imagen — error al analizar]";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await apiRes.json() as any;
+    return (data?.choices?.[0]?.message?.content as string) ?? "[imagen — sin descripción]";
+  } catch {
+    return "[imagen — error al procesar]";
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function readItemBlocks(itemId: string): string {
+function getFileUrl(b: any): { url: string; name: string; isPdf: boolean; isImage: boolean } | null {
+  const type: string = b?.type ?? "";
+  let url = "";
+  let name = "";
+  let isPdf = false;
+  let isImage = false;
+
+  if (type === "pdf") {
+    url = b?.pdf?.file?.url ?? b?.pdf?.external?.url ?? "";
+    name = b?.pdf?.name ?? "documento.pdf";
+    isPdf = true;
+  } else if (type === "file") {
+    url = b?.file?.file?.url ?? b?.file?.external?.url ?? "";
+    name = (b?.file?.name as string) ?? "";
+    isPdf = name.toLowerCase().endsWith(".pdf");
+    isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(name);
+  } else if (type === "image") {
+    url = b?.image?.file?.url ?? b?.image?.external?.url ?? "";
+    name = "imagen";
+    isImage = true;
+  }
+
+  if (!url) return null;
+  return { url, name, isPdf, isImage };
+}
+
+async function readItemBlocksAsync(itemId: string): Promise<string> {
   const res = callNtn(`v1/blocks/${itemId}/children`);
   if (!res.ok) return "";
   const data = res.data as { results?: unknown[] };
   const lines: string[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const b of (data?.results ?? []) as any[]) {
+    const fileInfo = getFileUrl(b);
+    if (fileInfo) {
+      const label = fileInfo.name ? ` (${fileInfo.name})` : "";
+      if (fileInfo.isPdf) {
+        const text = await extractPdfUrl(fileInfo.url);
+        lines.push(`  📄 PDF${label}:\n${text.split("\n").map((l) => `    ${l}`).join("\n")}`);
+      } else if (fileInfo.isImage) {
+        const desc = await describeImage(fileInfo.url);
+        lines.push(`  🖼️ Imagen${label}:\n${desc.split("\n").map((l) => `    ${l}`).join("\n")}`);
+      }
+      continue;
+    }
     const text = extractBlockText(b);
     if (text.trim()) lines.push(`  ${text}`);
   }
   return lines.join("\n");
 }
 
-export function getVacacionDetail(pageId: string): string {
+const VIAJE_DBS: Array<{ id: string; label: string }> = [
+  { id: "44f70e0b-35eb-4b2f-bc9d-93c569d87831", label: "Alojamiento" },
+  { id: "19201a50-d4dd-44ff-93d6-b32d1c95b4de", label: "Pasajes" },
+  { id: "9769869a-df35-4a22-906b-436c0bd093d2", label: "Plan de Viaje" },
+];
+
+export async function getVacacionDetail(pageId: string): Promise<string> {
   const pageRes = callNtn(`v1/pages/${pageId}`);
   if (!pageRes.ok) return `❌ Error leyendo página: ${pageRes.error}`;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entry = parseVacacion(pageRes.data as any);
 
+  // Text blocks from the page itself
   const blocksRes = callNtn(`v1/blocks/${pageId}/children`);
   const textLines: string[] = [];
-  const childDbs: Array<{ id: string; title: string }> = [];
-
   if (blocksRes.ok) {
     const data = blocksRes.data as { results?: unknown[] };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const b of (data?.results ?? []) as any[]) {
       const type: string = b?.type ?? "";
-      if (type === "child_database") {
-        childDbs.push({
-          id: b.id as string,
-          title: (b?.child_database?.title as string) ?? "Items",
-        });
-        continue;
-      }
+      if (type === "child_database") continue;
       const text = extractBlockText(b);
       if (!text.trim()) continue;
       const prefix =
-        type === "bulleted_list_item" || type === "to_do"
-          ? "• "
-          : type === "numbered_list_item"
-          ? "- "
-          : "";
+        type === "bulleted_list_item" || type === "to_do" ? "• " :
+        type === "numbered_list_item" ? "- " : "";
       textLines.push(`${prefix}${text}`);
     }
   }
@@ -240,28 +360,26 @@ export function getVacacionDetail(pageId: string): string {
   if (entry.registroVacaciones != null)
     lines.push(`✅ Registro vacaciones: ${entry.registroVacaciones ? "sí" : "no"}`);
   if (entry.anoVacaciones) lines.push(`Año: ${entry.anoVacaciones}`);
-
   if (textLines.length > 0) lines.push("", "<b>Notas:</b>", textLines.join("\n").slice(0, 1500));
 
-  // Query inline databases (child_database blocks)
-  for (const db of childDbs) {
-    const queryRes = callNtn(`v1/data_sources/${db.id}/query`);
+  // Query central DBs filtered by Viaje relation
+  const filter = { property: "Viaje", relation: { contains: pageId } };
+  for (const db of VIAJE_DBS) {
+    const queryRes = callNtn(`v1/data_sources/${db.id}/query`, { body: { filter } });
     if (!queryRes.ok) continue;
-    const qdata = queryRes.data as { results?: unknown[] };
-    const items = qdata?.results ?? [];
+    const items = (queryRes.data as { results?: unknown[] })?.results ?? [];
     if (items.length === 0) continue;
 
-    lines.push("", `<b>${db.title}</b>`);
+    lines.push("", `<b>${db.label}</b>`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const item of items as any[]) {
       const name = getItemTitle(item);
       lines.push(`• ${name}`);
-      const itemText = readItemBlocks(item.id as string);
+      const itemText = await readItemBlocksAsync(item.id as string);
       if (itemText) lines.push(itemText);
     }
   }
 
   lines.push("", `<a href="${entry.url}">Ver en Notion →</a>`);
-
-  return lines.join("\n").slice(0, 4000);
+  return lines.join("\n");
 }

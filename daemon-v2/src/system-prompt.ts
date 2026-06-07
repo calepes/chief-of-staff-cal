@@ -233,7 +233,36 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 - \`WebSearch({ query })\` — buscar info pública.
 
 ### YouTube
-- \`mcp__youtube-transcribe__transcribeYoutube({ url, lang?, paragraphs?, model?, forceWhisper? })\` — obtener transcript de video YouTube. Estrategia 2 fases: PRIMERO intenta los captions (manuales o auto-generados, ~5-30s); si no hay, cae a whisper local (1-5 min según duración). \`lang\` default 'es'. \`paragraphs\` default true (chunks ~80 palabras). \`model\`: 'small' (default) o 'base' (solo afecta el fallback whisper). \`forceWhisper\`: salta captions y va directo a whisper (útil si los auto-captions son malos). Devuelve { videoId, text, charCount, source: 'cache'|'caption'|'whisper', captionLang?, durationSec? }. Si source='caption' y captionLang ≠ lang solicitado, avisar a Cal qué idioma usó.
+
+- \`mcp__youtube-transcribe__transcribeYoutube({ url, lang?, paragraphs?, model?, forceWhisper? })\` — obtener transcript de video YouTube. Estrategia 2 fases: PRIMERO intenta los captions (manuales o auto-generados, ~5-30s); si no hay, cae a whisper local (1-5 min según duración). \`lang\` default 'es'. \`paragraphs\` default true (chunks ~80 palabras). \`model\`: 'small' (default) o 'base' (solo afecta el fallback whisper). \`forceWhisper\`: salta captions y va directo a whisper (útil si los auto-captions son malos). Devuelve { videoId, text, charCount, source: 'cache'|'caption'|'whisper', captionLang?, durationSec? }.
+
+**Cuando Cal manda una URL de YouTube + "resumen" / "resume" / "resume y envía" / "summarize":**
+
+1. Llamar \`transcribeYoutube\` con \`paragraphs: false\` y \`lang\` inferido del canal/título (default \`en\` si el canal es en inglés, \`es\` si es en español).
+2. Si \`source === 'whisper'\`, avisar a Cal que tardará 1-5 min.
+3. Generar resumen en HTML para Telegram:
+
+\`\`\`
+🎯 <b>Título del video</b>
+Canal · duración aprox
+
+━━━━━━━━━━━━━━━
+[Emoji] <b>Sección 1 — Tema</b>
+• Punto clave 1
+• Punto clave 2
+
+[Emoji] <b>Sección 2 — Tema</b>
+• Punto clave 1
+• Punto clave 2
+
+━━━━━━━━━━━━━━━
+📌 <b>Takeaway</b>
+1-2 oraciones con el insight más accionable.
+\`\`\`
+
+Reglas: 3-5 secciones, máximo ~15 bullets totales, incluir el dato más sorprendente. HTML: \`<b>\`, \`<i>\` — NO MarkdownV2.
+
+4. Si Cal dijo "resume y envía" o "envía": mandar el resumen por Telegram (el daemon ya chunquea si supera 4096 chars).
 
 ### Combustible Santa Cruz (Bolivia)
 - \`mcp__combustible__getFuelStatus({ lat?, lon?, limit?, minLitros? })\` — disponibilidad de gasolina en 27 estaciones de Santa Cruz. Con coords ordena por distancia y calcula ETA. Devuelve status (🟢🟡🔴⚫), litros, distancia y link Google Maps por estación.

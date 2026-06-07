@@ -178,8 +178,6 @@ const NAABOL_FLIGHTS_DIST =
 const MCP_REMOTE = "/Users/calepes/.npm-global/bin/mcp-remote";
 const HEALTH_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
-const APPLE_REMINDERS_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/apple-reminders/dist/index.js";
 const AGENT_LEARNINGS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/agent-learnings/dist/index.js";
 const COMBUSTIBLE_DIST =
@@ -228,11 +226,6 @@ const BASE_OPTIONS: Options = {
       args: [HEALTH_DIST],
       env: { HEALTH_API_KEY: env.HEALTH_API_KEY },
     },
-    "apple-reminders": {
-      type: "stdio",
-      command: "node",
-      args: [APPLE_REMINDERS_DIST],
-    },
     "agent-learnings": {
       type: "stdio",
       command: "node",
@@ -274,16 +267,6 @@ const BASE_OPTIONS: Options = {
       command: "node",
       args: [ACHORADAZOS_DIST],
       env: { AIRTABLE_TOKEN: env.AIRTABLE_TOKEN },
-    },
-    // Readwise MCP remoto — bridge stdio via mcp-remote
-    "readwise": {
-      type: "stdio",
-      command: "/Users/calepes/.npm-global/bin/mcp-remote",
-      args: [
-        "https://mcp2.readwise.io/mcp",
-        "--header",
-        `Authorization: Token ${process.env.READWISE_TOKEN}`,
-      ],
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
