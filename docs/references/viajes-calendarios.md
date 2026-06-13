@@ -4,7 +4,7 @@
 
 - **Personal** (`carlos@lepesqueur.net`): agenda personal de Cal. Default GCal sin `calendarId`.
 - **AntoCataNoeCal** (`c_4c2ogsnda3b61k1sd9eta6vc2k@group.calendar.google.com`): viajes (Flighty) + eventos familiares.
-- **Outlook BCP**: NO consultar el calendar importado en GCal (`655cenb4ro558qcnuucafn0kitdqtmia@import...`) — bug de timezone (TZID UTC se desplaza -4h). Usar siempre `getOutlookEvents` (cache local del cron `com.claude.outlook-cache`).
+- **Outlook BCP**: NO consultar el calendar importado en GCal (`655cenb4ro558qcnuucafn0kitdqtmia@import...`) — bug de timezone (TZID UTC se desplaza -4h). Usar siempre `getOutlookEvents` (cache local del cron `com.claude.outlook-cache` — ⚠️ cron dormido desde 2026-06-13, el tool sigue funcionando pero sirve cache **congelado**).
 - **Cumpleaños:** `list_events` con `eventTypeFilter: ["birthday"]` en calendar Personal. Incluir sección 🎂 en briefings/today si hay cumple del rango.
 
 ## Gestión de Viajes
