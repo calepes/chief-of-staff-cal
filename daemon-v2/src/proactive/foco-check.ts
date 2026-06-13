@@ -5,8 +5,6 @@ import { runAgent } from "../agent.js";
 import {
   getNextSection,
   FOCO_PAGE_ID,
-  FOCO_KPIS_VIEW_URL,
-  FOCO_TAREAS_VIEW_URL,
   readFocoProgress,
   type FocoSection,
 } from "../tools/foco-cal.js";
@@ -108,10 +106,10 @@ function buildPrompt(
   const isTareas = section === "Tareas";
 
   const notionStep = isKpis
-    ? `Llama mcp__claude_ai_Notion__notion-query-database-view con view_url="${FOCO_KPIS_VIEW_URL}" y page_size=5 para obtener los últimos KPIs de Yape Bolivia (Afiliaciones, DAU, TRX con variaciones vs ayer y semana anterior).`
+    ? `Llama notionCli({ method:"POST", path:"/v1/databases/d4996efa-4053-44cf-8149-c6aee5eba52a/query", body:{ page_size:2, sorts:[{ property:"Fecha", direction:"descending" }] } }) para los últimos KPIs de Yape Bolivia (props: Afiliaciones diarias, "Afiliaciones vs. Ayer (%)", "Afiliaciones vs. Sem. anterior (%)", "Activos DAU", "DAU vs. Ayer (%)", "DAU vs. Sem. anterior (%)", TRX, "TRX vs. Ayer (%)", "TRX vs. Sem. anterior (%)"). Toma la fila más reciente.`
     : isTareas
-    ? `Llama mcp__claude_ai_Notion__notion-query-database-view con view_url="${FOCO_TAREAS_VIEW_URL}" para obtener las tareas de Cal esta semana.`
-    : `Llama mcp__claude_ai_Notion__notion-fetch con id="${FOCO_PAGE_ID}" para leer el Foco CAL. Extrae los checkboxes pendientes (no marcados) de la sección "${section}".`;
+    ? `Llama notionCli({ method:"POST", path:"/v1/databases/1f2c487609dd802985dcd7ad59110ddd/query", body:{ page_size:10, filter:{ and:[ { property:"Estado", status:{ does_not_equal:"Listo" } }, { property:"Estado", status:{ does_not_equal:"Cancelada" } } ] }, sorts:[{ property:"Prioridad CAL", direction:"ascending" }] } }) para las tareas activas de Cal. Enfócate en las de mayor prioridad (Prioridad CAL P1/P2) de esta semana (prop "Nombre de tarea" = título).`
+    : `Llama notionPageMarkdown({ pageId:"${FOCO_PAGE_ID}" }) para leer el Foco CAL como Markdown. Extrae los checkboxes pendientes (no marcados, \`[ ]\`) de la sección "${section}".`;
 
   const kpiContext = isKpis
     ? `\nEl title del approval flow debe incluir los números reales de KPIs (ej: "KPIs · Afil: 4.2K ↑3% · DAU: 1.05M ↓1%").`

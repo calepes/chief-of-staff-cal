@@ -54,6 +54,7 @@ import {
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
 // removidas 2026-05-02 — pendientes en Apple Reminders (Personal / Vibe Me), no Notion.
 import { executeRemctl } from "./tools/reminders.js";
+import { notionApi, notionPageMarkdown, notionUpdateBody } from "./tools/notion-cli.js";
 import {
   readerListDocuments,
   readerSearchDocuments,
@@ -380,8 +381,8 @@ export function buildSdkTools(deps: ToolDeps) {
       "Lee el estado del Foco CAL de Cal: progreso local reciente por sección + punteros a los datos en vivo de Notion. " +
       "Llamar cuando Cal pregunte sobre el Foco, su progreso, en qué enfocarse, qué lleva sin mover, " +
       "cómo van los KPIs de Yape Bolivia (DAU, afiliaciones, TRX), o sus tareas de Notion de la semana. " +
-      "Después de este tool, usar notion-fetch(focoPageId) para estado de checkboxes, " +
-      "notion-query-database-view(kpisViewUrl) para KPIs, notion-query-database-view(tareaViewUrl) para tareas.",
+      "Después de este tool, usar notionPageMarkdown(focoPageId) para estado de checkboxes, " +
+      "notionCli POST /v1/databases/{kpisDbId|tareasDbId}/query para KPIs/tareas.",
       {},
       async () => {
         const progress = readFocoProgress(30);
@@ -601,7 +602,7 @@ export function buildSdkTools(deps: ToolDeps) {
       "Llamar cuando llegue callback mlog:{meetingId}:{mode}. " +
       "mode='focoCal': usa el campo Resumen Foco CAL pre-computado (rápido). " +
       "mode='resumen': devuelve el Resumen para que el LLM analice. " +
-      "mode='transcript': devuelve instrucciones para que el LLM use notion-fetch. " +
+      "mode='transcript': delega en analyzeTranscriptAgent (lee el transcript en contexto aislado). " +
       "Después de llamar este tool con mode='focoCal', usar buildApprovalFlow con los topics " +
       "retornados y confirmVerb='✅ Sí', rejectVerb='⏭ No'. " +
       "Mapping de callbacks jano-wiz-ok: stepApprovalWizard({ action: 'ok' }) → logFocoProgress({ itemText: topic.text, section: topic.section }).",
@@ -676,7 +677,7 @@ export function buildSdkTools(deps: ToolDeps) {
             `Llama analyzeTranscriptAgent({ meetingId: "${meetingId}", meetingTitle: "${meeting.title.replace(/"/g, "'")}" }). ` +
             `El subagente lee el transcript en un contexto aislado, envía mensajes de estado a Telegram, ` +
             `y retorna los topics directamente. ` +
-            `NO uses mcp__claude_ai_Notion__notion-fetch directamente — el transcript llenaría este contexto.`,
+            `NO leas el transcript directamente — llenaría este contexto.`,
         });
       },
     ),
@@ -744,7 +745,7 @@ export function buildSdkTools(deps: ToolDeps) {
         }
         await deps.kv.set(dedupKey, true, 4 * 3600);
 
-        // Slow path: subagente aislado con notion-fetch.
+        // Slow path: subagente aislado con notionPageMarkdown.
         // Un solo mensaje de estado que se edita en cada fase (no pila de mensajes nuevos).
         const statusMsgId = await tgSend(botToken, chatId,
           `🔍 Leyendo transcript de <b>${escapeHtml(meetingTitle)}</b>...`,
@@ -754,11 +755,11 @@ export function buildSdkTools(deps: ToolDeps) {
         try {
           const subOptions: Options = {
             ...deps.getOptions(),
-            allowedTools: ["mcp__claude_ai_Notion__notion-fetch"],
+            allowedTools: ["mcp__cos-tools__notionPageMarkdown"],
             maxTurns: 6,
             systemPrompt: [
               "You are Cal's Foco CAL analyzer. Cal leads Yape Bolivia (mobile payment app).",
-              "Fetch the Notion meeting page, read the transcript/notes, and extract ACTIONABLE items.",
+              "Read the Notion meeting page via notionPageMarkdown({ pageId }), read the transcript/notes, and extract ACTIONABLE items.",
               "",
               "Cal's Foco CAL has 6 sections — map every item to exactly one:",
               "• CAL — Cal's own strategic objectives, personal leadership decisions, things only Cal can decide",
@@ -787,8 +788,8 @@ export function buildSdkTools(deps: ToolDeps) {
           }
 
           const subPrompt =
-            `Fetch the Notion page with id="${meetingId}". ` +
-            `Read the full content — focus on transcript, notas, acuerdos, and follow-up sections. ` +
+            `Read the Notion page body via notionPageMarkdown({ pageId: "${meetingId}" }). ` +
+            `Focus on transcript, notas, acuerdos, and follow-up sections. ` +
             `Extract actionable Foco CAL items following the system prompt rules. ` +
             `Return ONLY the JSON array.`;
 
@@ -1167,6 +1168,25 @@ export function buildSdkTools(deps: ToolDeps) {
       { pageId: z.string() },
       async ({ pageId }) => asText(await getVacacionDetail(pageId)),
       READ_ONLY,
+    ),
+    tool(
+      "notionCli",
+      "Llamada a la API de Notion vía ntn CLI (acceso principal a Notion). Args: { method: 'GET'|'POST'|'PATCH', path: '/v1/...', body? (objeto JSON) }. Ejemplos: query DB → POST '/v1/databases/{id}/query' body {page_size:5}; búsqueda → POST '/v1/search' body {query,page_size:5}; leer página → GET '/v1/pages/{id}'; actualizar props → PATCH '/v1/pages/{id}' body {properties:{...}}; crear página → POST '/v1/pages' body {parent:{database_id},properties:{...}}. notion-version 2022-06-28 automática. (DELETE no permitido — archivar páginas con PATCH {in_trash:true}.) Devuelve el JSON de Notion. Si da 403/vacío, la integración no tiene esa página compartida.",
+      { method: z.enum(["GET", "POST", "PATCH"]), path: z.string(), body: z.any().optional() },
+      async ({ method, path, body }) => asText(notionApi(method, path, body)),
+    ),
+    tool(
+      "notionPageMarkdown",
+      "Lee el CUERPO de una página de Notion como Markdown (vía ntn pages get). Args: { pageId }. Útil para leer contenido de páginas, no solo propiedades.",
+      { pageId: z.string() },
+      async ({ pageId }) => asText(notionPageMarkdown(pageId)),
+      READ_ONLY,
+    ),
+    tool(
+      "notionUpdateBody",
+      "Reemplaza el CUERPO de una página de Notion con Markdown (vía ntn pages update). REEMPLAZA todo el body. Args: { pageId, markdown }.",
+      { pageId: z.string(), markdown: z.string() },
+      async ({ pageId, markdown }) => asText(notionUpdateBody(pageId, markdown)),
     ),
   ];
 }

@@ -1,5 +1,26 @@
 # CHANGELOG — Jano
 
+## 2026-06-13
+
+### Switch — Notion: MCP heredado → ntn CLI (Jano + Vesta)
+
+- **Breaking/Migration**: removido el acceso a Notion vía el MCP heredado `mcp__claude_ai_Notion__*` (7 tools en allowlist Jano, 6 en Vesta). Notion ahora SOLO vía tools custom que envuelven `ntn` CLI: `notionCli({method,path,body?})`, `notionPageMarkdown({pageId})`, `notionUpdateBody({pageId,markdown})` — ahora allowlisteadas (antes "en pruebas", sin allowlist).
+- **Migration**: 3 usos programáticos de Jano migrados — subagente `analyzeTranscriptAgent` (`allowedTools` → `notionPageMarkdown`), Foco check-in (`proactive/foco-check.ts`: KPIs → DB `d4996efa`, Tareas → DB `1f2c4876` filtro Estado, secciones → `notionPageMarkdown`), Metas Salud (system-prompt → `notionCli`).
+- **Security**: `DELETE` removido del enum de `notionCli` (archivar = `PATCH {in_trash:true}`). Auth por env `NOTION_TOKEN`→`NOTION_API_TOKEN` (sin Keychain/TCC). daemon-health-reviewer: 0 blocking.
+
+### Docs — rediseño CLAUDE.md + automatización dormida
+
+- **Docs**: `CLAUDE.md` reescrito como guía operativa + índice (156→85 líneas); cruft pre-build → `docs/archive/`; anexos/ARCHITECTURE/BACKLOG marcados. Spec/plan en `docs/superpowers/`.
+- **Ops**: 7 crons launchd (heartbeat/learnings/nightly/eisenhower/morning-build/outlook-cache) DESACTIVADOS + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`. Jano 100% reactivo.
+
+## 2026-06-11
+
+### Feature — Mundial 2026: MCP `worldcup` (datos en vivo + predicciones)
+
+- **Feature**: nuevo MCP server `worldcup` (`MCP Servers/mcp-servers/servers/worldcup/`) con 8 tools — datos en vivo vía API-Football v3 (`getFixtures`, `getStandings`, `getMatchDetail`, `getLineups`, `getMatchStats` con xG) + predicciones que spawnean el Predictor Mundial Python (`predictMatch`, `forecastTournament`) + `syncResults` (baja resultados reales → el modelo condiciona, simula solo lo que falta).
+- **Feature**: wired en `BASE_OPTIONS.mcpServers` (`index.ts`) + 8 tools en `CLAUDE_AI_COS_TOOLS` (`agent-options.ts`) + `TOOL_MESSAGES` (`agent.ts`) + doc en `system-prompt.ts`. Env `API_FOOTBALL_KEY` (plan Pro — el free NO cubre season 2026, solo 2022-2024).
+- **Refactor**: consolidados los wrappers locales `tools/worldcup.ts` (`predictMatch`/`worldCupForecast`) dentro del MCP; archivo eliminado de Jano. Reusable ahora por cualquier agente.
+
 ## 2026-06-07
 
 ### Feature — YouTube: resumen estructurado con envío Telegram

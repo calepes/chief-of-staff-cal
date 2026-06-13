@@ -92,13 +92,11 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__claude_ai_Google_Calendar__delete_event",
   "mcp__claude_ai_Google_Calendar__suggest_time",
   "mcp__claude_ai_Google_Calendar__respond_to_event",
-  // Notion — DB Tareas, People, Memoria, búsquedas
-  "mcp__claude_ai_Notion__notion-search",
-  "mcp__claude_ai_Notion__notion-fetch",
-  "mcp__claude_ai_Notion__notion-create-pages",
-  "mcp__claude_ai_Notion__notion-update-page",
-  "mcp__claude_ai_Notion__notion-query-database-view",
-  "mcp__claude_ai_Notion__notion-get-users",
+  // Notion — vía ntn CLI (migrado desde MCP heredado 2026-06-13).
+  // DB Tareas, People, Memoria, búsquedas, KPIs/Foco, bodies de página.
+  "mcp__cos-tools__notionCli",
+  "mcp__cos-tools__notionPageMarkdown",
+  "mcp__cos-tools__notionUpdateBody",
   // YouTube — transcripción de audio via whisper local (no depende de captions)
   "mcp__youtube-transcribe__transcribeYoutube",
   // Tipo de cambio Bolivia — oficial (BCB) y paralelo (Binance P2P USDT/BOB)
@@ -135,6 +133,25 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__agent-learnings__addLearning",
   // Combustible Santa Cruz — disponibilidad y distancia a estaciones de gasolina
   "mcp__combustible__getFuelStatus",
+  // Mundial 2026 — datos en vivo (API-Football) + predicciones (predictor Python)
+  "mcp__worldcup__getFixtures",
+  "mcp__worldcup__getStandings",
+  "mcp__worldcup__getMatchDetail",
+  "mcp__worldcup__getLineups",
+  "mcp__worldcup__getMatchStats",
+  "mcp__worldcup__getLiveFixtures",
+  "mcp__worldcup__getMatchEvents",
+  "mcp__worldcup__getPlayerStats",
+  "mcp__worldcup__getTopScorers",
+  "mcp__worldcup__getTopAssists",
+  "mcp__worldcup__getInjuries",
+  "mcp__worldcup__getH2H",
+  "mcp__worldcup__getOdds",
+  "mcp__worldcup__getApiPrediction",
+  "mcp__worldcup__getSquad",
+  "mcp__worldcup__predictMatch",
+  "mcp__worldcup__forecastTournament",
+  "mcp__worldcup__syncResults",
   // Google Flights via SerpAPI — vuelos internacionales (no Bolivia NAABOL)
   "mcp__serpapi-flights__searchFlights",
   "mcp__serpapi-flights__getReturnFlights",

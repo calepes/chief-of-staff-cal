@@ -44,6 +44,7 @@ const env = {
   NOTION_PEOPLE_DB_ID: requireEnv("NOTION_PEOPLE_DB_ID"),
   HEALTH_API_KEY: process.env.HEALTH_API_KEY ?? "",
   SERPAPI_KEY: process.env.SERPAPI_KEY ?? "",
+  API_FOOTBALL_KEY: process.env.API_FOOTBALL_KEY ?? "",
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
   READWISE_TOKEN: process.env.READWISE_TOKEN ?? "",
   KUBERA_AUTH_TOKEN: process.env.KUBERA_AUTH_TOKEN ?? "",
@@ -192,6 +193,8 @@ const SPARK_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/spark/dist/index.js";
 const ACHORADAZOS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/achoradazos/dist/index.js";
+const WORLDCUP_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/worldcup/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -267,6 +270,12 @@ const BASE_OPTIONS: Options = {
       command: "node",
       args: [ACHORADAZOS_DIST],
       env: { AIRTABLE_TOKEN: env.AIRTABLE_TOKEN },
+    },
+    "worldcup": {
+      type: "stdio",
+      command: "node",
+      args: [WORLDCUP_DIST],
+      env: { API_FOOTBALL_KEY: env.API_FOOTBALL_KEY },
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
