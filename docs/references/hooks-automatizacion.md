@@ -1,3 +1,5 @@
+> ⚠️ **DORMIDO desde 2026-06-13.** Los crons/heartbeat/learnings descritos aquí están desactivados (`bootout` + plists archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`). Los plists archivados están **corruptos** (un script de update de schedule los sobrescribió con solo el fragmento JSON) — reactivar requiere reconstruir el plist primero, no solo moverlo de vuelta. Este doc es la referencia de cómo eran y cómo reactivarlos. Los **hooks** de sesión (SessionStart, PostToolUse, PreCompact) siguen vigentes; solo los crons launchd están apagados.
+
 # Hooks & Automatización (Jano)
 
 ## Hooks registrados en `~/.claude/settings.json`
