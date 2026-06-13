@@ -1,5 +1,14 @@
 # CHANGELOG — Jano
 
+## 2026-06-13 (tarde)
+
+### Feature — Things 3: Jano gestiona tareas/proyectos personales
+
+- **Feature**: nueva capacidad Things 3 (`daemon-v2/src/tools/things.ts`). Antes Jano no podía: `clings` necesita Bash (bloqueado). Dos tools: `executeClings` (LEER vía clings/SQLite) + `thingsWrite` (ESCRIBIR vía URL scheme `things:///` con `open`).
+- **Gotcha clave**: las escrituras de `clings` usan osascript/JXA (Apple Events) → cuelgan bajo launchd por TCC Automation que no se puede responder headless. Solución: escrituras por URL scheme (`open`, sin Apple Events). `add`/`add-project` sin token; `update`/`update-project` con `THINGS3_AUTH_TOKEN` (el wrapper lo agrega). Proyectos usan param `area` (no `list`).
+- **Scope corregido**: TODAS las tareas/proyectos personales → Things; Apple Reminders (`executeRemctl`) solo familia/mercado. Removidas refs a la lista "Personal"/"Vibe Me" (ya no existen). Actualizado system-prompt + CLAUDE.md.
+- **Ops**: `brew pin clings` (+ reminders-cli) — un upgrade rompería el binding FDA del path versionado del Cellar.
+
 ## 2026-06-13
 
 ### Switch — Notion: MCP heredado → ntn CLI (Jano + Vesta)

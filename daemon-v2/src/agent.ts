@@ -25,6 +25,8 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__notionCli":           "🗂️ Consultando Notion (ntn)...",
   "mcp__cos-tools__notionPageMarkdown":  "🗂️ Leyendo página de Notion...",
   "mcp__cos-tools__notionUpdateBody":    "🗂️ Actualizando página de Notion...",
+  "mcp__cos-tools__executeClings":       "🗂️ Leyendo tareas de Things...",
+  "mcp__cos-tools__thingsWrite":         "✅ Guardando en Things...",
   "mcp__cos-tools__getWhatsappContacts": "📱 Leyendo contactos de WhatsApp...",
   "mcp__cos-tools__saveWhatsappContact": "💾 Guardando contacto de WhatsApp...",
   "mcp__cos-tools__readPersistedOutput":  "📂 Leyendo resultado completo...",

@@ -5,9 +5,10 @@
 > Este CLAUDE.md es la guía **dev/ops** para trabajar SOBRE el repo. El **comportamiento** del bot en runtime vive en `daemon-v2/src/system-prompt.ts` (fuente de verdad), no acá.
 
 ## Scope de herramientas
-- **Jano (personal):** pendientes en Apple Reminders — lista "Personal" (tareas) y "Vibe Projects" (ideas/backlog). NO Notion para tareas.
+- **Jano (personal):** TODAS las tareas y proyectos personales en **Things 3**. Dos tools (split por TCC): `executeClings` = LEER (clings/SQLite), `thingsWrite` = ESCRIBIR (URL scheme `things:///` vía `open`, headless-safe). Las escrituras de clings usan Apple Events → cuelgan bajo launchd; por eso el split.
+- **Apple Reminders** vía `executeRemctl`: SOLO familia y mercado (listas: Tareas Familia, Mercado, Colegio AntoCata). Ya NO existe lista "Personal" en Reminders.
 - **Yapito (trabajo):** pendientes en Notion DB Tareas. Ver `Yapito/CLAUDE.md`.
-- Notion en Jano solo para: búsquedas/memoria, Metas Salud, otras DBs.
+- Notion en Jano solo para: búsquedas/memoria, Metas Salud, otras DBs (vía `notionCli`/`notionPageMarkdown`).
 
 ## Dónde vive qué
 | Tema | Fuente de verdad |
@@ -38,7 +39,7 @@ El watchdog re-setea el webhook solo cada 1 min. Re-set manual de webhook + debu
 
 ## Índice de tools + MCPs
 Implementación y detalle en código (ver "dónde vive qué"). Inventario:
-- **Custom (`cos-tools`):** getOutlookEvents · runBriefing · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · readPersistedOutput · readwiseGetDailyReview.
+- **Custom (`cos-tools`):** getOutlookEvents · runBriefing · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody.
 - **Built-ins:** Skill · WebFetch · WebSearch.
 - **MCPs heredados (OAuth Max):** Google Calendar · Notion · Gmail (lectura).
 - **MCPs custom:** youtube-transcribe · exchange-rate-bolivia · naabol-flights · health · apple-reminders · combustible · feedbin · readwise · inversiones-query · worldcup · spark · panini-mundial.
@@ -47,8 +48,7 @@ Implementación y detalle en código (ver "dónde vive qué"). Inventario:
 Fuente: `daemon-v2/src/index.ts`.
 1. **dotenv first-wins:** `~/.cos-agent/.env` PRIMERO → `~/.claude/secrets/apps.env`. No-override → el del agente pisa al compartido.
 2. **Validación:** críticas con `requireEnv()` (throw si faltan): `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_*`. Opcionales → `""`.
-3. **Anthropic auth:** `delete process.env.ANTHROPIC_API_KEY` fuerza OAuth Max (creds en macOS Keychain `Claude Code-credentials`, NO en .env; si no se borra, API key Tier 1 → 429).
-4. **MCPs custom:** cada uno spawneado con solo sus tokens vía `mcpServers[].env` (least-privilege).
+3. **MCPs custom:** cada uno spawneado con solo sus tokens vía `mcpServers[].env` (least-privilege).
 
 | Credencial | Origen en runtime |
 |---|---|
@@ -58,13 +58,13 @@ Fuente: `daemon-v2/src/index.ts`.
 
 ## Gotchas del entorno
 - **`ntn api` query:** usar `/v1/data_sources/{ds_id}/query`, NO `/v1/databases/{id}/query` (devuelve 400). El `data_source_id` ≠ `db_id`.
-- **MCP prefijo Notion:** `mcp__claude_ai_Notion__*` (heredado OAuth Max). NO `mcp__notion__*` → "permissions not granted" silencioso. Igual para Gmail/Calendar.
 - **SDK librería NO lee `~/.claude/.mcp.json`:** registrar MCPs custom en `BASE_OPTIONS.mcpServers` (`daemon-v2/src/index.ts`). Sin esto: "permissions not granted".
 - **Formato Telegram = HTML:** parse mode HTML, escapar solo `< > &`. NO MarkdownV2. `sanitizeForTelegram()` convierte Markdown rezagado. Detalle en `system-prompt.ts`.
 - **PDF/DOCX:** `processDocument()` en `index.ts` (pdf-parse v2 / mammoth), trunca a 50K.
 - **SNI filtering bloquea Telegram** en algunas redes (WiFi guest/hoteles): "Connection reset" en TLS. Daemon arranca pero el bot queda mudo. Diagnóstico: `curl -s https://api.telegram.org/bot$TOKEN/getMe` vacío mientras google.com funciona. Fix: cambiar red.
 - **Debug estado launchd:** `launchctl print gui/$(id -u)/com.cal.cos-agent-v2` (más útil que `launchctl list | grep`).
 - **`reminders` con pantalla bloqueada cuelga** (espera TCC). En procesos sin sesión: `timeout 30s reminders ...`.
+- **Things 3 (`tools/things.ts`) — split read/write por TCC bajo launchd:** las ESCRITURAS de `clings` usan osascript/JXA (Apple Events) → cuelgan esperando permiso TCC de Automatización que no se puede responder en background (confirmado 2026-06-13: hasta `clings add`/`delete` interactivos cuelgan). **Lecturas** (`executeClings`, SQLite/FDA) sí funcionan. **Escrituras** van por URL scheme `things:///add|update` vía `open` (`thingsWrite`), que NO usa Apple Events → headless-safe. `things:///add` sin token; `things:///update` requiere `THINGS3_AUTH_TOKEN` (el wrapper lo agrega). `clings` está **`brew pin`-eado** (con reminders-cli) — un upgrade rompería el path versionado del Cellar y su binding FDA.
 - **`fetchAsUser` requiere FDA** en `~/.npm-global/bin/node` (lee Cookies.binarycookies de Safari).
 - **SDK persisted-output loop:** tool result >~25KB → SDK persiste a `toulu_*.json`; el LLM reintenta el tool. Solución: usar `fetchAndSummarize` (el texto no entra al contexto).
 - **compact.ts → Markdown en historial:** si reaparece Markdown en respuestas largas, revisar el prompt de `daemon-v2/src/compact.ts` ("sin Markdown, texto plano").

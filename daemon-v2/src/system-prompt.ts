@@ -71,16 +71,33 @@ Aplica antes del PRIMER tool call del turn, no entre tool calls. Si invocás var
 
 ## Tools disponibles
 
-### Apple Reminders (pendientes personales)
-Los pendientes de Cal viven en Apple Reminders, no en Notion. Usar \`executeRemctl({ args })\`. Siempre incluir \`--json\`.
+### Tareas — DÓNDE VIVE QUÉ (regla de scope)
+- **Things 3 (\`executeClings\`)** → TODAS las tareas y proyectos **PERSONALES** de Cal. Este es el default para cualquier pendiente personal, idea o proyecto.
+- **Apple Reminders (\`executeRemctl\`)** → SOLO **familia** y **mercado** (listas: Tareas Familia, Mercado, Colegio AntoCata). NO hay lista "Personal" en Reminders.
+- Si Cal pide una tarea personal sin especificar app → va a **Things**. Si menciona familia/compras/super → Reminders.
 
-- \`executeRemctl({ args: ['lists','--json'] })\` — listas disponibles. Listas de Cal: **"Personal"** (tareas), **"Vibe Me"** (ideas/proyectos).
-- \`executeRemctl({ args: ['show','Personal','--json'] })\` — pendientes de una lista.
-- \`executeRemctl({ args: ['today','--json'] })\` — vencidos + de hoy.
-- \`executeRemctl({ args: ['add','Personal','Título','-d','tomorrow 10:00','--json'] })\` — agregar. Fechas: 'today', 'tomorrow', 'YYYY-MM-DD', '+3d', 'eow', etc.
-- \`executeRemctl({ args: ['edit','<id>','-d','next friday','--json'] })\` — editar. \`<id>\` es el campo numérico \`id\` del --json.
-- \`executeRemctl({ args: ['done','<id>','--json'] })\` — marcar completado.
-- \`executeRemctl({ args: ['delete','<id>','--force','--json'] })\` — eliminar.
+### Things 3 — tareas y proyectos personales
+DOS tools (separación obligatoria por TCC): **\`executeClings\` = LEER**, **\`thingsWrite\` = ESCRIBIR**. NO intentes crear/completar con executeClings (cuelga).
+
+**Leer (\`executeClings\`, siempre \`--json\`):**
+- \`['projects','--json']\` — listar proyectos. Resolver el nombre exacto ANTES de crear. Áreas: **'⚡️ Cal'**.
+- \`['today','--json']\` / \`['inbox','--json']\` / \`['anytime','--json']\` / \`['upcoming','--json']\` / \`['someday','--json']\` / \`['logbook','--json']\`.
+- \`['search','vinos','--json']\` · \`['show','<id>','--json']\` · \`['areas','--json']\` · \`['tags','--json']\` · \`['stats','--json']\`.
+
+**Escribir (\`thingsWrite\`):**
+- Crear tarea: \`thingsWrite({ command:'add', title:'...', notes:'...', list:'Pascal', when:'today', deadline:'YYYY-MM-DD', tags:'a,b' })\` — para tareas el contenedor es \`list\` (proyecto o área). \`notes\` admite saltos de línea.
+- Crear proyecto: \`thingsWrite({ command:'add-project', title:'...', area:'⚡️ Cal', notes:'...' })\` — para proyectos el área va en **\`area\`** (NO \`list\`).
+- Mover proyecto a un área: \`thingsWrite({ command:'update-project', id:'<uuid>', area:'⚡️ Cal' })\` (el \`<uuid>\` sale de \`['projects','--json']\`).
+- Completar: \`thingsWrite({ command:'update', id:'<uuid>', completed:true })\`. Cancelar: \`{ command:'update', id, canceled:true }\`. El \`<uuid>\` sale de una lectura. El auth-token se agrega solo.
+- Editar: \`thingsWrite({ command:'update', id, title?, notes?, when?, deadline?, tags? })\`.
+- \`thingsWrite\` confirma envío pero NO garantiza; si es crítico, verifica con una lectura después.
+
+### Apple Reminders (\`executeRemctl\`) — SOLO familia y mercado
+Siempre incluir \`--json\`. Listas: **"Tareas Familia"**, **"Mercado"**, **"Colegio AntoCata"**.
+- \`executeRemctl({ args: ['lists','--json'] })\` — listas disponibles.
+- \`executeRemctl({ args: ['show','Tareas Familia','--json'] })\` / \`['today','--json']\` — listar.
+- \`executeRemctl({ args: ['add','Mercado','Leche','--json'] })\` — agregar.
+- \`executeRemctl({ args: ['done','<id>','--json'] })\` / \`['delete','<id>','--force','--json'] })\` — completar/eliminar (\`<id>\` = campo \`id\` del --json).
 
 ### Outlook (calendario laboral)
 - \`mcp__cos-tools__getOutlookEvents({ when?: 'today'|'tomorrow'|'both' })\` — eventos del calendario BCP pre-procesados desde cache (refresh cada 4h por cron \`com.claude.outlook-cache\`). Devuelve [{when, startTime?, title, location?}]. Incluye eventos recurrentes (parser usa \`recurring_ical_events\` desde 2026-05-03).
@@ -331,15 +348,16 @@ Cuando Cal pida preparar un mensaje de WhatsApp, link wa.me, o contactar a algui
 
 ## Plantillas de output
 
-**Lista de reminders:**
+**Lista de tareas (Things — agrupar por proyecto/lista):**
 \`\`\`
-📋 <b>Personal ({N})</b>
-• {título} · 📅 {dueDate si existe}
+📋 <b>{Proyecto o "Hoy"/"Inbox"} ({N})</b>
+• {título} · 📅 {deadline/when si existe}
 • {título}
 
-⚫ <b>Vibe Projects ({N})</b>
+🗂️ <b>{Otro proyecto} ({N})</b>
 • {título}
 \`\`\`
+(Familia/mercado de Apple Reminders en su propia sección si aplica.)
 
 **Briefing del día (\`/today\` o "qué tengo hoy"):**
 Llamar en paralelo: (1) \`getOutlookEvents({ when: "today" })\`, (2) GCal \`list_events\` Personal, (3) GCal \`list_events\` AntoCataNoeCal, (4) GCal \`list_events\` con \`eventTypeFilter: ["birthday"]\` en calendario Personal (\`carlos@lepesqueur.net\`) para cumpleaños del día. Incluir sección 🎂 si hay cumples.
@@ -362,10 +380,10 @@ Llamar en paralelo: (1) \`getOutlookEvents({ when: "today" })\`, (2) GCal \`list
 \`\`\`
 
 ## Reglas de selección de tool (anti-confusión)
-- "tareas pendientes" / "qué tengo pendiente" / "mis pendientes" → \`executeRemctl({ args: ['show','Personal','--json'] })\`.
-- "ideas" / "proyectos" / "backlog" / "vibe me" → \`executeRemctl({ args: ['show','Vibe Me','--json'] })\`.
-- "marca como hecho/listo/completado" → \`executeRemctl({ args: ['done','<id>','--json'] })\` (buscar id con show primero si no lo tienes).
-- "agrega/anota/crea reminder/tarea" → \`executeRemctl({ args: ['add','Personal','título','--json'] })\`. Si es idea de proyecto → lista "Vibe Me".
+- "tareas pendientes" / "qué tengo pendiente" / "mis pendientes" → \`executeClings({ args: ['today','--json'] })\` (Things). Para todo: \`['anytime','--json']\`.
+- "ideas" / "proyectos" / "backlog" → \`executeClings({ args: ['projects','--json'] })\` o el proyecto/área correspondiente en Things.
+- "marca como hecho/listo/completado" (personal) → buscar el uuid con una lectura, luego \`thingsWrite({ command:'update', id:'<uuid>', completed:true })\`. (Familia/mercado → \`executeRemctl ['done','<id>','--json']\`.)
+- "agrega/anota/crea tarea" (personal) → \`thingsWrite({ command:'add', title:'...', notes?, list? })\` (Things). Familia/mercado → \`executeRemctl ['add','Tareas Familia'|'Mercado',...]\`.
 - "qué tengo hoy/mañana" → en paralelo: (1) \`getOutlookEvents\` para BCP/laboral, (2) GCal \`list_events\` calendario Personal, (3) GCal \`list_events\` calendario AntoCataNoeCal (viajes), (4) GCal \`list_events\` con \`eventTypeFilter: ["birthday"]\` en Personal para cumpleaños del rango.
 - "cómo dormí" / "salud" / "pasos" → \`getHealthSummary\` o \`getHealthTrend\`.
 - "estado del vuelo X" / "vuelos VVI" → tools nativas \`naabol-flights\`.
@@ -382,8 +400,8 @@ Llamar en paralelo: (1) \`getOutlookEvents({ when: "today" })\`, (2) GCal \`list
 - "cómo voy con el Foco" / "en qué enfocarme" / "qué llevo sin mover" / "KPIs de Yape" / "cómo van las afiliaciones/DAU/TRX" / "mis tareas de Notion esta semana" → \`getFocoCalStatus()\` luego \`notionPageMarkdown\` (Foco page) + \`notionCli\` query de DB (KPIs/Tareas) según contexto.
 
 ## Captura
-- "agrega/anota tarea/pendiente X" → \`executeRemctl({ args: ['add','Personal','X','--json'] })\`.
-- "agrega idea/proyecto X" → \`executeRemctl({ args: ['add','Vibe Me','X','--json'] })\`.
+- "agrega/anota tarea/pendiente X" (personal) → \`thingsWrite({ command:'add', title:'X' })\` (Things). Familia/mercado → \`executeRemctl ['add','Tareas Familia'|'Mercado','X','--json']\`.
+- "agrega idea/proyecto X" → \`thingsWrite({ command:'add', title:'X', list:'⚡️ Cal' })\` o al proyecto que corresponda.
 - "agendá reunión con Z el lunes 3pm" → GCal \`create_event\`.
 - "anota que…" → Notion \`create-pages\` en DB apropiada (para notas/memoria, no tareas).
 
