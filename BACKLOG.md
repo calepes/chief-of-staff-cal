@@ -10,7 +10,7 @@
 - [x] **WhatsApp link skill** ✅ 2026-05-08 — Tools `getWhatsappContacts` + `saveWhatsappContact` en daemon-v2 (`tools/whatsapp.ts` + tests). Skill CLI en `~/.claude/skills/whatsapp/`. Contactos compartidos en `~/.claude/whatsapp-contacts.md`. Replicado en Vesta. Spec/plan: `docs/superpowers/{specs,plans}/2026-05-08-whatsapp-link-skill*.md`. Bug fix MCP -32602: `saveWhatsappContact` retornaba void → JSON.stringify(undefined) → text:undefined; ahora retorna confirmación de texto.
 
 ### Surgieron en sesión 2026-05-08
-- [ ] **Reestructurar Jano/CLAUDE.md** — mover secciones operativas históricas (Morning Builds, Skill Detector, Heartbeat checks detalle) a `docs/automation/`. CLAUDE.md hoy: 402 líneas / 39.8KB → meta ~150-200 líneas. Identificado en audit `claude-md-improver` 2026-05-08.
+- [x] **Reestructurar Jano/CLAUDE.md** — ✅ HECHO 2026-06-13: reescrito como guía operativa + índice (85 líneas, de 156). Detalle de producto → punteros al código; automatización dormida. Spec/plan en `docs/superpowers/`.
 - [ ] **System-prompt: regla "mira X" = WebSearch** — cuando Cal usa "mira X" sin entidad local clara, default a WebSearch sobre Santa Cruz/Bolivia. Bug observado 2026-05-08: "mira restaurantes vigentes" → Jano buscó listas en Apple Notes/Notion en vez de buscar en web. Agregar disambiguación en system-prompt o pedir confirmación con botones inline cuando el comando sea ambiguo.
 
 ### Migración MCP apple-reminders → EventKit (2026-05-04)
@@ -45,12 +45,14 @@
 
 ### Crons secundarios — Estado post-auditoría 2026-05-24
 
-**Activos (5):**
-- `com.claude.heartbeat` ✅ — cada 30min, 7am-22:30
-- `com.claude.nightly-report` ✅ — 22:00 diario
-- `com.claude.eisenhower-weekly` ✅ — Dom 21:00
-- `com.claude.outlook-cache` ✅ — cada 4h
-- `com.cal.jano-morning-build` ✅ — 22:30 diario (renombrado desde `com.claude.morning-build`)
+> ⚠️ **TODOS DESACTIVADOS 2026-06-13 (dormidos).** Los 5 "activos" de abajo fueron `bootout` + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/` (sus plists quedaron corruptos por un script de update de schedule). Jano corre 100% reactivo. Reactivar requiere reconstruir el plist — ver `docs/references/hooks-automatizacion.md`.
+
+**Activos (5) → [BLOQUEADO — automatización dormida 2026-06-13]:**
+- `com.claude.heartbeat` — cada 30min, 7am-22:30
+- `com.claude.nightly-report` — 22:00 diario
+- `com.claude.eisenhower-weekly` — Dom 21:00
+- `com.claude.outlook-cache` — cada 4h
+- `com.cal.jano-morning-build` — 22:30 diario (renombrado desde `com.claude.morning-build`)
 
 **Deshabilitados intencionalmente:**
 - `com.claude.daily-briefings` — `.disabled` en LaunchAgents. On-demand via `runBriefing` tool. Si se quiere 5am automático, renombrar quitando `.disabled`.
