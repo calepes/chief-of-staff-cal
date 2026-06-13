@@ -86,6 +86,8 @@ El resto del sistema (cron agents, hooks globales, scripts standalone) sigue sie
 - npm workspaces: `package.json` define `daemon-v2`, `worker-v2`, `shared-v2`.
 
 ### 4. Cron agents (tareas recurrentes vía launchd)
+> **Estado 2026-06-13:** DESACTIVADOS (dormidos). Los crons/heartbeat/learnings fueron `bootout` + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`. Jano corre 100% reactivo. Lo de abajo describe el diseño original; cómo reactivar en `docs/references/hooks-automatizacion.md`.
+
 Invocan `claude -p "<prompt>"` una vez por ejecución (sesión one-shot). Tabla abajo. Estos sí usan el binario CLI; son ortogonales al daemon.
 
 ### 5. Hooks globales (`~/.claude/hooks/`)
