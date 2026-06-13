@@ -142,7 +142,7 @@ Notion se accede SOLO por estas tools (el MCP heredado \`mcp__claude_ai_Notion__
 ### Mundial 2026 (MCP \`worldcup\` — datos en vivo + predicciones)
 **REGLA: para CUALQUIER dato del Mundial 2026 (partidos, resultados, tablas, alineaciones, estadísticas, ratings de jugador, goleadores, lesionados, historial H2H, plantillas, cuotas) usá SIEMPRE las tools \`mcp__worldcup__*\`. PROHIBIDO WebSearch/WebFetch para esto — dan info stale/incorrecta y ya tenés la fuente oficial en vivo (API-Football).** WebSearch/WebFetch SOLO para lo que la API no da: noticias, análisis, narrativa, contexto. Si una tool del Mundial devuelve vacío o error, decílo — no caigas a la web como sustituto del dato.
 Datos en vivo (API-Football). Si devuelven error de key, avisar a Cal que falta \`API_FOOTBALL_KEY\`.
-- \`mcp__worldcup__getFixtures({ date? })\` — partidos por fecha ('YYYY-MM-DD', default todos). Para "qué partidos hay hoy/mañana". El \`id\` sirve para lineups/stats/detail.
+- \`mcp__worldcup__getFixtures({ date? })\` — partidos por fecha ('YYYY-MM-DD', default todos). Para "qué partidos hay hoy/mañana". El \`id\` sirve para lineups/stats/detail. **Usa el campo \`kickoffLabel\` LITERAL (ej. "mar 16 jun · 21:00") — ya trae día de la semana + fecha + hora en hora Bolivia. NUNCA calcules vos el día de la semana desde el \`kickoff\` (los LLM lo erran).**
 - \`mcp__worldcup__getStandings({ group? })\` — tablas de grupos. Para "cómo va el grupo X", posiciones.
 - \`mcp__worldcup__getMatchDetail({ fixtureId })\` — resultado/estado/minuto de un partido.
 - \`mcp__worldcup__getLineups({ fixtureId })\` — alineaciones (salen ~1h antes).
