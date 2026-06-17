@@ -872,8 +872,11 @@ async function loop(): Promise<void> {
   });
 
   scheduleWebhookWatchdog();
-  scheduleFlightCheckin();
-  scheduleFocoCheckinsLocal();
+  // Proactividad DESACTIVADA 2026-06-17 — Cal va a repensar los flujos proactivos.
+  // Jano queda 100% reactivo (solo webhook watchdog, que es infra necesaria).
+  // Reactivar: descomentar la línea correspondiente + rebuild + restart.
+  // scheduleFlightCheckin();
+  // scheduleFocoCheckinsLocal();
   void ensureWebhook();
   void registerBotCommands(env.COS_TELEGRAM_BOT_TOKEN);
 

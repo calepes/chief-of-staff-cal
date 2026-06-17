@@ -81,5 +81,17 @@ Fuente: `daemon-v2/src/index.ts`.
 - Contexto Yape: `~/Claude Projects/Yape/CLAUDE.md`
 - Specs/Planes: `docs/superpowers/specs/` y `docs/superpowers/plans/`
 
-## Automatización — DESACTIVADA 2026-06-13 (dormida)
-Crons/heartbeat/learnings están apagados: 7 plists `bootout` + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`. Las carpetas `heartbeat-tasks/`, `hooks/`, `launchd/` se conservan. Jano corre **100% reactivo** (responde mensajes; sin proactividad). Cómo era y cómo reactivar: `docs/references/hooks-automatizacion.md`.
+## Automatización — dos capas (NO confundir)
+Hay dos mecanismos de proactividad independientes:
+
+**1. Plists launchd (crons externos) — DESACTIVADOS 2026-06-13 (dormidos).**
+7 plists `bootout` + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`. Cubrían heartbeat/learnings. Carpetas `heartbeat-tasks/`, `hooks/`, `launchd/` conservadas. Cómo era y cómo reactivar: `docs/references/hooks-automatizacion.md`.
+
+**2. Crons internos del daemon (`node-cron`, dentro del proceso) — los apaga/prende el código, NO launchd.** En `index.ts` (`loop()`):
+- `scheduleWebhookWatchdog()` — ACTIVO (re-set webhook cada 1 min; infra necesaria, no es proactividad hacia Cal).
+- `scheduleFlightCheckin()` — **DESACTIVADO 2026-06-17** (check-ins de vuelos, every 30min 7-22h).
+- `scheduleFocoCheckinsLocal()` — **DESACTIVADO 2026-06-17** (Foco CAL am/md/pm, `proactive/foco-check.ts`).
+
+Ambos comentados juntos en `loop()`. Reactivar: descomentar la llamada correspondiente + rebuild + restart.
+
+**Estado real (2026-06-17):** Jano es 100% reactivo — sin proactividad hacia Cal (solo el webhook watchdog, que es infra). Cal va a repensar los flujos proactivos. Verificar qué crons internos arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
