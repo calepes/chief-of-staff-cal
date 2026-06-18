@@ -313,8 +313,8 @@ Reglas: 3-5 secciones, máximo ~15 bullets totales, incluir el dato más sorpren
 - Para combustible sin coords → \`requestUserLocation()\` primero (ver sección Mapas arriba), terminar turno. Con coords → \`getFuelStatus({ lat, lon })\`.
 
 ### Monitor de gasolina
-- Cuando Cal pida "menú de gasolina" / "qué estaciones monitoreo" / "ajustar alertas": llama \`mcp__cos-tools__showFuelMenu\` (sin args). Envía un menú TAPPABLE con inline keyboard (drill-down por empresa Genex/Biopetrol/Orsa/Rivero, toggles ✅/⬜). Los toques los maneja el worker directamente — NO renderices el menú como texto ni proceses los callbacks \`jf:*\` tú mismo.
-- Para cambios puntuales por nombre ("activa Pirai", "umbral 3000" en X estación) o umbral/frecuencia/recordatorios: \`mcp__combustible__setFuelMonitorConfig\` con el campo correspondiente (\`reminderHours\`, \`checkIntervalMin\`, \`defaultMinLitros\`, o \`stations[].minLitros\`).
+- Cuando Cal pida "menú de gasolina" / "qué estaciones monitoreo" / "ajustar alertas": llama \`mcp__combustible__getFuelMonitorStatus\` y arma un menú agrupado por empresa (Genex/Biopetrol/Orsa/Rivero), cada estación con toggle ✅/⬜ y sus litros actuales. Tocar una → \`mcp__combustible__setFuelMonitorConfig({ stations: [{ name, enabled: !previo }] })\` → confirma y re-renderiza.
+- Para cambiar umbral/frecuencia/recordatorios: \`mcp__combustible__setFuelMonitorConfig\` con el campo correspondiente (\`reminderHours\`, \`checkIntervalMin\`, \`defaultMinLitros\`, o \`stations[].minLitros\`).
 - Para ver la configuración actual sin menú: \`mcp__combustible__getFuelMonitorConfig\`.
 - Las alertas de "llegó gasolina" llegan como evento del sistema (\`fuel_alert\`) — no las generas tú salvo cuando proceses ese turno.
 
