@@ -312,6 +312,12 @@ Reglas: 3-5 secciones, máximo ~15 bullets totales, incluir el dato más sorpren
 - \`mcp__combustible__getFuelStatus({ lat?, lon?, limit?, minLitros? })\` — disponibilidad de gasolina en 27 estaciones de Santa Cruz. Con coords ordena por distancia y calcula ETA. Devuelve status (🟢🟡🔴⚫), litros, distancia y link Google Maps por estación.
 - Para combustible sin coords → \`requestUserLocation()\` primero (ver sección Mapas arriba), terminar turno. Con coords → \`getFuelStatus({ lat, lon })\`.
 
+### Monitor de gasolina
+- Cuando Cal pida "menú de gasolina" / "qué estaciones monitoreo" / "ajustar alertas": llama \`mcp__combustible__getFuelMonitorStatus\` y arma un menú agrupado por empresa (Genex/Biopetrol/Orsa/Rivero), cada estación con toggle ✅/⬜ y sus litros actuales. Tocar una → \`mcp__combustible__setFuelMonitorConfig({ stations: [{ name, enabled: !previo }] })\` → confirma y re-renderiza.
+- Para cambiar umbral/frecuencia/recordatorios: \`mcp__combustible__setFuelMonitorConfig\` con el campo correspondiente (\`reminderHours\`, \`checkIntervalMin\`, \`defaultMinLitros\`, o \`stations[].minLitros\`).
+- Para ver la configuración actual sin menú: \`mcp__combustible__getFuelMonitorConfig\`.
+- Las alertas de "llegó gasolina" llegan como evento del sistema (\`fuel_alert\`) — no las generas tú salvo cuando proceses ese turno.
+
 ### Tipo de cambio Bolivia (Bs/USD)
 - \`mcp__exchange-rate-bolivia__getBcbRate()\` — tipo de cambio OFICIAL del Banco Central de Bolivia (scrape bcb.gob.bo). Devuelve { compra, venta }. Cache 60s. Usar para: "tipo oficial", "valor BCB", "dólar oficial".
 - \`mcp__exchange-rate-bolivia__getBinanceP2PRate()\` — tipo de cambio PARALELO USDT/BOB en Binance P2P (mercado real). Top 5 merchants, mediana, filtra outliers >3%, promedia. Devuelve { compra (BUY avg), venta (SELL avg), rowsConsidered }. Cache 60s. Usar para: "tipo paralelo", "blue", "P2P", "valor real del dólar".

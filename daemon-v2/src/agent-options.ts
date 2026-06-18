@@ -133,6 +133,9 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__agent-learnings__addLearning",
   // Combustible Santa Cruz — disponibilidad y distancia a estaciones de gasolina
   "mcp__combustible__getFuelStatus",
+  "mcp__combustible__getFuelMonitorConfig",
+  "mcp__combustible__getFuelMonitorStatus",
+  "mcp__combustible__setFuelMonitorConfig",
   // Mundial 2026 — datos en vivo (API-Football) + predicciones (predictor Python)
   "mcp__worldcup__getFixtures",
   "mcp__worldcup__getStandings",
