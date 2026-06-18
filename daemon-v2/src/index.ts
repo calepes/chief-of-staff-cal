@@ -934,6 +934,7 @@ async function loop(): Promise<void> {
                 currentChatId = id;
               },
               chatId: ALERT_CHAT_ID,
+              botToken: env.COS_TELEGRAM_BOT_TOKEN,
             });
             acks.push(leaseId);
           } catch (err) {

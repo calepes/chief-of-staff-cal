@@ -1,5 +1,6 @@
 import type { WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { FuelEvent } from "@cos/shared";
+import { sendMessage } from "@cos/shared";
 import { runAgent } from "../agent.js";
 
 const STATUS_URL = "https://combustible-proxy.carlos-cb4.workers.dev/monitor/status";
@@ -8,6 +9,7 @@ export interface FuelAlertDeps {
   takeWarm: () => Promise<WarmQuery>;
   setCurrentChatId: (id: number) => void;
   chatId: number;
+  botToken: string;
 }
 
 // Re-verifica litros actuales; devuelve solo eventos cuya estación sigue disponible.
@@ -38,17 +40,19 @@ function buildPrompt(events: FuelEvent[]): string {
     const nav = ev.waze || `https://www.google.com/maps/search/?api=1&query=${ev.lat},${ev.lon}`;
     return `- ${ev.name} (${ev.company}) — ~${litros} L · tipo:${ev.kind} · navegar:${nav}`;
   });
-  return `Eres Jano. Formato: Telegram HTML. Español neutro. Sin acks genéricos.
+  return `Eres Jano. Formato: Telegram HTML (solo <b>, <i>, <a href>). Español neutro. Sin acks genéricos.
 
-EVENTO PROACTIVO: llegó gasolina a estaciones que Cal monitorea. Avísale AHORA con un mensaje corto y visual.
+EVENTO PROACTIVO: llegó gasolina a estaciones que Cal monitorea.
 
 Estaciones (ya verificadas como disponibles):
 ${lines.join("\n")}
 
-Tu tarea en este turno:
-1. Por cada estación, envía una línea: emoji ⛽🟢 (alert) o ⛽🔔 (reminder), nombre en <b>negrita</b>, litros, y un <a href="...">Cómo llegar</a> con el link de navegación.
-2. Cierra ofreciendo: "¿Quieres ver/ajustar el menú de estaciones monitoreadas?" — si Cal dice que sí, usa getFuelMonitorStatus y arma el menú con toggles.
-3. No inventes estaciones fuera de la lista. Una sola tanda de mensajes, sin párrafos largos.`;
+IMPORTANTE: NO llames ninguna herramienta. Tu respuesta de texto ES el mensaje que se le envía a Cal (el sistema lo manda automáticamente). Solo escribe el texto, nada más.
+
+Redáctalo así:
+- Una línea por estación: emoji ⛽🟢 (si tipo=alert) o ⛽🔔 (si tipo=reminder), el nombre en <b>negrita</b>, los litros, y <a href="LINK">Cómo llegar</a> usando el link de navegación.
+- Cierra con una frase corta: "Escríbeme si quieres ver o ajustar el menú de estaciones."
+- Sin párrafos largos, sin inventar estaciones fuera de la lista.`;
 }
 
 export async function processFuelAlert(events: FuelEvent[], deps: FuelAlertDeps): Promise<void> {
@@ -66,8 +70,18 @@ export async function processFuelAlert(events: FuelEvent[], deps: FuelAlertDeps)
     return;
   }
   try {
-    await runAgent(buildPrompt(fresh), { warm, history: [] });
-    console.log(JSON.stringify({ ts: Date.now(), msg: "fuel_alert_sent", names: fresh.map((e) => e.name) }));
+    const result = await runAgent(buildPrompt(fresh), { warm, history: [] });
+    const reply = (result?.reply || "").trim();
+    if (reply) {
+      // El daemon entrega el texto del agente (mismo patrón que el flujo reactivo);
+      // el agente NO tiene tool de envío en este turno. Fallback a texto plano si el HTML falla.
+      await sendMessage(deps.botToken, { chatId: deps.chatId, text: reply, parseMode: "HTML" }).catch(() =>
+        sendMessage(deps.botToken, { chatId: deps.chatId, text: reply }).catch(() => {}),
+      );
+      console.log(JSON.stringify({ ts: Date.now(), msg: "fuel_alert_sent", names: fresh.map((e) => e.name) }));
+    } else {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "fuel_alert_empty_reply", names: fresh.map((e) => e.name) }));
+    }
   } catch (err) {
     console.log(JSON.stringify({ ts: Date.now(), msg: "fuel_alert_agent_error", err: String(err) }));
   }
