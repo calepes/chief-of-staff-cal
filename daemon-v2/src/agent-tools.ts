@@ -1,6 +1,7 @@
 import { tool, startup } from "@anthropic-ai/claude-agent-sdk";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { sendMessage, buildFuelMenu, type FuelStation } from "@cos/shared";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { getOutlookEvents } from "./tools/outlook.js";
@@ -1194,6 +1195,31 @@ export function buildSdkTools(deps: ToolDeps) {
       { pageId: z.string() },
       async ({ pageId }) => asText(await getVacacionDetail(pageId)),
       READ_ONLY,
+    ),
+    tool(
+      "showFuelMenu",
+      "Envía a Cal el menú TAPPABLE de monitoreo de combustible (inline keyboard, drill-down por empresa). " +
+      "Llamar cuando Cal pida 'menú de gasolina', 'qué estaciones monitoreo', 'ajustar alertas' o quiera ver/cambiar " +
+      "qué estaciones tiene monitoreadas. El menú se maneja con botones (toggles ✅/⬜) — no hay que renderizar texto. " +
+      "Para cambios puntuales por nombre ('activa Pirai', 'umbral 3000') usar mcp__combustible__setFuelMonitorConfig.",
+      {},
+      async () => {
+        const chatId = deps.getCurrentChatId();
+        const token = deps.botToken;
+        if (!chatId || !token) return asText({ error: "No chatId/token disponible" });
+        try {
+          const res = await fetch("https://combustible-proxy.carlos-cb4.workers.dev/monitor/status", {
+            signal: AbortSignal.timeout(10_000),
+          });
+          const data = (await res.json()) as { stations: FuelStation[] };
+          const stations = data.stations ?? [];
+          const { text, keyboard } = buildFuelMenu(stations, "r");
+          await sendMessage(token, { chatId, text, parseMode: "HTML", replyMarkup: keyboard });
+          return asText("Menú de gasolina enviado.");
+        } catch (err) {
+          return asText({ error: `No se pudo cargar el monitor de combustible: ${String(err)}` });
+        }
+      },
     ),
     tool(
       "notionCli",

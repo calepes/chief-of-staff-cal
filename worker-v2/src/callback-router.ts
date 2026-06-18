@@ -1,17 +1,20 @@
-import type { TelegramCallbackQuery } from "@cos/shared";
-import { answerCallbackQuery, editMessage } from "@cos/shared";
+import type { TelegramCallbackQuery, FuelStation } from "@cos/shared";
+import { answerCallbackQuery, editMessage, buildFuelMenu } from "@cos/shared";
 import { MENU_SECTIONS, buildInlineKeyboard } from "./menu.js";
 import { setTaskStatus, setTaskDateToday } from "./notion-light.js";
 
 export interface CallbackEnv {
   COS_TELEGRAM_BOT_TOKEN: string;
   NOTION_TOKEN: string;
+  MONITOR_TOKEN: string;
 }
 
 // Status valor real en DB Tareas Notion para "done": "Listo"
 const STATUS_DONE = "Listo";
 
-const LIGHT_PREFIXES = new Set(["menu", "t:d", "t:c", "t:s", "t:sd", "nav"]);
+const LIGHT_PREFIXES = new Set(["menu", "t:d", "t:c", "t:s", "t:sd", "nav", "jf"]);
+
+const FUEL_BASE = "https://combustible-proxy.carlos-cb4.workers.dev";
 
 export function isLightCallback(data: string | undefined): boolean {
   if (!data) return false;
@@ -31,6 +34,52 @@ export async function handleLightCallback(cb: TelegramCallbackQuery, env: Callba
   const chatId = cb.message.chat.id;
   const messageId = cb.message.message_id;
   const token = env.COS_TELEGRAM_BOT_TOKEN;
+
+  // jf:* — menú tappable de monitoreo de combustible (drill-down por empresa)
+  if (data.startsWith("jf:")) {
+    await answerCallbackQuery(token, cb.id);
+    try {
+      const statusRes = await fetch(`${FUEL_BASE}/monitor/status`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      const statusData = (await statusRes.json()) as { stations: FuelStation[] };
+      let stations = statusData.stations ?? [];
+
+      let view: string;
+      if (data.startsWith("jf:t:")) {
+        const [, , siStr, ...retParts] = data.split(":");
+        const si = Number(siStr);
+        const ret = retParts.join(":") || "r";
+        const st = stations[si];
+        if (st) {
+          await fetch(`${FUEL_BASE}/monitor/config`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Monitor-Token": env.MONITOR_TOKEN,
+            },
+            body: JSON.stringify({ stations: [{ name: st.name, enabled: !st.enabled }] }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          // Re-fetch para reflejar el toggle.
+          const fresh = await fetch(`${FUEL_BASE}/monitor/status`, {
+            signal: AbortSignal.timeout(10_000),
+          });
+          const freshData = (await fresh.json()) as { stations: FuelStation[] };
+          stations = freshData.stations ?? stations;
+        }
+        view = ret;
+      } else {
+        view = data.slice(3);
+      }
+
+      const { text, keyboard } = buildFuelMenu(stations, view);
+      await editMessage(token, chatId, messageId, text, "HTML", keyboard);
+    } catch {
+      await answerCallbackQuery(token, cb.id, "Error cargando el monitor de combustible");
+    }
+    return true;
+  }
 
   // menu:section — render estático si la sección está en MENU_SECTIONS
   // Si no está, fall through al daemon (heavy, requiere data dinámica)

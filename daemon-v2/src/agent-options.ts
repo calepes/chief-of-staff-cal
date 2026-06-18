@@ -136,6 +136,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__combustible__getFuelMonitorConfig",
   "mcp__combustible__getFuelMonitorStatus",
   "mcp__combustible__setFuelMonitorConfig",
+  // Menú tappable de monitoreo de combustible (inline keyboard, drill-down por empresa)
+  "mcp__cos-tools__showFuelMenu",
   // Mundial 2026 — datos en vivo (API-Football) + predicciones (predictor Python)
   "mcp__worldcup__getFixtures",
   "mcp__worldcup__getStandings",
