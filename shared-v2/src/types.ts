@@ -1,7 +1,18 @@
 export interface QueueMessage {
-  kind: "telegram_update";
-  payload: TelegramUpdate;
+  kind: "telegram_update" | "fuel_alert";
+  payload: TelegramUpdate | { events: FuelEvent[] };
   ts: number;
+}
+
+export interface FuelEvent {
+  name: string;
+  company: string;
+  litros: number;
+  lat?: number;
+  lon?: number;
+  waze?: string | null;
+  kind: "alert" | "reminder";
+  since: number | null;
 }
 
 export interface TelegramUpdate {
