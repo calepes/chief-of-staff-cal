@@ -16,9 +16,10 @@ import { QueuePoller } from "./queue-poller.js";
 import { CfKv } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
 import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
-import type { TelegramUpdate, QueueMessage } from "@cos/shared";
+import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
+import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf } from "./tools/vision.js";
@@ -923,6 +924,21 @@ async function loop(): Promise<void> {
             acks.push(leaseId);
           } catch (err) {
             log({ msg: "process_error", err: String(err), leaseId });
+          }
+        } else if (msg.kind === "fuel_alert") {
+          try {
+            const { events } = msg.payload as { events: FuelEvent[] };
+            await processFuelAlert(events, {
+              takeWarm,
+              setCurrentChatId: (id) => {
+                currentChatId = id;
+              },
+              chatId: ALERT_CHAT_ID,
+            });
+            acks.push(leaseId);
+          } catch (err) {
+            log({ msg: "fuel_alert_error", err: String(err), leaseId });
+            acks.push(leaseId);
           }
         } else {
           log({ msg: "skip_kind", kind: msg.kind });
