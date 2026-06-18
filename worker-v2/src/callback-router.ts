@@ -7,6 +7,9 @@ export interface CallbackEnv {
   COS_TELEGRAM_BOT_TOKEN: string;
   NOTION_TOKEN: string;
   MONITOR_TOKEN: string;
+  // Service binding → combustible-proxy. fetch directo por *.workers.dev se pierde
+  // en el edge de CF (worker→worker mismo account); el binding rutea internamente.
+  COMBUSTIBLE: Fetcher;
 }
 
 // Status valor real en DB Tareas Notion para "done": "Listo"
@@ -35,24 +38,25 @@ export async function handleLightCallback(cb: TelegramCallbackQuery, env: Callba
   const messageId = cb.message.message_id;
   const token = env.COS_TELEGRAM_BOT_TOKEN;
 
-  // jf:* — menú tappable de monitoreo de combustible (drill-down por empresa)
+  // jf:* — menú tappable de monitoreo de combustible (drill-down por empresa).
+  // Vía service binding env.COMBUSTIBLE (worker→worker por *.workers.dev se pierde en el edge).
   if (data.startsWith("jf:")) {
-    await answerCallbackQuery(token, cb.id);
     try {
-      const statusRes = await fetch(`${FUEL_BASE}/monitor/status`, {
+      const statusRes = await env.COMBUSTIBLE.fetch(`${FUEL_BASE}/monitor/status`, {
         signal: AbortSignal.timeout(10_000),
       });
       const statusData = (await statusRes.json()) as { stations: FuelStation[] };
       let stations = statusData.stations ?? [];
 
       let view: string;
+      let toggleFailed = false;
       if (data.startsWith("jf:t:")) {
         const [, , siStr, ...retParts] = data.split(":");
         const si = Number(siStr);
         const ret = retParts.join(":") || "r";
         const st = stations[si];
         if (st) {
-          await fetch(`${FUEL_BASE}/monitor/config`, {
+          const post = await env.COMBUSTIBLE.fetch(`${FUEL_BASE}/monitor/config`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -61,8 +65,9 @@ export async function handleLightCallback(cb: TelegramCallbackQuery, env: Callba
             body: JSON.stringify({ stations: [{ name: st.name, enabled: !st.enabled }] }),
             signal: AbortSignal.timeout(10_000),
           });
+          toggleFailed = !post.ok;
           // Re-fetch para reflejar el toggle.
-          const fresh = await fetch(`${FUEL_BASE}/monitor/status`, {
+          const fresh = await env.COMBUSTIBLE.fetch(`${FUEL_BASE}/monitor/status`, {
             signal: AbortSignal.timeout(10_000),
           });
           const freshData = (await fresh.json()) as { stations: FuelStation[] };
@@ -75,8 +80,10 @@ export async function handleLightCallback(cb: TelegramCallbackQuery, env: Callba
 
       const { text, keyboard } = buildFuelMenu(stations, view);
       await editMessage(token, chatId, messageId, text, "HTML", keyboard);
+      // Una sola respuesta al callback (dismiss spinner) — con toast si el toggle falló.
+      await answerCallbackQuery(token, cb.id, toggleFailed ? "No se pudo cambiar la estación" : undefined);
     } catch {
-      await answerCallbackQuery(token, cb.id, "Error cargando el monitor de combustible");
+      await answerCallbackQuery(token, cb.id, "Error cargando el monitor de combustible").catch(() => {});
     }
     return true;
   }
