@@ -68,6 +68,8 @@ Fuente: `daemon-v2/src/index.ts`.
 - **`fetchAsUser` requiere FDA** en `~/.npm-global/bin/node` (lee Cookies.binarycookies de Safari).
 - **SDK persisted-output loop:** tool result >~25KB → SDK persiste a `toulu_*.json`; el LLM reintenta el tool. Solución: usar `fetchAndSummarize` (el texto no entra al contexto).
 - **compact.ts → Markdown en historial:** si reaparece Markdown en respuestas largas, revisar el prompt de `daemon-v2/src/compact.ts` ("sin Markdown, texto plano").
+- **Envío proactivo (no reactivo):** el daemon entrega la respuesta del agente vía `sendMessage` SOLO en el flujo reactivo (`processMessage`). En handlers PROACTIVOS (ej. `proactive/fuel-alert.ts`) el handler debe llamar `sendMessage` con el `reply` de `runAgent` él mismo — el agente NO tiene tool de envío; si el prompt dice "envía", intentará tools de notificación inexistentes y nada llega a Cal. Alternativa: tool que envía sola (patrón `buildApprovalFlow`/foco-check).
+- **Fetch worker→worker por `*.workers.dev` se pierde en el edge CF** (mismo account). Usar **Service Binding** (ej. `combustible-proxy → cos-agent-worker` binding `JANO`, y viceversa). Síntoma: el POST "sale ok" pero nunca llega; el destino no registra el request.
 
 ## Notion
 - Integración "Claude CoS" (DB Tareas + People). Prefijo MCP: `mcp__claude_ai_Notion__*`.
@@ -94,4 +96,7 @@ Hay dos mecanismos de proactividad independientes:
 
 Ambos comentados juntos en `loop()`. Reactivar: descomentar la llamada correspondiente + rebuild + restart.
 
-**Estado real (2026-06-17):** Jano es 100% reactivo — sin proactividad hacia Cal (solo el webhook watchdog, que es infra). Cal va a repensar los flujos proactivos. Verificar qué crons internos arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
+**Estado real (2026-06-18):** sin crons internos de proactividad (solo webhook watchdog, infra). La única proactividad hacia Cal es por **evento externo**: el monitor de combustible (ver abajo) empuja `fuel_alert` a la cola. Verificar qué crons internos arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
+
+## Monitor de combustible (alertas proactivas)
+Cron en `combustible-proxy` (CF, externo) detecta "llegó gasolina" → `POST /fuel/alert` (Service Binding) al worker de Jano → `QueueMessage{kind:"fuel_alert"}` → daemon `proactive/fuel-alert.ts` re-verifica litros y avisa a Cal. Config editable **por texto** vía tools del MCP `combustible` (`getFuelMonitorConfig/Status/setFuelMonitorConfig`); el menú es texto (los botones tappables se revirtieron 2026-06-18, no funcionaron en el Telegram de Cal). Endpoint `/fuel/alert` en `worker-v2/src/index.ts`; tipo `FuelEvent` en `shared-v2/src/types.ts`. Detalle: `~/Claude Projects/Personal/Apps/Combustible/repo/CLAUDE.md`.

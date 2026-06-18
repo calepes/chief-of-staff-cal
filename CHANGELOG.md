@@ -1,5 +1,17 @@
 # CHANGELOG — Jano
 
+## 2026-06-18
+
+### Feature — Monitor de combustible: alertas proactivas de disponibilidad
+- **Feature**: Jano avisa cuando llega gasolina a las estaciones que Cal monitorea (inicial: Urubó, Equipetrol, Vangas; las 27 configurables). Cron cada 5 min en `combustible-proxy` (CF) detecta el flanco sin→con gasolina (`evaluateStation` + KV `monitor_config`/`monitor_state`/`monitor_lastrun`) → `POST /fuel/alert` al worker de Jano → `QueueMessage{kind:"fuel_alert"}` → daemon `proactive/fuel-alert.ts` re-verifica litros (descarta alertas vencidas) y avisa. Umbral 1.500 L, recordatorio cada 3h (máx 2), sin horario de silencio.
+- **Config por texto**: tools nuevas del MCP `combustible` (`getFuelMonitorConfig/Status/setFuelMonitorConfig`) — "activa Pirai", "umbral 3000", "cada 10 min". Menú agrupado por empresa (texto).
+- **Gotcha (CF)**: fetch worker→worker por `*.workers.dev` se pierde en el edge → Service Bindings (`combustible-proxy ↔ cos-agent-worker`). Cron "registrado pero sin disparar" → re-registrar schedule limpio (`PUT []` luego `PUT [{cron}]`). Límite 5 crons/cuenta → liberado uno de `digest-generator` (16:00 UTC).
+- **Gotcha (daemon)**: envío proactivo debe llamar `sendMessage` con el `reply` del agente; el agente no tiene tool de envío.
+- **Revertido**: menú de botones tappables (inline keyboard + callbacks `jf:*`) — no funcionó en el Telegram de Cal; se volvió a texto + config por escrito.
+
+### Ops — proactividad interna apagada
+- **Ops**: `scheduleFlightCheckin()` + `scheduleFocoCheckinsLocal()` desactivados en `loop()` (Jano 100% reactivo salvo el evento externo `fuel_alert`). Los Foco CAL check-ins (am/md/pm) eran cron interno `node-cron`, no plist launchd — distinto de la desactivación de 2026-06-13.
+
 ## 2026-06-13 (tarde)
 
 ### Feature — Things 3: Jano gestiona tareas/proyectos personales
