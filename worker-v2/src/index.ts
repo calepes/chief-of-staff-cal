@@ -9,6 +9,7 @@ interface Env {
   COS_TELEGRAM_BOT_TOKEN: string;
   COS_WEBHOOK_SECRET: string;
   NOTION_TOKEN: string;
+  FUEL_ALERT_SECRET: string;
 }
 
 const MINI_APP_ORIGIN = "https://apps.lepesqueur.net";
@@ -82,6 +83,24 @@ app.post("/telegram/webhook", async (c) => {
   const msg: QueueMessage = { kind: "telegram_update", payload: update, ts: Date.now() };
   await c.env.INBOX.send(msg);
   return c.text("ok");
+});
+
+// POST /fuel/alert — el worker combustible reporta llegada de gasolina.
+// Auth: header X-Fuel-Secret == FUEL_ALERT_SECRET.
+app.post("/fuel/alert", async (c) => {
+  const secret = c.req.header("X-Fuel-Secret") ?? null;
+  if (!secret || secret !== c.env.FUEL_ALERT_SECRET) {
+    return c.text("unauthorized", 401);
+  }
+  let body: { events?: unknown };
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad_json" }, 400); }
+  const events = (body as { events?: unknown }).events;
+  if (!Array.isArray(events) || events.length === 0) {
+    return c.json({ error: "bad_request" }, 400);
+  }
+  const msg: QueueMessage = { kind: "fuel_alert", payload: { events } as never, ts: Date.now() };
+  await c.env.INBOX.send(msg);
+  return c.json({ ok: true });
 });
 
 export default app;
