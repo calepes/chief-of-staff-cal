@@ -11,8 +11,5 @@
   "kv_namespaces": [
     { "binding": "STATE", "id": "8e5840cda34546949ff780be61c2579e" }
   ],
-  "services": [
-    { "binding": "COMBUSTIBLE", "service": "combustible-proxy" }
-  ],
   "observability": { "enabled": true }
 }

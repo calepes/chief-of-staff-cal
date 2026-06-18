@@ -11,7 +11,6 @@ interface Env {
   NOTION_TOKEN: string;
   FUEL_ALERT_SECRET: string;
   MONITOR_TOKEN: string;
-  COMBUSTIBLE: Fetcher;
 }
 
 const MINI_APP_ORIGIN = "https://apps.lepesqueur.net";
@@ -78,7 +77,6 @@ app.post("/telegram/webhook", async (c) => {
       COS_TELEGRAM_BOT_TOKEN: c.env.COS_TELEGRAM_BOT_TOKEN,
       NOTION_TOKEN: c.env.NOTION_TOKEN,
       MONITOR_TOKEN: c.env.MONITOR_TOKEN,
-      COMBUSTIBLE: c.env.COMBUSTIBLE,
     });
     if (handled) return c.text("ok");
     // si menu:section no está en MENU_SECTIONS estáticas, fall through al queue
