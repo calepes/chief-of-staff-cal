@@ -96,7 +96,9 @@ Hay dos mecanismos de proactividad independientes:
 
 Ambos comentados juntos en `loop()`. Reactivar: descomentar la llamada correspondiente + rebuild + restart.
 
-**Estado real (2026-06-18):** sin crons internos de proactividad (solo webhook watchdog, infra). La única proactividad hacia Cal es por **evento externo**: el monitor de combustible (ver abajo) empuja `fuel_alert` a la cola. Verificar qué crons internos arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
+**Estado real (2026-06-19):** sin crons internos de proactividad (solo webhook watchdog, infra) Y **sin proactividad por evento externo** — el monitor de combustible se apagó 2026-06-19 (ver abajo). Hoy NO hay ninguna proactividad automática hacia Cal. Verificar qué crons internos arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
 
-## Monitor de combustible (alertas proactivas)
+## Monitor de combustible (alertas proactivas) — ⛔ APAGADO 2026-06-19
+> El cron de `combustible-proxy` quemaba ~576 writes/día de KV (≈57% del free tier) → Cloudflare disparó alerta "50% daily KV limit". Apagado con `crons = []` + `enabled:false` en KV (`monitor_config`). Ya NO llegan `fuel_alert` a la cola. Reactivar: ver `~/Claude Projects/Personal/Apps/Combustible/repo/CLAUDE.md` (restaurar cron a `*/5`, no cada minuto; hacer el `put monitor_state` condicional). El flujo descrito abajo queda como referencia de cómo funcionaba.
+
 Cron en `combustible-proxy` (CF, externo) detecta "llegó gasolina" → `POST /fuel/alert` (Service Binding) al worker de Jano → `QueueMessage{kind:"fuel_alert"}` → daemon `proactive/fuel-alert.ts` re-verifica litros y avisa a Cal. Config editable **por texto** vía tools del MCP `combustible` (`getFuelMonitorConfig/Status/setFuelMonitorConfig`); el menú es texto (los botones tappables se revirtieron 2026-06-18, no funcionaron en el Telegram de Cal). Endpoint `/fuel/alert` en `worker-v2/src/index.ts`; tipo `FuelEvent` en `shared-v2/src/types.ts`. Detalle: `~/Claude Projects/Personal/Apps/Combustible/repo/CLAUDE.md`.
