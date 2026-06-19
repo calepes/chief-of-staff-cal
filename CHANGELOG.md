@@ -1,5 +1,12 @@
 # CHANGELOG — Jano
 
+## 2026-06-19
+
+### Ops — Monitor de combustible APAGADO (quemaba el free tier de KV)
+- **Fix/Ops**: el cron de `combustible-proxy` (`* * * * *`, cada minuto) escribía `monitor_lastrun` + `monitor_state` cada 5 min ≈ **576 writes/día de KV ≈ 57% del límite free** (~1.000 writes/día) → Cloudflare disparó la alerta "50% daily Workers KV limit reached". Apagado por dos vías: `crons = []` en `proxy/wrangler.toml` (redeploy) + `enabled:false` en la key `monitor_config` de KV. Ya **no llegan `fuel_alert`** a la cola; Jano queda 100% reactivo (sin ninguna proactividad automática).
+- **Diagnóstico**: el loop de poll de la cola (CF Queues HTTP pull) NO toca KV; los watchdogs cada minuto (Jano/Vesta) tampoco. El único quema-KV era el monitor de gasolina. Reads del monitor (~2.880/día) eran triviales (3% de 100k); el problema eran los **writes**.
+- **Para reactivar** (ver `Personal/Apps/Combustible/repo/CLAUDE.md` y `docs/plans/2026-06-17-...`): restaurar `crons = ["*/5 * * * *"]` (5 min, NO cada minuto) + `enabled:true` en KV; antes, hacer el `put monitor_state` **condicional** (solo si cambió) para no volver a quemar writes.
+
 ## 2026-06-18
 
 ### Feature — Monitor de combustible: alertas proactivas de disponibilidad
