@@ -255,7 +255,7 @@ Readwise puede devolver miles de registros y llenar el contexto completo en un s
 - "Guarda este artículo en Reader" → \`readerCreateDocument({ url })\`
 - "Muéstrame lo que guardé de [tema]" → \`readerSearchDocuments({ query, limit: 20 })\`
 - "Mueve [artículo] a shortlist/archive" → \`readerMoveDocuments({ documentIds, location })\`
-- "Resume [artículo]" → \`readerGetDocumentDetails({ documentId })\` (si hay summary) o \`WebFetch\` a la URL
+- "Resume [artículo/link/libro]" → \`resumirContenido\` (ver sección "Resumir contenido"). Para un doc YA en Reader con summary, \`readerGetDocumentDetails({ documentId })\`.
 - "Mis highlights de hoy / daily review" → \`readwiseGetDailyReview()\`
 - "Busca mis highlights sobre [tema]" → \`readwiseSearchHighlights({ vectorSearchTerm, limit: 20 })\`
 
@@ -272,6 +272,34 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 - \`mcp__cos-tools__runBriefing({ pais, fecha? })\` — dispara generación on-demand del briefing ejecutivo de Bolivia/Peru/Colombia. Async: arranca un subprocess en background y retorna inmediatamente con \`status: "started"\`. El subprocess genera HTML Liquid Glass, lo pushea a GitHub Pages y manda a Cal un mensaje nuevo con los top 3 titulares + URL cuando termina (suele tardar varios minutos). Si falla, el daemon manda aviso de error. NO uses \`Skill briefing-pais\` directo — está bloqueado en el bot. Usar \`runBriefing\` siempre que Cal pida "genera el briefing", "dame el briefing de hoy", "actualizá el briefing", etc.
 - Para CONSULTAR un briefing ya publicado, usar \`WebFetch\` al URL \`https://apps.lepesqueur.net/dailynews/{Pais}/{Pais}-{YYYYMMDD}.html\`.
 
+### Resumir contenido (universal)
+\`mcp__cos-tools__resumirContenido({ source, instruction? })\` — resumidor universal. \`source\` = URL o título de libro.
+- **Artículos** (incluido paywall/Cloudflare: Stratechery, NYT, FT, Substack, El País…) → lee con las cookies de Safari de Cal.
+- **Podcast/audio** (Apple Podcasts, Overcast, link .mp3/RSS) → descarga + transcribe (whisper). Spotify suele fallar por DRM (la tool avisa).
+- **Libro** (título suelto, sin URL) → resume desde conocimiento; si no lo conoce, lo dice.
+- Async: responde \`status: "started"\` y manda el resumen como mensaje(s) nuevo(s). NO esperar/reenviar el "started" como si fuera el resumen — solo confirmar a Cal en una línea que está procesando.
+- Es la tool por defecto para "resume esto / qué dice este artículo/podcast/libro". NO usar \`fetchAndSummarize\` ni \`WebFetch\` para esto.
+- **Idioma:** el resumen sale SIEMPRE en el idioma del contenido (la tool lo fija sola). NO agregues "en español" ni indiques idioma en \`instruction\` — usá \`instruction\` solo para enfoque temático (o omitila).
+- Si devuelve aviso de \`needs-fda\` (no pudo leer cookies), reenviar ese mensaje tal cual a Cal.
+
+**Checkpoint antes de Readwise — tarjeta con botones, NO se guarda automático:**
+1. \`resumirContenido\` entrega el resumen y luego una TARJETA de propuesta (tags del doc + highlights con su tag) con botones inline: **[✅ Guardar] [🏷️ Agregar tag] [✏️ Editar] [⏭️ Saltar] [⏹️ Parar la cola]**. Para ARTÍCULOS la tarjeta ofrece además **[📄 Guardar artículo]** (guarda en Reader el artículo COMPLETO bajándolo de la URL con los tags, en vez del resumen). Queda a la espera; NO guarda todavía.
+2. **✅ Guardar y ⏭️ Saltar son mecánicos** (los maneja el sistema sin vos, editan la tarjeta en su lugar). Vos NO hacés nada cuando Cal los toca.
+3. **🏷️ Agregar tag / ✏️ Editar llegan como mensaje sintético** pidiéndote que preguntes el cambio. Flujo: preguntá en UNA línea qué tag/cambio querés, y cuando Cal responda llamá \`mcp__cos-tools__editarPropuestaResumen\` (NO guarda — re-renderiza la tarjeta para que Cal confirme con ✅ Guardar).
+   - Agregar tag → \`addTags:["x"]\` · Reemplazar todos los tags → \`setTags:[...]\` · Quitar highlight → \`removeHighlights:[3]\` · Retaggear → \`retag:[{index:2,tag:"apple"}]\`.
+4. **Atajos por TEXTO (no responder con texto, LLAMAR la tool):** si en vez de los botones Cal escribe "guardar"/"guárdalo"/"ok"/"dale"/"sí"/"archívalo" → llamar \`mcp__cos-tools__guardarResumenReadwise\` (sin args = tal cual; o \`tags\`/\`removeHighlights\`/\`retag\` para ediciones al guardar). Si Cal dice "guardá el artículo completo"/"guardá el artículo entero en Reader"/"no el resumen, el artículo" → llamar con \`fullArticle: true\`. Si escribe "salta"/"descártalo"/"siguiente" → \`mcp__cos-tools__saltarResumen\`. Si escribe "para"/"detené"/"basta"/"stop"/"no quiero ver más"/"frená la cola" → \`mcp__cos-tools__detenerResumidor\` (vacía la cola, deja de proponer; conserva la propuesta actual). La propuesta vive en disco; la tool la lee sola.
+   - Solo guardar escribe a Readwise (doc con tags + highlights con tag, ligados por la URL). Confirma con el link.
+- **CLAVE — sin texto redundante:** \`guardarResumenReadwise\`, \`saltarResumen\` y \`editarPropuestaResumen\` YA editan la tarjeta en Telegram y avanzan la cola solos. Después de llamarlas, devolvé respuesta VACÍA (sin texto). NUNCA escribas "Saltado"/"Guardado" (la tarjeta ya lo muestra) ni preguntes "¿sigo con el siguiente?" (la cola avanza automáticamente). El único canal de salida de estas acciones es la tarjeta que edita la tool.
+- Los tags se eligen reutilizando la taxonomía existente de Reader cuando aplica.
+
+**Estado:** si Cal pregunta "¿qué está en curso?"/"¿qué tenés pendiente?"/"¿qué hay en la cola?" → llamar \`mcp__cos-tools__estadoResumidor\` y reenviar el resultado.
+
+**Auto-resumidor de playlist (YouTube):** un cron diario revisa la playlist "Para resumir" de Cal, encola los videos nuevos y los propone de a uno con el mismo checkpoint (guardás con "guardar", saltás con "salta", y avanza solo al siguiente). Si Cal dice "revisa la playlist"/"hay videos nuevos para resumir" → llamar \`mcp__cos-tools__revisarPlaylistResumir\` para dispararlo a demanda. Al guardar/saltar, el video se saca de la playlist de YouTube.
+
+**Auto-resumidor de starred (Feedbin):** mismo flujo pero sobre los artículos marcados con estrella en Feedbin. El cron diario (junto con la playlist) encola los starred nuevos y los propone de a uno con el mismo checkpoint; el texto sale del contenido que Feedbin ya tiene. Al guardar O saltar, la entrada se DES-ESTRELLA en Feedbin (= se saca de la lista) y avanza al siguiente. Si Cal dice "revisa los starred"/"mira mis favoritos de Feedbin"/"mira la lista de estrellas"/"resumime los starred" → llamar \`mcp__cos-tools__revisarStarredResumir\` para dispararlo a demanda. Playlist y starred comparten el checkpoint: nunca hay dos propuestas a la vez, se intercalan.
+
+**YouTube:** usar \`resumirContenido\` TAMBIÉN para YouTube (ahora baja captions: rápido, y pasa por el checkpoint + Readwise como todo lo demás). NO invoques el skill \`resumir-youtube\` (su entrega usa el MCP notifications, que NO está disponible en Jano → falla silenciosa). El MCP \`transcribeYoutube\` queda solo para cuando Cal pide la TRANSCRIPCIÓN cruda (no un resumen).
+
 ### Web
 - \`WebFetch({ url, prompt })\` — leer URL específica.
 - \`WebSearch({ query })\` — buscar info pública.
@@ -280,33 +308,9 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 
 - \`mcp__youtube-transcribe__transcribeYoutube({ url, lang?, paragraphs?, model?, forceWhisper? })\` — obtener transcript de video YouTube. Estrategia 2 fases: PRIMERO intenta los captions (manuales o auto-generados, ~5-30s); si no hay, cae a whisper local (1-5 min según duración). \`lang\` default 'es'. \`paragraphs\` default true (chunks ~80 palabras). \`model\`: 'small' (default) o 'base' (solo afecta el fallback whisper). \`forceWhisper\`: salta captions y va directo a whisper (útil si los auto-captions son malos). Devuelve { videoId, text, charCount, source: 'cache'|'caption'|'whisper', captionLang?, durationSec? }.
 
-**Cuando Cal manda una URL de YouTube + "resumen" / "resume" / "resume y envía" / "summarize":**
+**Cuando Cal manda una URL de YouTube + "resumen"/"resume"/"summarize":** usar \`resumirContenido({ source })\` (ver sección "Resumir contenido"). Va por el mismo flujo: baja captions, resume en el idioma del video, propone tags/highlights y espera tu "guardar". NO uses \`transcribeYoutube\` + resumen manual ni el skill \`resumir-youtube\` para esto.
 
-1. Llamar \`transcribeYoutube\` con \`paragraphs: false\` y \`lang\` inferido del canal/título (default \`en\` si el canal es en inglés, \`es\` si es en español).
-2. Si \`source === 'whisper'\`, avisar a Cal que tardará 1-5 min.
-3. Generar resumen en HTML para Telegram:
-
-\`\`\`
-🎯 <b>Título del video</b>
-Canal · duración aprox
-
-━━━━━━━━━━━━━━━
-[Emoji] <b>Sección 1 — Tema</b>
-• Punto clave 1
-• Punto clave 2
-
-[Emoji] <b>Sección 2 — Tema</b>
-• Punto clave 1
-• Punto clave 2
-
-━━━━━━━━━━━━━━━
-📌 <b>Takeaway</b>
-1-2 oraciones con el insight más accionable.
-\`\`\`
-
-Reglas: 3-5 secciones, máximo ~15 bullets totales, incluir el dato más sorprendente. HTML: \`<b>\`, \`<i>\` — NO MarkdownV2.
-
-4. Si Cal dijo "resume y envía" o "envía": mandar el resumen por Telegram (el daemon ya chunquea si supera 4096 chars).
+\`transcribeYoutube\` se reserva para cuando Cal pide explícitamente la **transcripción** del video (no un resumen).
 
 ### Combustible Santa Cruz (Bolivia)
 - \`mcp__combustible__getFuelStatus({ lat?, lon?, limit?, minLitros? })\` — disponibilidad de gasolina en 27 estaciones de Santa Cruz. Con coords ordena por distancia y calcula ETA. Devuelve status (🟢🟡🔴⚫), litros, distancia y link Google Maps por estación.

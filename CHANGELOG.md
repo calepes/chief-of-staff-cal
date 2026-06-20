@@ -1,5 +1,17 @@
 # CHANGELOG — Jano
 
+## 2026-06-20
+
+### Feature — Resumidor: checkpoint con tarjeta + colas (playlist YouTube + starred Feedbin)
+- **UX rediseñada (sigue skill `telegram-bot-ux`):** la propuesta es una **tarjeta inline** con botones `[✅ Guardar] [🏷️ Agregar tag] [✏️ Editar] [⏭️ Saltar] [⏹️ Parar la cola]` (para artículos, además `[📄 Guardar artículo]`). Guardar/Saltar/Parar/Guardar-artículo + los botones ⭐/🎬 del menú son **callbacks mecánicos** (interceptados en `index.ts`, sin LLM); tag/editar van por LLM. Estado = **un solo mensaje ancla editado por fases** (Revisando→Procesando→Resumiendo→resumen, hilvanando `messageId`). Tras estas tools el LLM devuelve **vacío** (la tarjeta es el único canal). Tools nuevas: `editarPropuestaResumen` (addTags/setTags/removeHighlights/retag sin guardar), `detenerResumidor`, `revisarStarredResumir`.
+- **📄 Guardar artículo completo:** `guardarResumenReadwise({fullArticle:true})` → Reader baja el original desde la URL con los tags (en vez del resumen). `readwise-save.sh` acepta html `-` (sin html → Reader fetchea).
+- **Auto-resumidor de starred de Feedbin:** espejo del de playlist. Cron diario 08:00 (ambos) + on-demand. Contenido desde Feedbin; si viene truncado (<1500 chars) cae a `safari-fetch` (full + paywall). Al guardar/saltar se des-estrella. Colas/seen en `~/.cos-agent/resumir-starred-*.json`.
+- **Borrado de video de playlist YouTube:** al guardar/saltar, `removeVideoFromPlaylist` saca el video (YouTube Data API v3 OAuth, proyecto `jano-youtube`, secrets `YOUTUBE_OAUTH_*` en apps.env; la app DEBE estar "En producción" o el refresh token expira a 7 días).
+- **Menú de Telegram rediseñado:** quitados Briefing/Tareas/Agenda; agregados ⭐ Starred · 🎬 Playlist · 📚 Resumir · 📋 Estado · 🧹 carpetas. Botón persistente "📋 Menú" en el chat.
+- **Resiliencia:** `cleanStalePlaceholders()` al arrancar limpia locks `placeholder` huérfanos (restart a mitad de transcripción ya no deja el resumidor pegado). Anti doble-tap de ✅ Guardar (lock `saving` sincrónico).
+- **Bugs corregidos:** reply keyboard en placeholder rompía `editMessage` ("message can't be edited") → quitado; cleanup fire-and-forget se colaba entre chunks del resumen → plegado en la tarjeta + awaited.
+- **Learnings → skills:** `telegram-bot-ux` anti-patterns #14-17; `sync-agent-docs` gotcha UTF-16 en code blocks.
+
 ## 2026-06-19
 
 ### Ops — Monitor de combustible APAGADO (quemaba el free tier de KV)

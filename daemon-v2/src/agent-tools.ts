@@ -25,6 +25,7 @@ import {
 import { fetchAsUser } from "./tools/fetch-as-user.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
+import { resumirContenido, guardarResumenReadwise, editarPropuestaResumen, revisarPlaylistResumir, revisarStarredResumir, saltarResumen, detenerResumidor, estadoResumidor } from "./tools/resumir.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import {
   searchBooks,
@@ -437,6 +438,120 @@ export function buildSdkTools(deps: ToolDeps) {
           deps.getCurrentChatId(),
           { url, instruction },
         );
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "resumirContenido",
+      "Resumidor universal. Dado un link (artículo incl. paywall/Cloudflare como Stratechery, NYT, FT; video de YouTube; podcast/audio de Apple Podcasts/Overcast/Spotify/link .mp3/RSS) o un TÍTULO de libro, obtiene el contenido con el mecanismo correcto (cookies de Safari de Cal para paywall, yt-dlp+whisper para audio/video, conocimiento propio para libros), genera un resumen DETALLADO en el MISMO idioma del contenido, y lo envía como mensaje(s) nuevo(s) en Telegram. Async/background: responde 'started' al toque y el resumen llega después. " +
+      "Usar esta tool (NO fetchAndSummarize ni WebFetch) cuando Cal comparta un link o título con intención de resumir/analizar/'qué dice'. " +
+      "Spotify puede fallar por DRM (avisa). Para libros que no conozco, lo dice en vez de inventar.",
+      {
+        source: z.string().describe("URL (artículo/YouTube/podcast/mp3/RSS) o título de libro a resumir"),
+        instruction: z.string().optional().describe("Instrucción opcional extra: 'enfócate en X', 'resumen ejecutivo de 200 palabras', etc. Si se omite, resumen detallado estándar."),
+      },
+      async ({ source, instruction }) => {
+        const result = resumirContenido(
+          { botToken: deps.botToken },
+          deps.getCurrentChatId(),
+          { source, instruction },
+        );
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "guardarResumenReadwise",
+      "Paso 2 del resumidor: guarda en Readwise la propuesta pendiente que generó `resumirContenido` (doc con tags + highlights con tag), DESPUÉS de que Cal la confirme o pida cambios. " +
+      "Llamar SOLO cuando Cal responde 'guardar'/'archívalo'/'ok guárdalo' o pide ediciones sobre la propuesta de tags/highlights. " +
+      "Para confirmar tal cual: llamar sin argumentos. Para ediciones: `tags` (lista final que reemplaza los del doc), `removeHighlights` (índices 1-based a quitar), `retag` (cambiar el tag de un highlight por índice 1-based). " +
+      "`fullArticle: true` cuando Cal pide guardar el ARTÍCULO COMPLETO en Reader (no el resumen) — Reader baja el original desde la URL y le aplica los tags (solo aplica a artículos). " +
+      "Si no hay propuesta pendiente, avisa a Cal.",
+      {
+        tags: z.array(z.string()).optional().describe("Lista final de tags del documento (reemplaza la propuesta). Omitir para conservar los propuestos."),
+        removeHighlights: z.array(z.number().int().positive()).optional().describe("Índices 1-based de highlights a eliminar de la propuesta."),
+        retag: z.array(z.object({ index: z.number().int().positive(), tag: z.string() })).optional().describe("Re-taggear highlights: index 1-based + nuevo tag."),
+        fullArticle: z.boolean().optional().describe("true = guardar el artículo COMPLETO en Reader (Reader baja la URL) con los tags, en vez del resumen."),
+      },
+      async ({ tags, removeHighlights, retag, fullArticle }) => {
+        const result = guardarResumenReadwise(
+          { botToken: deps.botToken },
+          deps.getCurrentChatId(),
+          { tags, removeHighlights, retag, fullArticle },
+        );
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "editarPropuestaResumen",
+      "Edita la propuesta de resumen pendiente SIN guardarla y re-renderiza la tarjeta (con botones) en su lugar. Usar cuando Cal toca '🏷️ Agregar tag' o '✏️ Editar' (o lo pide por texto). " +
+      "Args: `addTags` (agrega tags al doc, conservando los existentes), `setTags` (reemplaza TODOS los tags del doc), `removeHighlights` (índices 1-based a quitar), `retag` (cambiar tag de un highlight por índice 1-based). " +
+      "NO guarda en Readwise — después de editar, Cal confirma con '✅ Guardar'. Para guardar usar guardarResumenReadwise.",
+      {
+        addTags: z.array(z.string()).optional().describe("Tags a AGREGAR al documento (además de los actuales)."),
+        setTags: z.array(z.string()).optional().describe("Lista que REEMPLAZA por completo los tags del documento."),
+        removeHighlights: z.array(z.number().int().positive()).optional().describe("Índices 1-based de highlights a eliminar."),
+        retag: z.array(z.object({ index: z.number().int().positive(), tag: z.string() })).optional().describe("Re-taggear highlights: index 1-based + nuevo tag."),
+      },
+      async ({ addTags, setTags, removeHighlights, retag }) => {
+        const result = editarPropuestaResumen(
+          { botToken: deps.botToken },
+          deps.getCurrentChatId(),
+          { addTags, setTags, removeHighlights, retag },
+        );
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "detenerResumidor",
+      "Para la tanda del resumidor: vacía las colas (playlist + starred) y deja de proponer más. Conserva la propuesta ACTUAL (Cal puede guardarla o saltarla). Lo sacado de la cola reaparece si Cal vuelve a 'revisar la playlist/starred'. " +
+      "Llamar cuando Cal dice 'para'/'detené'/'basta'/'stop'/'no quiero ver más'/'frená la cola'. La tool avisa en Telegram; devolvé respuesta VACÍA (sin texto).",
+      {},
+      async () => {
+        const result = detenerResumidor({ botToken: deps.botToken }, deps.getCurrentChatId());
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "estadoResumidor",
+      "Reporta qué hay EN CURSO en el resumidor: la propuesta pendiente (título, si está procesándose o lista para guardar, cuántos tags/highlights), la cola de videos de la playlist y la cola de starred de Feedbin por procesar. Llamar cuando Cal pregunta '¿qué está en curso?'/'¿qué tenés pendiente?'/'¿qué hay en la cola?'/'¿qué estás resumiendo?'. Reenviar el resultado tal cual.",
+      {},
+      async () => {
+        const result = estadoResumidor(deps.getCurrentChatId());
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "saltarResumen",
+      "Descarta la propuesta de resumen pendiente SIN guardarla en Readwise. Llamar cuando Cal dice 'salta'/'salta este'/'descártalo'/'siguiente'/'no lo guardes' sobre una propuesta. Si la propuesta venía del auto-resumidor de playlist o de starred, avanza automáticamente al siguiente (y al item starred igual se le quita la estrella en Feedbin).",
+      {},
+      async () => {
+        const result = saltarResumen({ botToken: deps.botToken }, deps.getCurrentChatId());
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "revisarPlaylistResumir",
+      "Revisa AHORA la(s) playlist(s) de YouTube configurada(s) para resumir, encola los videos nuevos y empieza a proponer el primero (mismo flujo de checkpoint). Llamar cuando Cal dice 'revisa la playlist'/'hay videos nuevos para resumir'/'corre el resumidor de la playlist'. Normalmente corre solo 1×/día por cron; esta tool es para dispararlo a demanda.",
+      {},
+      async () => {
+        const result = revisarPlaylistResumir({ botToken: deps.botToken }, deps.getCurrentChatId());
+        return asText(result);
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "revisarStarredResumir",
+      "Revisa AHORA los artículos marcados con estrella (starred) en Feedbin, encola los nuevos y empieza a proponer el primero (mismo flujo de checkpoint que la playlist). Llamar cuando Cal dice 'revisa los starred'/'mira mis favoritos de Feedbin'/'resumime los starred'/'mira la lista de estrellas'. Al guardar o saltar cada uno, se des-estrella en Feedbin y avanza al siguiente. Normalmente corre solo 1×/día por cron; esta tool es para dispararlo a demanda.",
+      {},
+      async () => {
+        const result = revisarStarredResumir({ botToken: deps.botToken }, deps.getCurrentChatId());
         return asText(result);
       },
       READ_ONLY,

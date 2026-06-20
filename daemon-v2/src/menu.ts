@@ -40,11 +40,6 @@ export function buildMainMenu(): MenuPayload {
     keyboard: {
       inline_keyboard: [
         [
-          { text: "🔮 Briefing", callback_data: "j:brief" },
-          { text: "📋 Tareas", callback_data: "j:tasks" },
-          { text: "📅 Agenda", callback_data: "j:cal" },
-        ],
-        [
           { text: "🏥 Salud", callback_data: "j:health" },
           { text: "💰 Cambio", callback_data: "j:fx" },
           { text: "🚗 Combustible", callback_data: "j:fuel" },
@@ -53,63 +48,26 @@ export function buildMainMenu(): MenuPayload {
           { text: "✈️ Vuelos", callback_data: "j:flights" },
           { text: "⚡ Tokens", callback_data: "j:tokens" },
         ],
-      ],
-    },
-  };
-}
-
-export function buildBriefingMenu(): MenuPayload {
-  return {
-    text: "🔮 <b>Briefing</b> — ¿Qué país?",
-    keyboard: {
-      inline_keyboard: [
         [
-          { text: "🌐 Bolivia", callback_data: "j:brief:bo" },
-          { text: "🇵🇪 Perú", callback_data: "j:brief:pe" },
-          { text: "🌎 Colombia", callback_data: "j:brief:co" },
-        ],
-        [{ text: "← Volver", callback_data: "j:menu" }],
-      ],
-    },
-  };
-}
-
-export function buildTasksMenu(): MenuPayload {
-  return {
-    text: "📋 <b>Tareas</b> — ¿Qué lista?",
-    keyboard: {
-      inline_keyboard: [
-        [
-          { text: "👤 Personal", callback_data: "j:tasks:personal" },
-          { text: "⚡ Vibe", callback_data: "j:tasks:vibe" },
+          { text: "⭐ Starred", callback_data: "j:star" },
+          { text: "🎬 Playlist", callback_data: "j:ytpl" },
+          { text: "📚 Resumir", callback_data: "j:resumir" },
         ],
         [
-          { text: "➕ Nueva", callback_data: "j:tasks:new" },
-          { text: "← Volver", callback_data: "j:menu" },
+          { text: "📋 Estado del resumidor", callback_data: "j:estado" },
         ],
       ],
     },
   };
 }
 
-export function buildAgendaMenu(): MenuPayload {
-  return {
-    text: "📅 <b>Agenda</b> — ¿Qué rango?",
-    keyboard: {
-      inline_keyboard: [
-        [
-          { text: "📅 Hoy", callback_data: "j:cal:today" },
-          { text: "🗓 Esta semana", callback_data: "j:cal:week" },
-        ],
-        [
-          { text: "💼 Outlook", callback_data: "j:cal:outlook" },
-          { text: "➕ Nuevo evento", callback_data: "j:cal:new" },
-        ],
-        [{ text: "← Volver", callback_data: "j:menu" }],
-      ],
-    },
-  };
-}
+// Teclado persistente bajo el campo de texto: un botón "📋 Menú" siempre visible en el chat
+// para abrir el menú principal sin escribir /menu. Se fija adjuntándolo a cualquier sendMessage.
+export const MENU_REPLY_KEYBOARD = {
+  keyboard: [[{ text: "📋 Menú" }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
 
 export function buildHealthMenu(): MenuPayload {
   return {
@@ -184,16 +142,11 @@ function buildFlightsDirMenu(code: string, name: string): MenuPayload {
 // ---------------------------------------------------------------------------
 
 const ACTION_TEXT: Record<string, string> = {
-  "j:brief:bo": "Genera el briefing para Bolivia",
-  "j:brief:pe": "Genera el briefing para Perú",
-  "j:brief:co": "Genera el briefing para Colombia",
-  "j:tasks:personal": "Muéstrame mis tareas personales",
-  "j:tasks:vibe": "Muéstrame los Vibe Projects",
-  "j:tasks:new": "Quiero agregar una nueva tarea",
-  "j:cal:today": "¿Qué tengo en el calendario hoy?",
-  "j:cal:week": "¿Qué tengo esta semana en el calendario?",
-  "j:cal:outlook": "¿Qué reuniones tengo en Outlook?",
-  "j:cal:new": "Quiero crear un nuevo evento en el calendario",
+  // j:star y j:ytpl son MECÁNICOS (se interceptan en index.ts y editan el mensaje tocado como ancla).
+  "j:resumir": "Quiero resumir un link o título de libro; pídeme cuál es.",
+  "j:estado": "Dame el estado del resumidor: qué hay en curso y en cola (playlist y starred).",
+  "j:resu:tag": "Quiero agregar uno o más tags al resumen pendiente ANTES de guardar. Preguntame en una línea qué tag(s) agregar; cuando responda, llamá mcp__cos-tools__editarPropuestaResumen con addTags. NO guardes todavía.",
+  "j:resu:edit": "Quiero editar los highlights o tags del resumen pendiente. Preguntame en una línea qué cambiar; usá mcp__cos-tools__editarPropuestaResumen (setTags / removeHighlights / retag). NO guardes hasta que confirme.",
   "j:health:sum": "Dame un resumen de mi salud",
   "j:health:trend": "Muéstrame la tendencia de mi salud",
   "j:health:work": "Muéstrame mis workouts recientes",
@@ -219,9 +172,6 @@ const ACTION_TEXT: Record<string, string> = {
 // Callbacks de navegación pura (solo editan el mensaje, sin LLM)
 const NAV_MENUS: Record<string, () => MenuPayload> = {
   "j:menu": buildMainMenu,
-  "j:brief": buildBriefingMenu,
-  "j:tasks": buildTasksMenu,
-  "j:cal": buildAgendaMenu,
   "j:health": buildHealthMenu,
   "j:fx": buildCambioMenu,
   "j:flights": buildFlightsMenu,

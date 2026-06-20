@@ -19,6 +19,7 @@ import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, ans
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
+import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor } from "./tools/resumir.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
@@ -442,6 +443,39 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
       return;
     }
 
+    // Checkpoint del resumidor: ✅ Guardar / 📄 Guardar artículo / ⏭️ Saltar / ⏹️ Parar → mecánico (sin LLM, edita la tarjeta).
+    if (cb.data === "j:resu:save" || cb.data === "j:resu:savefull" || cb.data === "j:resu:skip" || cb.data === "j:resu:stop") {
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id);
+      const rchat = cb.message?.chat.id;
+      if (rchat != null) {
+        const rdeps = { botToken: env.COS_TELEGRAM_BOT_TOKEN };
+        if (cb.data === "j:resu:save") guardarResumenReadwise(rdeps, rchat, {});
+        else if (cb.data === "j:resu:savefull") guardarResumenReadwise(rdeps, rchat, { fullArticle: true });
+        else if (cb.data === "j:resu:skip") saltarResumen(rdeps, rchat);
+        else detenerResumidor(rdeps, rchat);
+      }
+      return;
+    }
+
+    // ⭐ Revisar starred / 🎬 Revisar playlist → mecánico: edita el MISMO mensaje tocado como
+    // ancla de estado (Revisando → Procesando → Resumiendo → resumen). Un solo mensaje, sin LLM.
+    if (cb.data === "j:star" || cb.data === "j:ytpl") {
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id);
+      const rchat = cb.message?.chat.id;
+      const anchorId = cb.message?.message_id;
+      if (rchat != null && anchorId != null) {
+        const rdeps = { botToken: env.COS_TELEGRAM_BOT_TOKEN };
+        if (cb.data === "j:star") {
+          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, rchat, anchorId, "⭐ Revisando los starred de Feedbin...", "HTML").catch(() => {});
+          void checkStarredResumir(rdeps, rchat, anchorId);
+        } else {
+          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, rchat, anchorId, "🎬 Revisando la playlist de YouTube...", "HTML").catch(() => {});
+          void checkPlaylistsResumir(rdeps, rchat, anchorId);
+        }
+      }
+      return;
+    }
+
     // Menú interactivo Jano: callbacks con prefijo "j:" se manejan sin LLM
     // (navegación) o con mensaje sintético en lenguaje natural (acciones).
     if (cb.data?.startsWith("j:")) {
@@ -520,8 +554,8 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     return;
   }
 
-  // /menu command — envía menú principal interactivo
-  if (text && text.trim().toLowerCase() === "/menu") {
+  // /menu o el botón persistente "📋 Menú" del chat → envía el menú principal interactivo.
+  if (text && ["/menu", "menu", "menú", "📋 menú", "📋 menu"].includes(text.trim().toLowerCase())) {
     const menu = buildMainMenu();
     await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
       chatId,
@@ -548,6 +582,9 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         : "⏳ Pensando...";
   const placeholderMsgId: number = opts?.existingPlaceholderId != null
     ? opts.existingPlaceholderId
+    // OJO: NO adjuntar reply keyboard acá — Telegram no permite editMessageText sobre un mensaje
+    // con ReplyKeyboardMarkup → "message can't be edited" y el turno falla. El teclado persistente
+    // "📋 Menú" se fija una sola vez con un mensaje aparte (no editado) y persiste server-side.
     : (await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: initialPlaceholder })).message_id;
 
   let voiceTranscript: string | undefined;
@@ -736,7 +773,11 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
               await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML");
             } catch (parseErr) {
               log({ msg: "html_parse_failed", err: String(parseErr) });
-              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null);
+              // Fallback: reintentar sin HTML; si el mensaje tampoco se puede editar (p.ej. tiene
+              // reply keyboard o fue borrado), entregar como mensaje nuevo en vez de romper el turno.
+              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null).catch(() =>
+                sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk }).catch(() => {}),
+              );
             }
           } else {
             try {
@@ -813,6 +854,17 @@ function scheduleWebhookWatchdog(): void {
   log({ msg: "webhook_watchdog_scheduled", interval: "1min" });
 }
 
+function scheduleResumirPlaylist(): void {
+  cron.schedule("0 8 * * *", () => {
+    // Playlist primero (drena su cola), luego starred — comparten el slot de propuesta.
+    void (async () => {
+      await checkPlaylistsResumir({ botToken: env.COS_TELEGRAM_BOT_TOKEN }, ALERT_CHAT_ID);
+      await checkStarredResumir({ botToken: env.COS_TELEGRAM_BOT_TOKEN }, ALERT_CHAT_ID);
+    })();
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "resumir_playlist_scheduled", interval: "daily 08:00" });
+}
+
 function scheduleFlightCheckin(): void {
   cron.schedule("0,30 7-22 * * *", () => {
     void checkFlightCheckin({
@@ -873,6 +925,12 @@ async function loop(): Promise<void> {
   });
 
   scheduleWebhookWatchdog();
+  // Resiliencia: limpiar locks de propuesta huérfanos que dejó un restart a mitad de un resumen.
+  const staleCleaned = cleanStalePlaceholders();
+  if (staleCleaned > 0) log({ msg: "resumir_stale_placeholders_cleaned", count: staleCleaned });
+  // Auto-resumidor de playlist de YouTube — ACTIVADO 2026-06-20 (Cal opt-in): 1×/día revisa la
+  // playlist "Para resumir", encola videos nuevos y los propone de a uno con checkpoint.
+  scheduleResumirPlaylist();
   // Proactividad DESACTIVADA 2026-06-17 — Cal va a repensar los flujos proactivos.
   // Jano queda 100% reactivo (solo webhook watchdog, que es infra necesaria).
   // Reactivar: descomentar la línea correspondiente + rebuild + restart.

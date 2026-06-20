@@ -75,6 +75,17 @@ export const DISALLOWED_BUILTINS: string[] = [
 export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Skills globales (vuelos-bolivia, telegram-bot-ux, briefing-pais)
   "Skill",
+  // Resumidor universal — link (artículo/paywall, YouTube, podcast/audio) o título de libro.
+  // Reutiliza los scripts del skill `resumir` vía spawn (sin Bash). Lee cookies de Safari
+  // con ~/.claude/bin/node-fda (requiere Full Disk Access en ese binario).
+  "mcp__cos-tools__resumirContenido",
+  "mcp__cos-tools__guardarResumenReadwise",
+  "mcp__cos-tools__editarPropuestaResumen",
+  "mcp__cos-tools__saltarResumen",
+  "mcp__cos-tools__detenerResumidor",
+  "mcp__cos-tools__revisarPlaylistResumir",
+  "mcp__cos-tools__revisarStarredResumir",
+  "mcp__cos-tools__estadoResumidor",
   // Web — briefings país, links de Notion/GCal, búsquedas
   "WebFetch",
   "WebSearch",
@@ -125,6 +136,13 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__feedbin__markTagRead",
   "mcp__feedbin__getReadEntriesByFeed",
   "mcp__feedbin__getReadEntriesByTag",
+  "mcp__feedbin__getStarredEntries",
+  "mcp__feedbin__starEntries",
+  "mcp__feedbin__unstarEntries",
+  "mcp__feedbin__createTagging",
+  "mcp__feedbin__deleteTagging",
+  "mcp__feedbin__renameTag",
+  "mcp__feedbin__deleteTag",
   // Apple Health — métricas diarias, tendencias, workouts (migrado de custom tools a MCP)
   "mcp__health__getHealthSummary",
   "mcp__health__getHealthTrend",
