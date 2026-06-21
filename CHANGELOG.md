@@ -1,5 +1,15 @@
 # CHANGELOG — Jano
 
+## 2026-06-21
+
+### Feature — Enviar adjuntos de Notion por Telegram (`enviarArchivoNotion`)
+
+- **Feature**: Jano ahora envía el archivo REAL (PDF/imagen) adjunto a una página de Notion como documento/foto en el chat, en vez de decir "no puedo enviar el adjunto interno". Reusa el patrón de Pecunia (`sendComprobante`): tool agéntica + envío por URL remota (Telegram descarga server-side).
+- **Helpers**: `sendPhoto`/`sendDocument` agregados a `shared-v2/src/telegram.ts` (POST JSON, parse_mode HTML, retornan `{ message_id }`).
+- **Módulo** `daemon-v2/src/tools/notion-files.ts` (**compartido con Vesta**, igual que `schedule-cal.ts` — al tocarlo copiar a ambos y rebuildar): `collectAttachments` (puro, resuelve propiedades tipo `files` + bloques `pdf`/`file`/`image`, dedup por url) + `fetchNotionAttachments` (I/O vía `callNtn`, resuelve URL fresca al momento de enviar para evitar expiración de las firmas S3 de Notion). Tests en `notion-files.test.ts` (6).
+- **Tool** `enviarArchivoNotion({ pageId, caption? })` en `agent-tools.ts` (prefijo `mcp__cos-tools__`): decide foto vs documento, caption (escapado HTML) solo en el primero, usa `deps.botToken` + `deps.getCurrentChatId()`. Devuelve `{ status: sent|empty|send_failed|error }`. Progreso "📤 Enviando archivo…" en `agent.ts`; instrucción en `system-prompt.ts`.
+- **Decisiones**: solo `jpg/png/gif/webp` van como foto (SVG/HEIC/HEIF/BMP → documento, Telegram los rechaza por URL); NO usa el MCP `notifications` (enviaría desde otro bot, fuera del hilo). Límite Telegram por URL: 20 MB doc / 5 MB foto.
+
 ## 2026-06-20
 
 ### Feature — Resumidor: checkpoint con tarjeta + colas (playlist YouTube + starred Feedbin)
