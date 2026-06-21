@@ -2,8 +2,9 @@ import { createRequire } from "node:module";
 import { callNtn } from "../shared/ntn.js";
 
 const require = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const PDFParse: any = require("pdf-parse");
+const { PDFParse } = require("pdf-parse") as {
+  PDFParse: new (opts: { data: Uint8Array }) => { getText(): Promise<{ text: string }> };
+};
 
 export const SCHEDULE_CAL_DS = "f66c31e7-a4c1-4b6e-9f65-c28ecaf50ce3";
 
@@ -219,8 +220,9 @@ async function extractPdfUrl(url: string): Promise<string> {
     const res = await fetch(url);
     if (!res.ok) return "[PDF — error al descargar]";
     const buf = await res.arrayBuffer();
-    const parsed = await new PDFParse({ data: new Uint8Array(buf) });
-    const fullText = (parsed.text as string).trim();
+    const parser = new PDFParse({ data: new Uint8Array(buf) });
+    const parsed = await parser.getText();
+    const fullText = parsed.text.trim();
     if (!fullText) return "[PDF sin texto extraíble]";
     return await summarizeTextWithLlm(fullText);
   } catch {

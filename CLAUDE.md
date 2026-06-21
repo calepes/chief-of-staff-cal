@@ -67,7 +67,7 @@ Fuente: `daemon-v2/src/index.ts`.
 - **`ntn api` query:** usar `/v1/data_sources/{ds_id}/query`, NO `/v1/databases/{id}/query` (devuelve 400). El `data_source_id` ≠ `db_id`.
 - **SDK librería NO lee `~/.claude/.mcp.json`:** registrar MCPs custom en `BASE_OPTIONS.mcpServers` (`daemon-v2/src/index.ts`). Sin esto: "permissions not granted".
 - **Formato Telegram = HTML:** parse mode HTML, escapar solo `< > &`. NO MarkdownV2. `sanitizeForTelegram()` convierte Markdown rezagado. Detalle en `system-prompt.ts`.
-- **PDF/DOCX:** `processDocument()` en `index.ts` (pdf-parse v2 / mammoth), trunca a 50K.
+- **PDF/DOCX:** `processDocument()` en `index.ts` (pdf-parse v2 / mammoth), trunca a 50K. API pdf-parse v2: `const { PDFParse } = require("pdf-parse")` (named export, NO la clase directa) → `new PDFParse({data}).getText()` → `.text`. Mismo patrón obligatorio en `tools/schedule-cal.ts` (`extractPdfUrl`, PDFs de Notion) — archivo compartido con Vesta; al tocarlo copiar a ambos y rebuildar. Bug histórico (fix 2026-06-21): require sin destructurar + `parsed.text` sin `.getText()` → TypeError enmascarado como `"[PDF — error al procesar]"`.
 - **SNI filtering bloquea Telegram** en algunas redes (WiFi guest/hoteles): "Connection reset" en TLS. Daemon arranca pero el bot queda mudo. Diagnóstico: `curl -s https://api.telegram.org/bot$TOKEN/getMe` vacío mientras google.com funciona. Fix: cambiar red.
 - **Debug estado launchd:** `launchctl print gui/$(id -u)/com.cal.cos-agent-v2` (más útil que `launchctl list | grep`).
 - **`reminders` con pantalla bloqueada cuelga** (espera TCC). En procesos sin sesión: `timeout 30s reminders ...`.
