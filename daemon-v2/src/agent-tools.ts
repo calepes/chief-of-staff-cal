@@ -83,6 +83,8 @@ import {
   listVacaciones,
   getVacacionDetail,
 } from "./tools/schedule-cal.js";
+import { fetchNotionAttachments } from "./tools/notion-files.js";
+import { sendPhoto, sendDocument, sendChatAction } from "@cos/shared";
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
 
@@ -281,6 +283,49 @@ export function buildSdkTools(deps: ToolDeps) {
         } catch (err) {
           return asText({ error: String(err) });
         }
+      },
+    ),
+    tool(
+      "enviarArchivoNotion",
+      [
+        "Envía al chat de Telegram el/los archivo(s) adjunto(s) de una página de Notion (PDF, imagen u otro).",
+        "Args: { pageId: string (id de la página de Notion que contiene el adjunto), caption?: string (texto corto, solo va en el primer archivo, sin HTML) }.",
+        "Lee las propiedades tipo 'files' y los bloques pdf/file/image de la página y MANDA cada archivo directo al chat — NO devuelvas URLs de Notion (expiran).",
+        "Después de invocar esta tool NO repitas links ni describas el adjunto: ya se envió. Responde solo una frase corta tipo '📎 Te envié el PDF' (o el error si status != sent).",
+        "status: 'sent' (count enviados) · 'empty' (la página no tiene adjuntos) · 'send_failed'/'error'.",
+      ].join(" "),
+      {
+        pageId: z.string(),
+        caption: z.string().optional(),
+      },
+      async ({ pageId, caption }) => {
+        const chatId = deps.getCurrentChatId?.();
+        const token = deps.botToken;
+        if (!chatId || !token) return asText({ status: "error", error: "No chatId/token disponible" });
+
+        const { attachments, error } = fetchNotionAttachments(pageId);
+        if (error) return asText({ status: "error", error });
+        if (!attachments || attachments.length === 0) return asText({ status: "empty", pageId });
+
+        let sent = 0;
+        const errors: string[] = [];
+        for (let i = 0; i < attachments.length; i++) {
+          const att = attachments[i];
+          const extra = i === 0 && caption
+            ? { caption: caption.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+            : {};
+          try {
+            await sendChatAction(token, chatId, att.isImage ? "upload_photo" : "upload_document").catch(() => {});
+            if (att.isImage) await sendPhoto(token, chatId, att.url, extra);
+            else await sendDocument(token, chatId, att.url, extra);
+            sent++;
+          } catch (err) {
+            errors.push(String(err));
+          }
+        }
+
+        if (sent === 0) return asText({ status: "send_failed", total: attachments.length, errors });
+        return asText({ status: "sent", count: sent });
       },
     ),
     tool(

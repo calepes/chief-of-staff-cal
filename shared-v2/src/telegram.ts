@@ -89,6 +89,46 @@ export async function sendChatAction(token: string, chatId: number | string, act
   }
 }
 
+/**
+ * Envía una foto al chat. `photo` puede ser una URL HTTPS (Telegram la descarga
+ * server-side al enviar), un file_id, o InputFile. Caption soporta HTML.
+ */
+export async function sendPhoto(
+  token: string,
+  chatId: number | string,
+  photo: string,
+  extra: Record<string, unknown> = {},
+): Promise<{ message_id: number }> {
+  const res = await fetch(`${TG_API}/bot${token}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, photo, parse_mode: "HTML", ...extra }),
+  });
+  const data = (await res.json()) as { ok: boolean; result?: { message_id: number }; description?: string };
+  if (!data.ok || !data.result) throw new Error(`sendPhoto failed: ${data.description ?? "unknown"}`);
+  return { message_id: data.result.message_id };
+}
+
+/**
+ * Envía un documento/archivo al chat. `document` puede ser una URL HTTPS, file_id,
+ * o InputFile. Para PDFs y adjuntos no-imagen.
+ */
+export async function sendDocument(
+  token: string,
+  chatId: number | string,
+  document: string,
+  extra: Record<string, unknown> = {},
+): Promise<{ message_id: number }> {
+  const res = await fetch(`${TG_API}/bot${token}/sendDocument`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, document, parse_mode: "HTML", ...extra }),
+  });
+  const data = (await res.json()) as { ok: boolean; result?: { message_id: number }; description?: string };
+  if (!data.ok || !data.result) throw new Error(`sendDocument failed: ${data.description ?? "unknown"}`);
+  return { message_id: data.result.message_id };
+}
+
 export function escapeMarkdownV2(s: string): string {
   return s.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
 }

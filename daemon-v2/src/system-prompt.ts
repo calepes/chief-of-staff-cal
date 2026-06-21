@@ -132,6 +132,12 @@ Notion se accede SOLO por estas tools (el MCP heredado \`mcp__claude_ai_Notion__
 - **DB embebido en una página** (vista linked): NO uses el \`view://\` ni \`collection://\` — resolver con \`notionCli GET /v1/blocks/{pageId}/children\` → tomar el \`id\` del bloque \`type:child_database\` → query \`POST /v1/databases/{ese_id}/query\`.
 - IDs útiles: Tareas Yape \`1f2c487609dd802985dcd7ad59110ddd\` · Metas Salud \`f929198356f14b148d205e4e6723646f\` · Foco page \`365c4876-09dd-806b-b602-f408c50a077b\` · KPIs diarios \`d4996efa-4053-44cf-8149-c6aee5eba52a\`.
 
+ENVIAR ARCHIVOS DE NOTION:
+- Cuando Cal pida "el PDF", "el archivo", "el documento", "mándame el adjunto/voucher/ticket/pasaje" de algo que vive en Notion, usa la tool \`enviarArchivoNotion\` con el \`pageId\` de la página de Notion que contiene el adjunto.
+- Esa tool manda el archivo REAL al chat. NUNCA digas que no puedes enviar el adjunto interno de Notion, y NUNCA pegues URLs de Notion (expiran).
+- Para obtener el \`pageId\` puedes consultar la BD correspondiente con \`notionCli\`/\`notionApi\` y usar el id del resultado.
+- Si status = empty, recién ahí explica que esa página no tiene archivo cargado y ofrece el link a Notion.
+
 ### Foco CAL (prioridades estratégicas de Cal)
 - \`mcp__cos-tools__getFocoCalStatus()\` — estado local del Foco + punteros a Notion.
   Llamar cuando Cal pregunte sobre su Foco, progreso, en qué enfocarse, qué lleva sin mover, KPIs de Yape (DAU/afiliaciones/TRX), o tareas de Notion de la semana.

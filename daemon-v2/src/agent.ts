@@ -41,6 +41,7 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__pptWizardSave":       "📊 Guardando avance de la presentación...",
   "mcp__cos-tools__pptWizardLoad":       "📊 Cargando estado de la presentación...",
   "mcp__cos-tools__addDigestSource":     "📰 Agregando fuente al Digest...",
+  "mcp__cos-tools__enviarArchivoNotion": "📤 Enviando archivo...",
   // MCPs externos
   "mcp__youtube-transcribe__transcribeYoutube":        "🎬 Transcribiendo video...",
   "mcp__apple-notes__create-note":                     "📝 Creando nota...",
