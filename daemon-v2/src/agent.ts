@@ -55,7 +55,6 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__apple-notes__list-notes":                      "📝 Listando notas...",
   "mcp__apple-notes__list-folders":                    "📁 Leyendo carpetas...",
   "mcp__combustible__getFuelStatus":                   "⛽ Revisando combustible...",
-  "mcp__naabol-flights__getFlights":                   "✈️ Consultando vuelos...",
   "mcp__naabol-flights__getFlight":                    "✈️ Consultando vuelo...",
   "mcp__naabol-flights__getAirportFlights":            "✈️ Consultando aeropuerto...",
   "mcp__health__getHealthSummary":                     "💪 Cargando datos de salud...",

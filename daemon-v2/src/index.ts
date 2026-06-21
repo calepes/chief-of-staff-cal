@@ -176,8 +176,6 @@ const YT_TRANSCRIBE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
 const EXCHANGE_RATE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
-const NAABOL_FLIGHTS_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/naabol-flights/dist/index.js";
 const MCP_REMOTE = "/Users/calepes/.npm-global/bin/mcp-remote";
 const HEALTH_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
@@ -215,10 +213,14 @@ const BASE_OPTIONS: Options = {
       command: "node",
       args: [EXCHANGE_RATE_DIST],
     },
+    // Vía worker CF (mcp-remote), NO el stdio local: el CLI local usa Node fetch (undici)
+    // que se cuelga ~8s contra fids.naabol.gob.bo desde la red de Cal (curl al mismo host
+    // responde en ~0.2s) → devolvía total:0 "operation aborted". El worker corre el fetch
+    // desde el edge CF, donde sí responde. Mismo patrón que feedbin. (Diag 2026-06-21.)
     "naabol-flights": {
       type: "stdio",
-      command: "node",
-      args: [NAABOL_FLIGHTS_DIST],
+      command: MCP_REMOTE,
+      args: ["https://mcp-naabol-flights.carlos-cb4.workers.dev/mcp"],
     },
     "feedbin": {
       type: "stdio",

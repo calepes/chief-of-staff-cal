@@ -4,13 +4,12 @@
  * Consumidores: Jano daemon-v2, Vesta daemon-v2.
  *
  * Scope: aplica al formato de getAirportFlights (listado masivo).
- * No afecta la consulta de vuelo individual (getFlight / getFlights).
+ * No afecta la consulta de vuelo individual (getFlight).
  */
 export const VUELOS_NAABOL_INSTRUCTIONS = `\
 ### Vuelos NAABOL (Bolivia)
 Para CUALQUIER pregunta sobre estado/gate/hora/retraso de vuelos en aeropuertos bolivianos, usar las tools nativas del MCP \`naabol-flights\` (NO el skill, NO ToolSearch). Cobertura: 12 aeropuertos NAABOL (VVI, LPB, CBB, TJA, SRE, ORU, UYU, CIJ, RIB, RBQ, TDD, GYA). Aerolíneas: OB BoA, EO Ecojet, Z8 Amaszonas, LA Latam, H2 Sky, AV Avianca, CM Copa, AA American, UA United, IB Iberia.
-- \`mcp__naabol-flights__getFlight({ vuelo, aeropuerto?, tipo? })\` — un solo vuelo. Acepta variantes: "OB659", "BOA 659", "vuelo 659 de boa", "el 659".
-- \`mcp__naabol-flights__getFlights({ queries: [...] })\` — múltiples vuelos en una llamada (eficiente cuando comparten aeropuerto+tipo).
+- \`mcp__naabol-flights__getFlight({ vuelo, aeropuerto?, tipo? })\` — un solo vuelo. Acepta variantes: "OB659", "BOA 659", "vuelo 659 de boa", "el 659". Para varios vuelos, llamala una vez por cada uno.
 - \`mcp__naabol-flights__getAirportFlights({ aeropuerto, tipo?, horaDesde?, horaHasta?, aerolinea? })\` — consulta ABIERTA cuando NO sabés el código. Ej: "¿qué vuelos salen de VVI a la mañana?". Mapeo "mañana" → 06:00-12:00, "tarde" → 13:00-19:00, "noche" → 19:00-23:59.
 - Tipo: \`S\` salida, \`L\` llegada. Si ambiguo, omitir.
 - **REGLA OBLIGATORIA — usar SIEMPRE los datos de \`matches[]\`:** si el response trae \`matches\` con items (o \`resultados[].matches\`), DEBES mostrar \`gate\`, \`horaProgramada\`, \`estado\`, \`ruta\` con sus valores literales. PROHIBIDO decir "no puedo confirmar gate", "no puedo confirmar delays", "endpoint caído", "estado en tiempo real offline" o cualquier variante de "no puedo verificar" cuando hay matches. La \`nota\` del response es metadata interna — NO la repitas al usuario, NO editorializes sobre estado offline. Si \`gate\` viene poblado en \`matches[].gate\`, responde "Gate: <valor>". Si \`estado\` viene poblado, responde con ese estado. Punto.

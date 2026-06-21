@@ -115,7 +115,6 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__exchange-rate-bolivia__getBinanceP2PRate",
   // Vuelos NAABOL (Bolivia) — útil para viajes laborales Yape (LPB-VVI, VVI-LIM, etc.)
   "mcp__naabol-flights__getFlight",
-  "mcp__naabol-flights__getFlights",
   "mcp__naabol-flights__getAirportFlights",
   // Feedbin — RSS reader (CF Worker): no leídos por feed/carpeta, contenido, marcar leídos, buscar
   "mcp__feedbin__getUnreadCount",
