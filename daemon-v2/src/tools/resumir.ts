@@ -227,7 +227,7 @@ function buildPrompt(kind: Kind, label: string, text: string, instruction?: stri
 
   const meta =
     `\n\nDESPUÉS del resumen completo, escribe en una línea nueva EXACTAMENTE el separador ===RESUMIR-META=== y debajo un ÚNICO objeto JSON (sin code fences, sin texto adicional) con esta forma:\n` +
-    `{"tags":["3-5 tags temáticos del contenido"],"highlights":[{"text":"cita textual o idea clave (literal del contenido cuando se pueda)","tag":"un-tag"}]}\n` +
+    `{"title":"título corto y descriptivo del contenido, ≤80 chars, en el idioma del contenido (NO 'Resumen de...')","tags":["3-5 tags temáticos del contenido"],"highlights":[{"text":"cita textual o idea clave (literal del contenido cuando se pueda)","tag":"un-tag"}]}\n` +
     `Incluí entre 5 y 8 highlights, los MÁS importantes. Textos de highlights en el idioma del contenido. Nada después del JSON.` +
     tagHint;
 
@@ -249,18 +249,20 @@ function buildPrompt(kind: Kind, label: string, text: string, instruction?: stri
 }
 
 // Separa el output del subprocess en: resumen markdown + metadata (tags + highlights).
-function splitMeta(raw: string): { md: string; tags: string[]; highlights: Array<{ text: string; tag?: string }> } {
+function splitMeta(raw: string): { md: string; title: string; tags: string[]; highlights: Array<{ text: string; tag?: string }> } {
   const SEP = "===RESUMIR-META===";
   const idx = raw.indexOf(SEP);
-  if (idx === -1) return { md: raw.trim(), tags: [], highlights: [] };
+  if (idx === -1) return { md: raw.trim(), title: "", tags: [], highlights: [] };
   const md = raw.slice(0, idx).trim();
   const rest = raw.slice(idx + SEP.length).trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
   const m = rest.match(/\{[\s\S]*\}/);
+  let title = "";
   let tags: string[] = [];
   let highlights: Array<{ text: string; tag?: string }> = [];
   if (m) {
     try {
-      const parsed = JSON.parse(m[0]) as { tags?: unknown; highlights?: unknown };
+      const parsed = JSON.parse(m[0]) as { title?: unknown; tags?: unknown; highlights?: unknown };
+      if (typeof parsed.title === "string") title = parsed.title.trim();
       if (Array.isArray(parsed.tags)) {
         tags = parsed.tags.filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim());
       }
@@ -271,16 +273,19 @@ function splitMeta(raw: string): { md: string; tags: string[]; highlights: Array
       }
     } catch { /* sin meta válida → seguir sin tags/highlights */ }
   }
-  return { md, tags, highlights };
+  return { md, title, tags, highlights };
 }
 
-function deriveTitle(kind: Kind, source: string, text: string, explicitTitle: string): string {
+function deriveTitle(kind: Kind, source: string, text: string, explicitTitle: string, metaTitle: string): string {
   if (explicitTitle.trim()) return explicitTitle.trim().slice(0, 160);
   if (kind === "book") return source.slice(0, 140);
   if (kind === "article") {
     const first = text.split("\n").map((s) => s.trim()).find(Boolean);
     if (first) return first.slice(0, 140);
   }
+  // Video/podcast sin título de la fuente (ej. podcast no-YouTube): el LLM propone uno en el meta,
+  // mucho mejor que caer al hostname ("Resumen — overcast.fm").
+  if (metaTitle.trim()) return metaTitle.trim().slice(0, 140);
   try { return `Resumen — ${new URL(source).hostname.replace(/^www\./, "")}`; } catch { return "Resumen"; }
 }
 
@@ -535,7 +540,7 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
   await typing();
   const existingTags = await fetchReaderTags();
   const raw = await summarize(buildPrompt(kind, args.source, text, args.instruction, existingTags));
-  const { md, tags, highlights } = splitMeta(raw);
+  const { md, title: metaTitle, tags, highlights } = splitMeta(raw);
 
   // ¿Cal pidió parar mientras resumíamos? Abortar antes de mostrar la tarjeta de propuesta.
   if (await bailIfCancelled()) return;
@@ -550,7 +555,7 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
 
   // Checkpoint: tarjeta de propuesta con botones (mensaje nuevo). NO escribe a Readwise hasta confirmar.
   const proposal: PendingProposal = {
-    title: deriveTitle(kind, args.source, text, docTitle),
+    title: deriveTitle(kind, args.source, text, docTitle, metaTitle),
     url: /^https?:\/\//i.test(args.source) ? args.source : "",
     kind,
     html: mdToHtml(md),
