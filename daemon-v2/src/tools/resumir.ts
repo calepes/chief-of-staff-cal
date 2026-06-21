@@ -54,6 +54,7 @@ interface PendingProposal {
   fromPlaylist?: boolean; // si la propuesta vino del auto-resumidor de playlist → auto-avanzar al guardar/saltar
   fromStarred?: boolean;  // si vino del auto-resumidor de starred de Feedbin → al cerrar, des-estrellar + auto-avanzar
   feedbinId?: number;     // id de la entrada de Feedbin (para des-estrellar al guardar/saltar)
+  videoId?: string;       // id del video de YouTube (para quitarlo de 'seen' al cancelar y dejarlo para después)
   messageId?: number;     // id del mensaje-tarjeta de la propuesta (para editarlo en su lugar: guardar/saltar/editar)
   placeholder?: boolean;  // lock: reserva el slot mientras run() transcribe/resume (anti-carrera)
   saving?: boolean;       // lock sincrónico: guardado en curso (anti doble-tap de ✅ Guardar)
@@ -64,9 +65,15 @@ interface RunOpts {
   fromPlaylist?: boolean;
   fromStarred?: boolean;
   feedbinId?: number;
+  videoId?: string;      // id del video de YouTube (playlist) → para rescatarlo de 'seen' si se cancela en curso
   prefetched?: { text: string; title: string }; // texto ya obtenido (starred: contenido de Feedbin)
   anchorMsgId?: number;  // mensaje ancla a editar por fases (la cola lo crea; si falta, run() lo crea)
 }
+
+// Cancelación en curso: cuando Cal toca "⏹️ Parar" mientras el siguiente ítem se está
+// resumiendo, runDetener marca el chatId acá; run() lo detecta en sus checkpoints y aborta
+// el ítem en curso (lo deja para después). En memoria: el daemon es un único proceso.
+const cancelRequested = new Set<number>();
 
 // Ediciones sobre la propuesta pendiente SIN guardar (botones 🏷️ Agregar tag / ✏️ Editar).
 export interface EditarPropuestaArgs {
@@ -353,6 +360,12 @@ function buildCardKeyboard(kind: Kind): unknown {
   return { inline_keyboard: [saveRow, secondRow, lastRow] };
 }
 
+// Mini-teclado de un solo botón para los mensajes de progreso del siguiente ítem de la cola.
+// Telegram quita el reply_markup en cada edición sin teclado, así que se re-pasa en cada fase.
+function stopKeyboard(): unknown {
+  return { inline_keyboard: [[{ text: "⏹️ Parar la cola", callback_data: "j:resu:stop" }]] };
+}
+
 function buildProposalCard(proposal: PendingProposal): { text: string; keyboard: unknown } {
   const tags = proposal.tags ?? [];
   const highlights = proposal.highlights ?? [];
@@ -441,9 +454,35 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
   const typing = () => sendChatAction(botToken, chatId, "typing").catch(() => {});
   let anchorId = opts.anchorMsgId;
   // Un solo mensaje ancla editado por fases (en vez de varios mensajes sueltos). Si no hay, lo crea.
-  const setAnchor = async (text: string): Promise<void> => {
-    anchorId = await setCardMessage(botToken, chatId, anchorId, text);
+  const setAnchor = async (text: string, keyboard?: unknown): Promise<void> => {
+    anchorId = await setCardMessage(botToken, chatId, anchorId, text, keyboard);
   };
+  // Ítems que vienen de una cola: llevan el botón "⏹️ Parar la cola" en cada fase de progreso,
+  // para poder frenar sin esperar a que termine de resumirse el siguiente.
+  const fromQueue = !!(opts.fromPlaylist || opts.fromStarred);
+  const progressKb = fromQueue ? stopKeyboard() : undefined;
+  // Aborta el ítem en curso si Cal tocó "⏹️ Parar" mientras se procesaba: borra el lock, lo saca
+  // de 'seen' (para que reaparezca al "revisar"), NO lo des-estrella / NO lo saca de la playlist.
+  const bailIfCancelled = async (): Promise<boolean> => {
+    if (!fromQueue || !cancelRequested.has(chatId)) return false;
+    cancelRequested.delete(chatId);
+    try { unlinkSync(pendingPath(chatId)); } catch { /* noop */ }
+    if (opts.fromStarred && opts.feedbinId != null) {
+      const seen = new Set(readJsonSafe<{ ids: number[] }>(STARRED_SEEN, { ids: [] }).ids);
+      seen.delete(opts.feedbinId);
+      writeJsonSafe(STARRED_SEEN, { ids: [...seen] });
+    }
+    if (opts.fromPlaylist && opts.videoId) {
+      const seen = new Set(readJsonSafe<{ ids: string[] }>(PLAYLIST_SEEN, { ids: [] }).ids);
+      seen.delete(opts.videoId);
+      writeJsonSafe(PLAYLIST_SEEN, { ids: [...seen] });
+    }
+    await setAnchor('⏹️ <b>Cancelado</b> — lo dejé para después. Decí "revisa la playlist" o "revisa starred" para retomarlo.');
+    return true;
+  };
+  // NO se limpia el flag acá: si Cal tocó ⏹️ durante el "Procesando..." previo a entrar a run(),
+  // borrarlo mataría esa cancelación legítima. El reset del flag viejo lo hace advance*Queue al
+  // ARRANCAR cada ítem de cola (punto único), de modo que aquí el flag refleja solo este ítem.
   let text = "";
   let docTitle = "";
 
@@ -452,9 +491,9 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     // El contenido ya viene resuelto (ej. starred de Feedbin: contenido extraído por Feedbin).
     text = opts.prefetched.text;
     if (opts.prefetched.title.trim()) docTitle = opts.prefetched.title.trim();
-    await setAnchor("💭 Resumiendo...");
+    await setAnchor("💭 Resumiendo...", progressKb);
   } else if (kind === "article") {
-    await setAnchor("📥 Leyendo el artículo...");
+    await setAnchor("📥 Leyendo el artículo...", progressKb);
     const r = await runJson(NODE_FDA, [SAFARI_FETCH, args.source], FETCH_TIMEOUT_MS);
     if (r.status === "needs-fda") {
       await setAnchor("🔒 No puedo leer las cookies de Safari. Otorgá Full Disk Access a <code>~/.claude/bin/node-fda</code> en Ajustes → Privacidad y seguridad → Acceso completo al disco, y reintentá.");
@@ -470,9 +509,9 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     }
     text = r.text;
     if (typeof r.title === "string") docTitle = r.title;
-    await setAnchor("💭 Resumiendo...");
+    await setAnchor("💭 Resumiendo...", progressKb);
   } else if (kind === "video" || kind === "podcast") {
-    await setAnchor(kind === "video" ? "🎬 Transcribiendo el video..." : "🎧 Transcribiendo el audio...");
+    await setAnchor(kind === "video" ? "🎬 Transcribiendo el video..." : "🎧 Transcribiendo el audio...", progressKb);
     await typing();
     const r = await runJson(AUDIO_TRANSCRIBE, [args.source], TRANSCRIBE_TIMEOUT_MS);
     if (r.status === "spotify-drm") {
@@ -485,15 +524,21 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     }
     text = r.transcript;
     if (typeof r.title === "string" && r.title.trim()) docTitle = r.title.trim();
-    await setAnchor("💭 Resumiendo...");
+    await setAnchor("💭 Resumiendo...", progressKb);
   } else {
     await setAnchor("📚 Resumiendo el libro desde mi conocimiento...");
   }
+
+  // ¿Cal pidió parar mientras buscábamos el contenido? Abortar antes del resumen (lo caro, ~180s).
+  if (await bailIfCancelled()) return;
 
   await typing();
   const existingTags = await fetchReaderTags();
   const raw = await summarize(buildPrompt(kind, args.source, text, args.instruction, existingTags));
   const { md, tags, highlights } = splitMeta(raw);
+
+  // ¿Cal pidió parar mientras resumíamos? Abortar antes de mostrar la tarjeta de propuesta.
+  if (await bailIfCancelled()) return;
 
   // Entrega del resumen: el primer chunk EDITA el ancla; los chunks extra van como mensajes nuevos.
   const parts = chunk(mdToTelegram(md), TG_MAX);
@@ -887,6 +932,10 @@ async function unstarFeedbinEntry(entryId: number): Promise<boolean> {
 // anchorMsgId: mensaje a EDITAR como estado (del tap "Revisando..."); si falta, crea uno nuevo.
 async function advanceStarredQueue(deps: ResumirDeps, chatId: number, anchorMsgId?: number): Promise<void> {
   if (existsSync(pendingPath(chatId))) return;
+  // Punto único de reset del flag de cancelación: cada ítem de cola arranca limpio. Una parada
+  // vieja (de un ítem ya resuelto/abortado/errado) no debe abortar este. Desde el placeholder de
+  // abajo, solo un nuevo ⏹️ sobre ESTE ítem vuelve a marcarlo.
+  cancelRequested.delete(chatId);
   const q = readJsonSafe<{ items: StarredItem[] }>(STARRED_QUEUE, { items: [] });
   const next = q.items.shift();
   writeJsonSafe(STARRED_QUEUE, q);
@@ -897,7 +946,7 @@ async function advanceStarredQueue(deps: ResumirDeps, chatId: number, anchorMsgI
   // Lock sincrónico: reserva el slot antes de obtener contenido/resumir (anti-carrera).
   writeJsonSafe(pendingPath(chatId), { title: next.title, url: next.url, kind: "article", html: "", tags: [], highlights: [], createdAt: Date.now(), fromStarred: true, feedbinId: next.id, placeholder: true } satisfies PendingProposal);
   // Ancla: reusa el mensaje del tap (edición) o crea uno nuevo. run() lo sigue editando por fases.
-  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `⭐ <b>${escapeHtml(next.title)}</b>\n⏳ Procesando...`);
+  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `⭐ <b>${escapeHtml(next.title)}</b>\n⏳ Procesando...`, stopKeyboard());
   let failed = false;
   try {
     const content = await fetchStarredContent(next.id, next.url);
@@ -999,6 +1048,8 @@ async function listPlaylistVideos(url: string): Promise<PlaylistVideo[]> {
 // anchorMsgId: mensaje a EDITAR como estado (del tap "Revisando..."); si falta, crea uno nuevo.
 async function advancePlaylistQueue(deps: ResumirDeps, chatId: number, anchorMsgId?: number): Promise<void> {
   if (existsSync(pendingPath(chatId))) return; // hay una propuesta en curso → esperar
+  // Punto único de reset del flag de cancelación (ver advanceStarredQueue): cada ítem arranca limpio.
+  cancelRequested.delete(chatId);
   const q = readJsonSafe<{ videos: PlaylistVideo[] }>(PLAYLIST_QUEUE, { videos: [] });
   const next = q.videos.shift();
   writeJsonSafe(PLAYLIST_QUEUE, q);
@@ -1008,12 +1059,12 @@ async function advancePlaylistQueue(deps: ResumirDeps, chatId: number, anchorMsg
     return;
   }
   // Lock sincrónico: reserva el slot ANTES de transcribir (evita que otro advance haga doble shift en la ventana).
-  writeJsonSafe(pendingPath(chatId), { title: next.title, url: next.url, kind: "video", html: "", tags: [], highlights: [], createdAt: Date.now(), fromPlaylist: true, placeholder: true } satisfies PendingProposal);
+  writeJsonSafe(pendingPath(chatId), { title: next.title, url: next.url, kind: "video", html: "", tags: [], highlights: [], createdAt: Date.now(), fromPlaylist: true, videoId: next.id, placeholder: true } satisfies PendingProposal);
   // Ancla: reusa el mensaje del tap (edición) o crea uno nuevo. run() lo sigue editando por fases.
-  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `🎬 <b>${escapeHtml(next.title)}</b>\n⏳ Procesando...`);
+  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `🎬 <b>${escapeHtml(next.title)}</b>\n⏳ Procesando...`, stopKeyboard());
   let failed = false;
   try {
-    await run(deps, chatId, "video", { source: next.url }, { fromPlaylist: true, anchorMsgId: anchor });
+    await run(deps, chatId, "video", { source: next.url }, { fromPlaylist: true, videoId: next.id, anchorMsgId: anchor });
   } catch {
     failed = true;
   }
@@ -1157,10 +1208,16 @@ export function saltarResumen(deps: ResumirDeps, chatId: number): { status: stri
   return { status: "started", message: "Descarte iniciado: YA edito la tarjeta (⏭️ Descartado) y avanzo la cola solo. NO escribas texto ni preguntes si seguir — devolvé VACÍO." };
 }
 
-// Para la tanda: vacía las colas (playlist + starred) y deja de proponer. Conserva la propuesta
-// ACTUAL (Cal puede guardarla/saltarla). Lo sacado de la cola vuelve si Cal "revisa" de nuevo (un-see).
+// Para la tanda: vacía las colas (playlist + starred) y deja de proponer. Si hay un ítem
+// resumiéndose AHORA (placeholder), lo cancela y lo deja para después; si lo que hay arriba es una
+// propuesta ya lista, la conserva (Cal la guarda/salta). Lo sacado de la cola vuelve al "revisar".
 async function runDetener(deps: ResumirDeps, chatId: number): Promise<void> {
   const { botToken } = deps;
+  // ¿Hay un ítem resumiéndose AHORA (placeholder)? Marcar cancelación: run() lo abortará en su
+  // próximo checkpoint, lo dejará para después y editará su mensaje a "⏹️ Cancelado".
+  const cur = readJsonSafe<PendingProposal | null>(pendingPath(chatId), null);
+  const cancellingCurrent = !!(cur && cur.placeholder);
+  if (cancellingCurrent) cancelRequested.add(chatId);
   const pq = readJsonSafe<{ videos: PlaylistVideo[] }>(PLAYLIST_QUEUE, { videos: [] });
   const sq = readJsonSafe<{ items: StarredItem[] }>(STARRED_QUEUE, { items: [] });
   const remaining = (pq.videos?.length ?? 0) + (sq.items?.length ?? 0);
@@ -1177,13 +1234,23 @@ async function runDetener(deps: ResumirDeps, chatId: number): Promise<void> {
   }
   writeJsonSafe(PLAYLIST_QUEUE, { videos: [] });
   writeJsonSafe(STARRED_QUEUE, { items: [] });
-  const text = remaining
-    ? `⏹️ <b>Paré la cola</b> — saqué ${remaining} pendiente(s). No te muestro más (vuelven si decís "revisa la playlist/starred"). Si quedó una propuesta arriba, resolvéla con ✅ o ⏭️.`
-    : `⏹️ <b>Listo</b> — no había nada más en cola.`;
+  // El ítem en curso lo cancela y reporta run() (edita su propio mensaje a "⏹️ Cancelado").
+  const tail = ' No te muestro más (vuelven si decís "revisa la playlist/starred").';
+  let text: string;
+  if (cancellingCurrent) {
+    text = remaining
+      ? `⏹️ <b>Parando</b> — cancelo el que se estaba resumiendo (queda para después) y saqué ${remaining} más de la cola.${tail}`
+      : `⏹️ <b>Parando</b> — cancelo el que se estaba resumiendo; queda para después.${tail}`;
+  } else {
+    text = remaining
+      ? `⏹️ <b>Paré la cola</b> — saqué ${remaining} pendiente(s).${tail} Si quedó una propuesta arriba, resolvéla con ✅ o ⏭️.`
+      : `⏹️ <b>Listo</b> — no había nada más en cola.`;
+  }
   await sendMessage(botToken, { chatId, text, parseMode: "HTML" }).catch(() => {});
 }
 
-// Tool/botón "⏹️ Parar la cola": detiene la tanda sin tocar la propuesta actual.
+// Tool/botón "⏹️ Parar la cola": detiene la tanda. Si hay un ítem resumiéndose, lo cancela
+// (queda para después); una propuesta ya lista se conserva.
 export function detenerResumidor(deps: ResumirDeps, chatId: number): { status: string; message: string } {
   void runDetener(deps, chatId).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
