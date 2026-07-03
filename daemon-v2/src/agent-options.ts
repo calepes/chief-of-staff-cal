@@ -172,6 +172,12 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__worldcup__predictMatch",
   "mcp__worldcup__forecastTournament",
   "mcp__worldcup__syncResults",
+  "mcp__worldcup__getFifaMatchStats",
+  "mcp__worldcup__getFifaPlayerStats",
+  "mcp__worldcup__getFifaPowerRanking",
+  "mcp__worldcup__getMatchReport",
+  "mcp__worldcup__getMatchPreview",
+  "mcp__worldcup__getWorldcupCapabilities",
   // Google Flights via SerpAPI — vuelos internacionales (no Bolivia NAABOL)
   "mcp__serpapi-flights__searchFlights",
   "mcp__serpapi-flights__getReturnFlights",

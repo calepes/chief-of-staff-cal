@@ -85,6 +85,14 @@ import {
 } from "./tools/schedule-cal.js";
 import { fetchNotionAttachments } from "./tools/notion-files.js";
 import { sendPhoto, sendDocument, sendChatAction } from "@cos/shared";
+import {
+  resolveTraveler,
+  listTravelerKeys,
+  generarQrAduana,
+  qrPngBuffer,
+  enviarFotoBuffer,
+  ImpresionUrl,
+} from "./tools/qr-aduana.js";
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
 
@@ -326,6 +334,73 @@ export function buildSdkTools(deps: ToolDeps) {
 
         if (sent === 0) return asText({ status: "send_failed", total: attachments.length, errors });
         return asText({ status: "sent", count: sent });
+      },
+    ),
+    tool(
+      "generarQrAduanaBolivia",
+      [
+        "Genera el QR de salida/ingreso de Bolivia (Formulario N° 250 de la Aduana — Declaración Jurada) para un viajero y lo MANDA directo al chat como imagen.",
+        "Úsalo cuando Cal pida el QR de aduana / Form 250 / 'el papel para el aeropuerto' para él, Noe, Antonia o Catalina. VALIDA de quién es; si viajan varios, genera un QR por cada uno.",
+        "Identidad sale de ~/.claude/datos-viaje.json por nombre — cada quien con su propio documento (el CI 17513894 es solo de Cal).",
+        "Args: { viajero, tipoViaje?: 'salida'|'ingreso' (default salida), pais (ISO-2 destino/procedencia, ej PE/CO/AR), transporte?: 'AVIÓN'|'BUS'|'VEHÍCULO PARTICULAR'|'TRANSPORTE DE CARGA'|'A PIE'|'OTROS' (default AVIÓN), empresa? (aerolínea), vuelo? (Nº vuelo/placa), motivo: 'Turismo'|'Salud'|'Trabajo'|'Retorno'|'Otros', divisas?: boolean (efectivo entre $10k-$20k, default false), montoUsd? }.",
+        "Tras invocar NO repitas el QR ni links: ya se envió la imagen al chat. Responde una frase corta (o el error).",
+        "status: 'sent' (ya mandó el QR) · 'traveler_not_found' (incluye 'disponibles') · 'form_error' (rechazo de validación de la Aduana, ver 'error') · 'send_failed'/'error'.",
+      ].join(" "),
+      {
+        viajero: z.string(),
+        tipoViaje: z.enum(["salida", "ingreso"]).optional(),
+        pais: z.string().describe("ISO-2 país destino (salida) o procedencia (ingreso)"),
+        transporte: z
+          .enum(["AVIÓN", "BUS", "VEHÍCULO PARTICULAR", "TRANSPORTE DE CARGA", "A PIE", "OTROS"])
+          .optional(),
+        empresa: z.string().optional(),
+        vuelo: z.string().optional(),
+        motivo: z.enum(["Turismo", "Salud", "Trabajo", "Retorno", "Otros"]),
+        divisas: z.boolean().optional(),
+        montoUsd: z.string().optional(),
+      },
+      async ({ viajero, tipoViaje, pais, transporte, empresa, vuelo, motivo, divisas, montoUsd }) => {
+        const chatId = deps.getCurrentChatId?.();
+        const token = deps.botToken;
+        if (!chatId || !token) return asText({ status: "error", error: "No chatId/token disponible" });
+
+        const t = resolveTraveler(viajero);
+        if (!t) return asText({ status: "traveler_not_found", viajero, disponibles: listTravelerKeys() });
+
+        const res = await generarQrAduana(t, {
+          tipoViaje: tipoViaje || "salida",
+          pais,
+          transporte: transporte || "AVIÓN",
+          empresa,
+          vuelo,
+          motivo,
+          divisas: divisas || false,
+          montoUsd,
+        });
+        if (!res.ok) return asText({ status: "form_error", error: res.error });
+
+        try {
+          const png = await qrPngBuffer(res.qrData!);
+          const vueloTxt = vuelo ? ` · ✈️ ${[empresa, vuelo].filter(Boolean).join(" ")}` : "";
+          const cap = `🛂 QR ${tipoViaje === "ingreso" ? "Ingreso a" : "Salida de"} Bolivia — Form 250\n${t.nombres} ${t.apellido1}${vueloTxt}\nCódigo: ${res.memorizado}`;
+          await sendChatAction(token, chatId, "upload_photo").catch(() => {});
+          const sent = await enviarFotoBuffer(token, chatId, png, cap);
+          if (!sent.ok) {
+            return asText({
+              status: "send_failed",
+              error: sent.error,
+              memorizado: res.memorizado,
+              recuperar: ImpresionUrl(res.memorizado!),
+            });
+          }
+          return asText({ status: "sent", memorizado: res.memorizado, recuperar: ImpresionUrl(res.memorizado!) });
+        } catch (e) {
+          return asText({
+            status: "error",
+            error: e instanceof Error ? e.message : String(e),
+            memorizado: res.memorizado,
+          });
+        }
       },
     ),
     tool(
