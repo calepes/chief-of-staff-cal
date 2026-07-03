@@ -45,3 +45,26 @@ export class CfKv {
     if (!res.ok && res.status !== 404) throw new Error(`KV delete failed: ${res.status}`);
   }
 }
+
+const LOCK_PREFIX = "jano:lock:";
+
+/**
+ * Lock corto anti-doble-tap por (chatId, userId): evita que dos invocaciones concurrentes
+ * de `processMessage` para el MISMO callback (ej. doble tap rápido sobre una tarjeta de
+ * mlog:/mskip:/msel:) editen en paralelo el mismo `message_id` reusado como placeholder.
+ * No es un lock atómico (get+set, no compare-and-swap vía la REST API de CF KV) — alcanza
+ * para cubrir la ventana de milisegundos de un doble-tap humano, no pensado como lock
+ * distribuido de uso general. Mismo patrón que Pecunia (`ExpenseStateStore.tryAcquireLock`
+ * en `pecunia-agent/daemon/src/expense-handler.ts`).
+ */
+export async function tryAcquireLock(kv: CfKv, chatId: number, userId: number, ttlSec: number): Promise<boolean> {
+  const key = `${LOCK_PREFIX}${chatId}:${userId}`;
+  const existing = await kv.get<string>(key);
+  if (existing) return false;
+  await kv.set(key, "1", ttlSec);
+  return true;
+}
+
+export async function releaseLock(kv: CfKv, chatId: number, userId: number): Promise<void> {
+  await kv.delete(`${LOCK_PREFIX}${chatId}:${userId}`);
+}

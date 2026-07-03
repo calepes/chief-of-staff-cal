@@ -108,9 +108,20 @@ function prevUnprocessed(items: ApprovalItem[], processed: string[], fromIdx: nu
   return -1;
 }
 
+// `editMessageText` de Telegram NO limpia `reply_markup` si el parámetro se omite en el body
+// (lo deja intacto) — mismo gotcha documentado en CLAUDE.md para el flujo mlog:/mskip:/msel:.
+// Por eso acá SIEMPRE se manda `reply_markup` explícito: si no se pasa uno nuevo, se manda
+// `{ inline_keyboard: [] }` para limpiar los botones de la tarjeta anterior (evita que
+// "🔍 Revisar uno a uno"/"Todo"/"Todo"/ok/no/skip queden vivos y tocables tras una transición
+// a un estado terminal como "todos revisados").
 async function editMsg(token: string, chatId: number, msgId: number, text: string, replyMarkup?: unknown): Promise<void> {
-  const body: Record<string, unknown> = { chat_id: chatId, message_id: msgId, text, parse_mode: "HTML" };
-  if (replyMarkup) body.reply_markup = replyMarkup;
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    message_id: msgId,
+    text,
+    parse_mode: "HTML",
+    reply_markup: replyMarkup ?? { inline_keyboard: [] },
+  };
   await tg(token, "editMessageText", body);
 }
 

@@ -13,7 +13,7 @@ import { buildLearningsSection } from "./learnings.js";
 import { compactHistory } from "./compact.js";
 import { sanitizeForTelegram } from "./format.js";
 import { QueuePoller } from "./queue-poller.js";
-import { CfKv } from "./cf-kv.js";
+import { CfKv, tryAcquireLock, releaseLock } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
 import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
@@ -70,6 +70,10 @@ const LEARNINGS_PATH = `${process.env.HOME}/.cos-agent/learnings.md`;
 const ALERT_CHAT_ID = 94137698;
 const ALERT_THRESHOLD = 3;
 const BACKOFF_MAX_MS = 120_000;
+// TTL corto del lock anti-doble-tap sobre las tarjetas mlog:/mskip:/msel: — suficiente para
+// cubrir el procesamiento típico de processMessage (agente + edit), sin bloquear de verdad
+// si algo se cuelga. Mismo valor que Pecunia (CALLBACK_LOCK_TTL_SEC).
+const MEETING_FLOW_LOCK_TTL_SEC = 20;
 
 function log(obj: Record<string, unknown>) {
   console.log(JSON.stringify({ ts: Date.now(), ...obj }));
@@ -528,18 +532,37 @@ async function processMessage(
     // deja el reply_markup viejo pegado al mensaje editado y Cal podría re-tocar botones de una
     // tarjeta ya procesada). Ver gotcha en CLAUDE.md.
     const isMeetingFlowCallback = /^(mlog:|mskip:|msel:)/.test(cb.data ?? "");
-    // Ack inmediato: apaga el spinner del botón cuanto antes para desalentar un doble-tap
-    // mientras se reusa la misma tarjeta como placeholder (editMessageText concurrente sobre
-    // el mismo message_id si Cal toca 2 veces seguido — no hay lock, esto solo reduce la
-    // ventana, no la elimina; ver gotcha en CLAUDE.md).
     if (isMeetingFlowCallback) {
+      // Lock anti-doble-tap por (chatId, userId): dos toques casi simultáneos sobre la misma
+      // tarjeta dispararían 2 processMessage concurrentes editando el mismo message_id
+      // reusado como placeholder. Si el lock ya está tomado, avisamos con un toast y cortamos
+      // sin tocar el mensaje ni el estado. El lock se libera siempre (éxito o excepción).
+      // Mismo patrón que Pecunia (`ExpenseStateStore.tryAcquireLock`). Ver gotcha en CLAUDE.md.
+      const lockChatId = cb.message.chat.id;
+      const lockUserId = cb.from.id;
+      const acquired = await tryAcquireLock(kv, lockChatId, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      // Ack inmediato: apaga el spinner del botón cuanto antes.
       await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+      try {
+        await processMessage(
+          synthetic,
+          queueWaitMs,
+          { existingPlaceholderId: cb.message.message_id, clearKeyboard: true },
+        );
+      } finally {
+        // .catch() por consistencia con el resto del bloque (answerCallbackQuery arriba): un
+        // blip de red Mac→CF en el DELETE no debe escapar del finally y tirar processMessage
+        // entero a error (el lock igual expira solo por TTL a los 20s). Hallado por
+        // daemon-health-reviewer.
+        await releaseLock(kv, lockChatId, lockUserId).catch(() => {});
+      }
+      return;
     }
-    await processMessage(
-      synthetic,
-      queueWaitMs,
-      isMeetingFlowCallback ? { existingPlaceholderId: cb.message.message_id, clearKeyboard: true } : undefined,
-    );
+    await processMessage(synthetic, queueWaitMs, undefined);
     return;
   }
 
