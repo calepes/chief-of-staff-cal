@@ -66,7 +66,7 @@ interface RunOpts {
   fromStarred?: boolean;
   feedbinId?: number;
   videoId?: string;      // id del video de YouTube (playlist) → para rescatarlo de 'seen' si se cancela en curso
-  prefetched?: { text: string; title: string }; // texto ya obtenido (starred: contenido de Feedbin)
+  prefetched?: { text: string; title: string; author?: string }; // texto ya obtenido (starred: contenido de Feedbin)
   anchorMsgId?: number;  // mensaje ancla a editar por fases (la cola lo crea; si falta, run() lo crea)
 }
 
@@ -437,6 +437,25 @@ function mdToHtml(md: string): string {
   return out.join("\n");
 }
 
+// Emoji de autor/fuente según tipo de documento — antepuesto junto al título en el resumen.
+const AUTHOR_EMOJI: Record<Kind, string> = {
+  video: "🎬",
+  podcast: "🎬",
+  article: "📰",
+  book: "📰",
+};
+
+// Arma las 1-2 líneas de título + autor/canal a anteponer al TL;DR del resumen entregado.
+// Pura y testeable: sin I/O. Si no hay ni título ni autor, devuelve string vacío (no agrega nada).
+export function buildResumenHeader(title: string | undefined, author: string | undefined, kind: Kind): string {
+  const t = (title ?? "").trim();
+  const a = (author ?? "").trim();
+  if (!t && !a) return "";
+  const titleLine = t ? `<b>${escapeHtml(t)}</b>` : "";
+  const authorLine = a ? `${AUTHOR_EMOJI[kind]} ${escapeHtml(a)}` : "";
+  return [titleLine, authorLine].filter(Boolean).join("\n") + "\n\n";
+}
+
 function chunk(s: string, max: number): string[] {
   if (s.length <= max) return [s];
   const parts: string[] = [];
@@ -490,12 +509,14 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
   // ARRANCAR cada ítem de cola (punto único), de modo que aquí el flag refleja solo este ítem.
   let text = "";
   let docTitle = "";
+  let docAuthor = "";
 
   await typing();
   if (opts.prefetched) {
     // El contenido ya viene resuelto (ej. starred de Feedbin: contenido extraído por Feedbin).
     text = opts.prefetched.text;
     if (opts.prefetched.title.trim()) docTitle = opts.prefetched.title.trim();
+    if (opts.prefetched.author?.trim()) docAuthor = opts.prefetched.author.trim();
     await setAnchor("💭 Resumiendo...", progressKb);
   } else if (kind === "article") {
     await setAnchor("📥 Leyendo el artículo...", progressKb);
@@ -529,6 +550,7 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     }
     text = r.transcript;
     if (typeof r.title === "string" && r.title.trim()) docTitle = r.title.trim();
+    if (typeof r.channel === "string" && r.channel.trim()) docAuthor = r.channel.trim();
     await setAnchor("💭 Resumiendo...", progressKb);
   } else {
     await setAnchor("📚 Resumiendo el libro desde mi conocimiento...");
@@ -546,7 +568,8 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
   if (await bailIfCancelled()) return;
 
   // Entrega del resumen: el primer chunk EDITA el ancla; los chunks extra van como mensajes nuevos.
-  const parts = chunk(mdToTelegram(md), TG_MAX);
+  const header = buildResumenHeader(docTitle, docAuthor, kind);
+  const parts = chunk(header + mdToTelegram(md), TG_MAX);
   await setAnchor(parts[0] ?? "(resumen vacío)");
   for (const extra of parts.slice(1)) {
     const sent = await sendMessage(botToken, { chatId, text: extra, parseMode: "HTML" }).catch(() => null);
@@ -749,6 +772,34 @@ const STARRED_QUEUE = `${PENDING_DIR}/resumir-starred-queue.json`;
 interface PlaylistVideo { id: string; title: string; url: string }
 interface StarredItem { id: number; title: string; url: string } // id = entry id de Feedbin
 
+// Selector de cola: antes de arrancar a procesar de a uno, muestra conteo + lista numerada +
+// botones para que Cal elija cuál resumir (o "Procesar todos" para el auto-avance FIFO de
+// siempre). Pura y testeable: sin I/O. Mismo patrón que reviewMeetings (agent-tools.ts:770-834)
+// — botones msel:{id} en filas de máx 5 + fila final. Acá: resu-pick:{kind}:{id}, más
+// resu-pick:{kind}:all / resu-pick:{kind}:none.
+export function buildQueueSelector(kind: "v" | "s", items: Array<{ id: string | number; title: string }>): { text: string; keyboard: unknown } {
+  const emoji = kind === "v" ? "🎬" : "⭐";
+  const noun = kind === "v" ? "video(s) nuevo(s) en la playlist" : "starred nuevo(s) en Feedbin";
+  const lines = items.map((it, i) => `${i + 1}. ${escapeHtml(it.title.slice(0, 80))}`);
+  const text = [
+    `${emoji} <b>${items.length} ${noun}</b>`,
+    "",
+    lines.join("\n"),
+    "",
+    "¿Cuál querés que resuma?",
+  ].join("\n");
+
+  type TgButton = { text: string; callback_data: string };
+  const numButtons: TgButton[] = items.map((it, i) => ({ text: `${i + 1}`, callback_data: `resu-pick:${kind}:${it.id}` }));
+  const rows: TgButton[][] = [];
+  for (let i = 0; i < numButtons.length; i += 5) rows.push(numButtons.slice(i, i + 5));
+  rows.push([
+    { text: "✅ Procesar todos", callback_data: `resu-pick:${kind}:all` },
+    { text: "❌ Ahora no", callback_data: `resu-pick:${kind}:none` },
+  ]);
+  return { text, keyboard: { inline_keyboard: rows } };
+}
+
 function readJsonSafe<T>(path: string, fallback: T): T {
   try { return JSON.parse(readFileSync(path, "utf8")) as T; } catch { return fallback; }
 }
@@ -896,10 +947,11 @@ async function fetchStarredEntries(): Promise<StarredItem[]> {
 // Trae el contenido de un starred para resumir. Primero el content de Feedbin; si viene TRUNCADO
 // (excerpt), baja el artículo completo con safari-fetch (full + atraviesa paywall vía cookies de
 // Safari — mejor que el content del feed y que Mercury, que no pasa paywalls).
-async function fetchStarredContent(entryId: number, url?: string): Promise<{ text: string; title: string } | null> {
-  const d = (await feedbinGet(`/entries/${entryId}.json`)) as { title?: string | null; content?: string | null; summary?: string | null } | null;
+async function fetchStarredContent(entryId: number, url?: string): Promise<{ text: string; title: string; author?: string } | null> {
+  const d = (await feedbinGet(`/entries/${entryId}.json`)) as { title?: string | null; content?: string | null; summary?: string | null; author?: string | null } | null;
   let text = d ? stripHtml(d.content ?? d.summary ?? "") : "";
   let title = (d?.title ?? "").trim();
+  const author = (d?.author ?? "").trim();
   const TRUNCATED = 1500; // bajo este largo asumimos excerpt → intentar full vía safari-fetch
   if (url && /^https?:\/\//i.test(url) && text.length < TRUNCATED) {
     try {
@@ -911,7 +963,7 @@ async function fetchStarredContent(entryId: number, url?: string): Promise<{ tex
     } catch { /* fallback falló → quedarse con el content del feed */ }
   }
   if (!text.trim()) return null;
-  return { text, title };
+  return { text, title, author: author || undefined };
 }
 
 async function unstarFeedbinEntry(entryId: number): Promise<boolean> {
@@ -933,30 +985,22 @@ async function unstarFeedbinEntry(entryId: number): Promise<boolean> {
   }
 }
 
-// Propone el siguiente starred de la cola (si no hay propuesta pendiente activa).
-// anchorMsgId: mensaje a EDITAR como estado (del tap "Revisando..."); si falta, crea uno nuevo.
-async function advanceStarredQueue(deps: ResumirDeps, chatId: number, anchorMsgId?: number): Promise<void> {
-  if (existsSync(pendingPath(chatId))) return;
-  // Punto único de reset del flag de cancelación: cada ítem de cola arranca limpio. Una parada
-  // vieja (de un ítem ya resuelto/abortado/errado) no debe abortar este. Desde el placeholder de
-  // abajo, solo un nuevo ⏹️ sobre ESTE ítem vuelve a marcarlo.
+// Arranca a procesar UN starred ya elegido (reserva el lock, edita el ancla, corre run(), y si
+// falla limpia + des-estrella + avanza al siguiente). Compartida entre el camino FIFO (shift(),
+// modo batch) y el camino "por id" (splice desde resu-pick:s:{id}) — ver pickStarredItem.
+async function startStarredItem(deps: ResumirDeps, chatId: number, item: StarredItem, anchorMsgId?: number): Promise<void> {
+  // Punto único de reset del flag de cancelación: cada ítem arranca limpio, sea elegido desde el
+  // selector o por FIFO automático. Una parada vieja (de un ítem ya resuelto) no debe abortar este.
   cancelRequested.delete(chatId);
-  const q = readJsonSafe<{ items: StarredItem[] }>(STARRED_QUEUE, { items: [] });
-  const next = q.items.shift();
-  writeJsonSafe(STARRED_QUEUE, q);
-  if (!next) {
-    if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "✅ Starred al día — no quedan por resumir.");
-    return;
-  }
   // Lock sincrónico: reserva el slot antes de obtener contenido/resumir (anti-carrera).
-  writeJsonSafe(pendingPath(chatId), { title: next.title, url: next.url, kind: "article", html: "", tags: [], highlights: [], createdAt: Date.now(), fromStarred: true, feedbinId: next.id, placeholder: true } satisfies PendingProposal);
+  writeJsonSafe(pendingPath(chatId), { title: item.title, url: item.url, kind: "article", html: "", tags: [], highlights: [], createdAt: Date.now(), fromStarred: true, feedbinId: item.id, placeholder: true } satisfies PendingProposal);
   // Ancla: reusa el mensaje del tap (edición) o crea uno nuevo. run() lo sigue editando por fases.
-  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `⭐ <b>${escapeHtml(next.title)}</b>\n⏳ Procesando...`, stopKeyboard());
+  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `⭐ <b>${escapeHtml(item.title)}</b>\n⏳ Procesando...`, stopKeyboard());
   let failed = false;
   try {
-    const content = await fetchStarredContent(next.id, next.url);
+    const content = await fetchStarredContent(item.id, item.url);
     if (!content) failed = true;
-    else await run(deps, chatId, "article", { source: next.url }, { fromStarred: true, feedbinId: next.id, prefetched: content, anchorMsgId: anchor });
+    else await run(deps, chatId, "article", { source: item.url }, { fromStarred: true, feedbinId: item.id, prefetched: content, anchorMsgId: anchor });
   } catch {
     failed = true;
   }
@@ -966,10 +1010,28 @@ async function advanceStarredQueue(deps: ResumirDeps, chatId: number, anchorMsgI
     try { unlinkSync(pendingPath(chatId)); } catch { /* noop */ }
     // Ya quedó marcado como 'seen' (no se reprocesa) → des-estrellar también, para no dejar
     // una estrella huérfana en Feedbin de algo que el sistema descartó. Esperar antes de avanzar.
-    await unstarFeedbinEntry(next.id);
-    await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(next.title)}" (sin contenido en Feedbin); lo descarto y le quito la estrella.`);
+    await unstarFeedbinEntry(item.id);
+    await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(item.title)}" (sin contenido en Feedbin); lo descarto y le quito la estrella.`);
     await advanceStarredQueue(deps, chatId); // el siguiente crea su propio mensaje
   }
+}
+
+// Propone el siguiente starred de la cola (si no hay propuesta pendiente activa). FIFO — usado
+// en modo batch ("Procesar todos") y como fallback de auto-avance al fallar un ítem.
+// anchorMsgId: mensaje a EDITAR como estado (del tap "Revisando..."); si falta, crea uno nuevo.
+async function advanceStarredQueue(deps: ResumirDeps, chatId: number, anchorMsgId?: number): Promise<void> {
+  if (existsSync(pendingPath(chatId))) return;
+  const q = readJsonSafe<{ items: StarredItem[]; mode?: "batch" }>(STARRED_QUEUE, { items: [] });
+  const next = q.items.shift();
+  if (!next) {
+    // Cola vacía: resetea el modo para que la próxima tanda de items nuevos vuelva a preguntar.
+    delete q.mode;
+    writeJsonSafe(STARRED_QUEUE, q);
+    if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "✅ Starred al día — no quedan por resumir.");
+    return;
+  }
+  writeJsonSafe(STARRED_QUEUE, q);
+  await startStarredItem(deps, chatId, next, anchorMsgId);
 }
 
 // Cron + on-demand: revisa los starred, encola los nuevos y arranca el primero.
@@ -980,7 +1042,7 @@ export async function checkStarredResumir(deps: ResumirDeps, chatIdArg?: number,
   const chatId = chatIdArg ?? cfg.chatId ?? 0;
   if (!chatId) return { status: "noop", message: "Sin chatId configurado." };
   const seen = new Set(readJsonSafe<{ ids: number[] }>(STARRED_SEEN, { ids: [] }).ids);
-  const q = readJsonSafe<{ items: StarredItem[] }>(STARRED_QUEUE, { items: [] });
+  const q = readJsonSafe<{ items: StarredItem[]; mode?: "batch" }>(STARRED_QUEUE, { items: [] });
   let added = 0;
   for (const it of await fetchStarredEntries()) {
     if (!seen.has(it.id)) {
@@ -992,21 +1054,27 @@ export async function checkStarredResumir(deps: ResumirDeps, chatIdArg?: number,
   writeJsonSafe(STARRED_QUEUE, q);
   // Con ancla (tap): el mismo mensaje fluye al procesamiento; sin ancla (cron): notificar los nuevos.
   if (added > 0 && anchorMsgId == null) {
-    await sendMessage(deps.botToken, { chatId, text: `⭐ ${added} starred nuevo(s) en Feedbin. Te los propongo de a uno.`, parseMode: "HTML" }).catch(() => {});
+    await sendMessage(deps.botToken, { chatId, text: `⭐ ${added} starred nuevo(s) en Feedbin.`, parseMode: "HTML" }).catch(() => {});
   }
   if (q.items.length === 0) {
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "👌 Revisé los starred: no hay nuevos.");
     return { status: "ok", message: added > 0 ? `${added} encolado(s).` : "Sin starred nuevos." };
   }
-  // Hay items en cola. Si una propuesta está en curso, avisar; si no, arrancar (drena aunque no haya nuevos).
+  // Hay items en cola. Si una propuesta está en curso, avisar; si no, mostrar el selector (o
+  // seguir en FIFO si Cal ya eligió "Procesar todos" para esta tanda — modo batch).
   if (existsSync(pendingPath(chatId))) {
     const msg = `📋 Tenés una propuesta en curso. Resolvéla ("guardar" o "salta") y sigo con los starred (${q.items.length} en cola).`;
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, msg);
     else await sendMessage(deps.botToken, { chatId, text: msg, parseMode: "HTML" }).catch(() => {});
     return { status: "ok", message: `Propuesta en curso; ${q.items.length} en cola.` };
   }
-  await advanceStarredQueue(deps, chatId, anchorMsgId);
-  return { status: "ok", message: `Procesando cola de starred (${q.items.length}).` };
+  if (q.mode === "batch") {
+    await advanceStarredQueue(deps, chatId, anchorMsgId);
+    return { status: "ok", message: `Procesando cola de starred (${q.items.length}).` };
+  }
+  const sel = buildQueueSelector("s", q.items.map((it) => ({ id: it.id, title: it.title })));
+  await setCardMessage(deps.botToken, chatId, anchorMsgId, sel.text, sel.keyboard);
+  return { status: "ok", message: `Selector mostrado (${q.items.length} en cola).` };
 }
 
 // Tool: disparar la revisión de los starred a demanda.
@@ -1049,27 +1117,20 @@ async function listPlaylistVideos(url: string): Promise<PlaylistVideo[]> {
   } catch { return []; }
 }
 
-// Propone el siguiente video de la cola (si no hay propuesta pendiente activa).
-// anchorMsgId: mensaje a EDITAR como estado (del tap "Revisando..."); si falta, crea uno nuevo.
-async function advancePlaylistQueue(deps: ResumirDeps, chatId: number, anchorMsgId?: number): Promise<void> {
-  if (existsSync(pendingPath(chatId))) return; // hay una propuesta en curso → esperar
-  // Punto único de reset del flag de cancelación (ver advanceStarredQueue): cada ítem arranca limpio.
+// Arranca a procesar UN video ya elegido (reserva el lock, edita el ancla, corre run(), y si
+// falla limpia + avanza al siguiente). Compartida entre el camino FIFO (shift(), modo batch) y
+// el camino "por id" (splice desde resu-pick:v:{id}) — ver pickPlaylistItem.
+async function startPlaylistItem(deps: ResumirDeps, chatId: number, video: PlaylistVideo, anchorMsgId?: number): Promise<void> {
+  // Punto único de reset del flag de cancelación (ver startStarredItem): cada ítem arranca limpio,
+  // sea elegido desde el selector o por FIFO automático.
   cancelRequested.delete(chatId);
-  const q = readJsonSafe<{ videos: PlaylistVideo[] }>(PLAYLIST_QUEUE, { videos: [] });
-  const next = q.videos.shift();
-  writeJsonSafe(PLAYLIST_QUEUE, q);
-  if (!next) {
-    if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "✅ Playlist al día — no quedan videos por resumir.");
-    else await sendMessage(deps.botToken, { chatId, text: "✅ Playlist al día — no quedan videos por resumir.", parseMode: "HTML" }).catch(() => {});
-    return;
-  }
   // Lock sincrónico: reserva el slot ANTES de transcribir (evita que otro advance haga doble shift en la ventana).
-  writeJsonSafe(pendingPath(chatId), { title: next.title, url: next.url, kind: "video", html: "", tags: [], highlights: [], createdAt: Date.now(), fromPlaylist: true, videoId: next.id, placeholder: true } satisfies PendingProposal);
+  writeJsonSafe(pendingPath(chatId), { title: video.title, url: video.url, kind: "video", html: "", tags: [], highlights: [], createdAt: Date.now(), fromPlaylist: true, videoId: video.id, placeholder: true } satisfies PendingProposal);
   // Ancla: reusa el mensaje del tap (edición) o crea uno nuevo. run() lo sigue editando por fases.
-  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `🎬 <b>${escapeHtml(next.title)}</b>\n⏳ Procesando...`, stopKeyboard());
+  const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `🎬 <b>${escapeHtml(video.title)}</b>\n⏳ Procesando...`, stopKeyboard());
   let failed = false;
   try {
-    await run(deps, chatId, "video", { source: next.url }, { fromPlaylist: true, videoId: next.id, anchorMsgId: anchor });
+    await run(deps, chatId, "video", { source: video.url }, { fromPlaylist: true, videoId: video.id, anchorMsgId: anchor });
   } catch {
     failed = true;
   }
@@ -1077,9 +1138,28 @@ async function advancePlaylistQueue(deps: ResumirDeps, chatId: number, anchorMsg
   const cur = readJsonSafe<PendingProposal | null>(pendingPath(chatId), null);
   if (failed || (cur && cur.placeholder)) {
     try { unlinkSync(pendingPath(chatId)); } catch { /* noop */ }
-    await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(next.title)}", paso al siguiente.`);
+    await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(video.title)}", paso al siguiente.`);
     await advancePlaylistQueue(deps, chatId); // el siguiente crea su propio mensaje
   }
+}
+
+// Propone el siguiente video de la cola (si no hay propuesta pendiente activa). FIFO — usado en
+// modo batch ("Procesar todos") y como fallback de auto-avance al fallar un ítem.
+// anchorMsgId: mensaje a EDITAR como estado (del tap "Revisando..."); si falta, crea uno nuevo.
+async function advancePlaylistQueue(deps: ResumirDeps, chatId: number, anchorMsgId?: number): Promise<void> {
+  if (existsSync(pendingPath(chatId))) return; // hay una propuesta en curso → esperar
+  const q = readJsonSafe<{ videos: PlaylistVideo[]; mode?: "batch" }>(PLAYLIST_QUEUE, { videos: [] });
+  const next = q.videos.shift();
+  if (!next) {
+    // Cola vacía: resetea el modo para que la próxima tanda de items nuevos vuelva a preguntar.
+    delete q.mode;
+    writeJsonSafe(PLAYLIST_QUEUE, q);
+    if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "✅ Playlist al día — no quedan videos por resumir.");
+    else await sendMessage(deps.botToken, { chatId, text: "✅ Playlist al día — no quedan videos por resumir.", parseMode: "HTML" }).catch(() => {});
+    return;
+  }
+  writeJsonSafe(PLAYLIST_QUEUE, q);
+  await startPlaylistItem(deps, chatId, next, anchorMsgId);
 }
 
 // Tras resolver una propuesta, sacar el item de su origen y devolver una nota corta para PLEGAR en la
@@ -1093,12 +1173,24 @@ async function cleanupProcessedSource(proposal: PendingProposal): Promise<string
 
 // Tras resolver cualquier propuesta (guardar/saltar), si quedan items en cola y no hay otra propuesta, continuar.
 // Drena primero la playlist de YouTube y luego los starred de Feedbin (nunca dos propuestas en paralelo).
+// Si la cola quedó en modo batch ("Procesar todos"), sigue el FIFO automático de siempre; si no,
+// vuelve a mostrar el selector (mensaje nuevo — acá no hay tap/ancla) para que Cal elija de nuevo.
 async function maybeAdvance(deps: ResumirDeps, chatId: number): Promise<void> {
   if (existsSync(pendingPath(chatId))) return;
-  const pq = readJsonSafe<{ videos: PlaylistVideo[] }>(PLAYLIST_QUEUE, { videos: [] });
-  if (pq.videos.length > 0) { await advancePlaylistQueue(deps, chatId); return; }
-  const sq = readJsonSafe<{ items: StarredItem[] }>(STARRED_QUEUE, { items: [] });
-  if (sq.items.length > 0) { await advanceStarredQueue(deps, chatId); return; }
+  const pq = readJsonSafe<{ videos: PlaylistVideo[]; mode?: "batch" }>(PLAYLIST_QUEUE, { videos: [] });
+  if (pq.videos.length > 0) {
+    if (pq.mode === "batch") { await advancePlaylistQueue(deps, chatId); return; }
+    const sel = buildQueueSelector("v", pq.videos.map((v) => ({ id: v.id, title: v.title })));
+    await sendMessage(deps.botToken, { chatId, text: sel.text, parseMode: "HTML", replyMarkup: sel.keyboard }).catch(() => {});
+    return;
+  }
+  const sq = readJsonSafe<{ items: StarredItem[]; mode?: "batch" }>(STARRED_QUEUE, { items: [] });
+  if (sq.items.length > 0) {
+    if (sq.mode === "batch") { await advanceStarredQueue(deps, chatId); return; }
+    const sel = buildQueueSelector("s", sq.items.map((it) => ({ id: it.id, title: it.title })));
+    await sendMessage(deps.botToken, { chatId, text: sel.text, parseMode: "HTML", replyMarkup: sel.keyboard }).catch(() => {});
+    return;
+  }
 }
 
 // Cron handler: revisa las playlists configuradas, encola los videos nuevos y arranca el primero.
@@ -1111,7 +1203,7 @@ export async function checkPlaylistsResumir(deps: ResumirDeps, chatIdArg?: numbe
     return { status: "noop", message: "Sin playlists configuradas." };
   }
   const seen = new Set(readJsonSafe<{ ids: string[] }>(PLAYLIST_SEEN, { ids: [] }).ids);
-  const q = readJsonSafe<{ videos: PlaylistVideo[] }>(PLAYLIST_QUEUE, { videos: [] });
+  const q = readJsonSafe<{ videos: PlaylistVideo[]; mode?: "batch" }>(PLAYLIST_QUEUE, { videos: [] });
   let added = 0;
   for (const purl of cfg.playlists) {
     for (const v of await listPlaylistVideos(purl)) {
@@ -1125,21 +1217,27 @@ export async function checkPlaylistsResumir(deps: ResumirDeps, chatIdArg?: numbe
   writeJsonSafe(PLAYLIST_QUEUE, q);
   // Con ancla (tap): el mismo mensaje fluye al procesamiento; sin ancla (cron): notificar los nuevos.
   if (added > 0 && anchorMsgId == null) {
-    await sendMessage(deps.botToken, { chatId, text: `🎬 ${added} video(s) nuevo(s) en tu playlist. Te los propongo de a uno.`, parseMode: "HTML" }).catch(() => {});
+    await sendMessage(deps.botToken, { chatId, text: `🎬 ${added} video(s) nuevo(s) en tu playlist.`, parseMode: "HTML" }).catch(() => {});
   }
   if (q.videos.length === 0) {
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "👌 Revisé la playlist: no hay videos nuevos.");
     return { status: "ok", message: added > 0 ? `${added} encolado(s).` : "Sin videos nuevos en la playlist." };
   }
-  // Hay videos en cola. Si una propuesta está en curso, avisar; si no, arrancar (drena la cola aunque no haya nuevos).
+  // Hay videos en cola. Si una propuesta está en curso, avisar; si no, mostrar el selector (o
+  // seguir en FIFO si Cal ya eligió "Procesar todos" para esta tanda — modo batch).
   if (existsSync(pendingPath(chatId))) {
     const msg = `📋 Tenés una propuesta en curso. Resolvéla ("guardar" o "salta") y sigo con la playlist (${q.videos.length} en cola).`;
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, msg);
     else await sendMessage(deps.botToken, { chatId, text: msg, parseMode: "HTML" }).catch(() => {});
     return { status: "ok", message: `Propuesta en curso; ${q.videos.length} en cola.` };
   }
-  await advancePlaylistQueue(deps, chatId, anchorMsgId);
-  return { status: "ok", message: `Procesando cola (${q.videos.length} en cola).` };
+  if (q.mode === "batch") {
+    await advancePlaylistQueue(deps, chatId, anchorMsgId);
+    return { status: "ok", message: `Procesando cola (${q.videos.length} en cola).` };
+  }
+  const sel = buildQueueSelector("v", q.videos.map((v) => ({ id: v.id, title: v.title })));
+  await setCardMessage(deps.botToken, chatId, anchorMsgId, sel.text, sel.keyboard);
+  return { status: "ok", message: `Selector mostrado (${q.videos.length} en cola).` };
 }
 
 // Tool: disparar la revisión de la playlist a demanda.
@@ -1155,6 +1253,77 @@ export function revisarPlaylistResumir(deps: ResumirDeps, chatId: number): { sta
     void sendMessage(deps.botToken, { chatId, text: `❌ Error revisando la playlist (${msg}).`, parseMode: "HTML" }).catch(() => {});
   });
   return { status: "started", message: "Revisando la playlist en background..." };
+}
+
+// ───────────────── Callback resu-pick:{v|s}:{id|all|none} ─────────────────
+// Interceptado MECÁNICAMENTE en index.ts (sin pasar por el LLM) — igual que j:resu:save/skip/etc.
+// Cal elige, desde buildQueueSelector, un ítem puntual, "Procesar todos" (modo batch) o "Ahora no".
+
+async function pickPlaylistItem(deps: ResumirDeps, chatId: number, id: string, anchorMsgId: number): Promise<void> {
+  if (existsSync(pendingPath(chatId))) return; // ya hay una propuesta en curso (doble-tap/carrera) → noop
+  const q = readJsonSafe<{ videos: PlaylistVideo[]; mode?: "batch" }>(PLAYLIST_QUEUE, { videos: [] });
+  const idx = q.videos.findIndex((v) => v.id === id);
+  if (idx === -1) {
+    await setCardMessage(deps.botToken, chatId, anchorMsgId, "Ese video ya no está en la cola (puede que ya se haya procesado).");
+    return;
+  }
+  const [video] = q.videos.splice(idx, 1);
+  writeJsonSafe(PLAYLIST_QUEUE, q);
+  await startPlaylistItem(deps, chatId, video, anchorMsgId);
+}
+
+async function pickPlaylistAll(deps: ResumirDeps, chatId: number, anchorMsgId: number): Promise<void> {
+  const q = readJsonSafe<{ videos: PlaylistVideo[]; mode?: "batch" }>(PLAYLIST_QUEUE, { videos: [] });
+  q.mode = "batch";
+  writeJsonSafe(PLAYLIST_QUEUE, q);
+  await advancePlaylistQueue(deps, chatId, anchorMsgId);
+}
+
+async function pickPlaylistNone(deps: ResumirDeps, chatId: number, anchorMsgId: number): Promise<void> {
+  const q = readJsonSafe<{ videos: PlaylistVideo[] }>(PLAYLIST_QUEUE, { videos: [] });
+  await setCardMessage(deps.botToken, chatId, anchorMsgId, `Ok, seguís con ${q.videos.length} pendiente(s) — pedime "revisá la playlist" cuando quieras.`);
+}
+
+async function pickStarredItem(deps: ResumirDeps, chatId: number, id: number, anchorMsgId: number): Promise<void> {
+  if (existsSync(pendingPath(chatId))) return; // ya hay una propuesta en curso (doble-tap/carrera) → noop
+  const q = readJsonSafe<{ items: StarredItem[]; mode?: "batch" }>(STARRED_QUEUE, { items: [] });
+  const idx = q.items.findIndex((it) => it.id === id);
+  if (idx === -1) {
+    await setCardMessage(deps.botToken, chatId, anchorMsgId, "Ese starred ya no está en la cola (puede que ya se haya procesado).");
+    return;
+  }
+  const [item] = q.items.splice(idx, 1);
+  writeJsonSafe(STARRED_QUEUE, q);
+  await startStarredItem(deps, chatId, item, anchorMsgId);
+}
+
+async function pickStarredAll(deps: ResumirDeps, chatId: number, anchorMsgId: number): Promise<void> {
+  const q = readJsonSafe<{ items: StarredItem[]; mode?: "batch" }>(STARRED_QUEUE, { items: [] });
+  q.mode = "batch";
+  writeJsonSafe(STARRED_QUEUE, q);
+  await advanceStarredQueue(deps, chatId, anchorMsgId);
+}
+
+async function pickStarredNone(deps: ResumirDeps, chatId: number, anchorMsgId: number): Promise<void> {
+  const q = readJsonSafe<{ items: StarredItem[] }>(STARRED_QUEUE, { items: [] });
+  await setCardMessage(deps.botToken, chatId, anchorMsgId, `Ok, seguís con ${q.items.length} pendiente(s) — pedime "revisá los starred" cuando quieras.`);
+}
+
+// Punto único llamado desde index.ts al recibir un callback `resu-pick:{kind}:{pick}` — kind es
+// "v" (playlist) o "s" (starred), pick es el id elegido (videoId string / feedbinId numérico como
+// string) o los literales "all"/"none". Dispatcher mecánico: no hay LLM de por medio.
+export async function handleQueuePick(deps: ResumirDeps, chatId: number, kind: "v" | "s", pick: string, anchorMsgId: number): Promise<void> {
+  if (kind === "v") {
+    if (pick === "all") { await pickPlaylistAll(deps, chatId, anchorMsgId); return; }
+    if (pick === "none") { await pickPlaylistNone(deps, chatId, anchorMsgId); return; }
+    await pickPlaylistItem(deps, chatId, pick, anchorMsgId);
+    return;
+  }
+  if (pick === "all") { await pickStarredAll(deps, chatId, anchorMsgId); return; }
+  if (pick === "none") { await pickStarredNone(deps, chatId, anchorMsgId); return; }
+  const id = Number(pick);
+  if (Number.isNaN(id)) return; // callback_data corrupto/inesperado — no debería pasar
+  await pickStarredItem(deps, chatId, id, anchorMsgId);
 }
 
 // Tool: reportar el estado del resumidor (propuesta en curso + cola de la playlist).

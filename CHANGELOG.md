@@ -1,5 +1,53 @@
 # CHANGELOG — Jano
 
+## 2026-07-03
+
+### Feature — Resumidor: selector de cola antes de procesar + título/autor en el resumen
+
+- **Selector de cola (playlist YouTube / starred Feedbin):** antes de arrancar a procesar de a
+  uno (FIFO), `checkPlaylistsResumir`/`checkStarredResumir` ahora muestran primero una tarjeta con
+  conteo + lista numerada + botones (`buildQueueSelector`, `tools/resumir.ts`) para que Cal elija
+  QUÉ resumir — en vez de agarrar directo el primero. Aplica al cron 08:00 y a los botones
+  ⭐/🎬 del menú (on-demand). Botones: uno por ítem (`resu-pick:{v|s}:{id}`, filas de máx 5),
+  `[✅ Procesar todos]` (`resu-pick:{v|s}:all`, activa modo `batch` = FIFO automático de siempre
+  hasta vaciar la cola) y `[❌ Ahora no]` (`resu-pick:{v|s}:none`, no toca la cola). El flag
+  `mode?: "batch"` se persiste junto a la cola (`resumir-playlist-queue.json`/
+  `resumir-starred-queue.json`) y se resetea al vaciarse, para que la próxima tanda vuelva a
+  preguntar. `maybeAdvance` (tras resolver una propuesta) respeta el mismo criterio: sigue el FIFO
+  si la cola está en modo batch, si no vuelve a mostrar el selector.
+- **Callback `resu-pick:` mecánico (sin LLM):** interceptado en `index.ts` igual que
+  `j:resu:save/skip/stop` — dispatcher único `handleQueuePick()` en `resumir.ts`. Mismo lock
+  anti-doble-tap `(chatId, userId)` que ya usan `mlog:/mskip:/msel:` (`tryAcquireLock`/
+  `releaseLock`, `cf-kv.ts`), reusado a propósito (no se creó un lock nuevo). Extraída la lógica
+  de "arrancar UN ítem" a `startPlaylistItem`/`startStarredItem`, compartida entre el camino FIFO
+  (`shift()`) y el camino "por id" (`findIndex`+`splice`, desde el pick puntual).
+- **Bug bloqueante corregido antes de mergear (hallado por `daemon-health-reviewer`):** la primera
+  versión del bloque `resu-pick:` en `index.ts` hacía `await handleQueuePick(...)`, que puede
+  tardar minutos (transcribe+resume vía `run()`, hasta `TRANSCRIBE_TIMEOUT_MS`=10min) — awaitear
+  ahí congela el loop secuencial del daemon (un solo `for` con `await processMessage`) para TODOS
+  los chats hasta que termine. Fix: `void handleQueuePick(...).catch(...).finally(releaseLock)`,
+  el mismo patrón fire-and-forget que ya usan `j:star`/`j:ytpl` (`void checkStarredResumir(...)`/
+  `void checkPlaylistsResumir(...)`) unas líneas más abajo en el mismo archivo.
+- **Título + autor/canal antes del TL;DR:** el resumen entregado ahora antepone
+  `<b>{título}</b>` + `{emoji} {autor}` (🎬 canal de YouTube para video/podcast, 📰 fuente para
+  artículo/libro) vía `buildResumenHeader()` (función pura, `tools/resumir.ts`) — antes no se
+  incluía ninguno de los dos en el mensaje del resumen (solo el título aparecía en la tarjeta de
+  propuesta, más abajo).
+  - `audio-transcribe.sh` ahora pide también `%(uploader)s` a yt-dlp (rama captions Y rama
+    descarga+whisper, esta última no traía metadata antes) → nuevo campo `channel` en el JSON de
+    salida, best-effort (si el `--print` falla, queda ausente sin bloquear la transcripción).
+  - `fetchStarredContent` (Feedbin) ahora también extrae `author` del JSON de la entrada.
+- **Tests nuevos:** `tools/resumir.test.ts` (13 casos) — `buildResumenHeader` (título+autor,
+  solo título, solo autor, ninguno, emoji por `kind`, escape HTML) y `buildQueueSelector` (1 item,
+  7 items con paginado de filas de máx 5, ids string vs number, 0 items, truncado de títulos
+  largos). Solo las funciones puras — la extracción real (yt-dlp/Feedbin/filesystem) sigue sin
+  mocks, verificación manual + build limpio.
+- **Decisión de alcance:** si un ítem falla al procesarse (transcripción/fetch sin contenido), el
+  recovery sigue haciendo auto-skip FIFO al siguiente (`advance*Queue`) independientemente del
+  modo — no vuelve a mostrar el selector en ese caso puntual. Es el mismo comportamiento que ya
+  existía antes de esta feature; no se tocó porque es manejo de errores, no el flujo feliz de
+  selección.
+
 ## 2026-06-21
 
 ### Feature — Enviar adjuntos de Notion por Telegram (`enviarArchivoNotion`)

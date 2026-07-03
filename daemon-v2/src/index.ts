@@ -19,7 +19,7 @@ import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, ans
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
-import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor } from "./tools/resumir.js";
+import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick } from "./tools/resumir.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
@@ -464,6 +464,39 @@ async function processMessage(
         else if (cb.data === "j:resu:skip") saltarResumen(rdeps, rchat);
         else detenerResumidor(rdeps, rchat);
       }
+      return;
+    }
+
+    // Selector de cola del resumidor (resu-pick:{v|s}:{id|all|none}) → mecánico, sin LLM, IGUAL
+    // que j:resu:*: Cal elige un ítem puntual / "Procesar todos" / "Ahora no" desde la tarjeta de
+    // buildQueueSelector. Si esto pasara por el LLM se reintroduciría el mismo bug de doble
+    // escritura/mensajes descoordinados que se arregló hoy para mlog:/mskip:/msel: (ver CLAUDE.md).
+    if (cb.data?.startsWith("resu-pick:")) {
+      const [, kindRaw, pick] = cb.data.split(":");
+      const rchat = cb.message?.chat.id;
+      const anchorId = cb.message?.message_id;
+      if (rchat == null || anchorId == null || (kindRaw !== "v" && kindRaw !== "s") || !pick) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+        return;
+      }
+      // Mismo lock anti-doble-tap (chatId, userId) que mlog:/mskip:/msel: — dos toques casi
+      // simultáneos sobre el mismo selector no deben procesar el mismo pick en paralelo.
+      const lockUserId = cb.from.id;
+      const acquired = await tryAcquireLock(kv, rchat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+      // Fire-and-forget: handleQueuePick puede tardar minutos (transcribe+resume vía run(),
+      // TRANSCRIBE_TIMEOUT_MS hasta 10 min). Si se awaitea acá, el loop principal del daemon
+      // (secuencial, un solo `for` con `await processMessage`) queda congelado para TODOS los
+      // chats hasta que termine — mismo motivo por el que j:star/j:ytpl, 15 líneas más abajo,
+      // usan `void checkStarredResumir(...)`/`void checkPlaylistsResumir(...)` en vez de await.
+      // Hallado por daemon-health-reviewer (bug bloqueante, no cosmético).
+      void handleQueuePick({ botToken: env.COS_TELEGRAM_BOT_TOKEN }, rchat, kindRaw, pick, anchorId)
+        .catch((err) => log({ msg: "resu_pick_error", err: String(err) }))
+        .finally(() => releaseLock(kv, rchat, lockUserId).catch(() => {}));
       return;
     }
 
