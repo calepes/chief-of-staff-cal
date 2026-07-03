@@ -988,7 +988,7 @@ async function unstarFeedbinEntry(entryId: number): Promise<boolean> {
 // Arranca a procesar UN starred ya elegido (reserva el lock, edita el ancla, corre run(), y si
 // falla limpia + des-estrella + avanza al siguiente). Compartida entre el camino FIFO (shift(),
 // modo batch) y el camino "por id" (splice desde resu-pick:s:{id}) — ver pickStarredItem.
-async function startStarredItem(deps: ResumirDeps, chatId: number, item: StarredItem, anchorMsgId?: number): Promise<void> {
+async function startStarredItem(deps: ResumirDeps, chatId: number, item: StarredItem, anchorMsgId: number | undefined, autoAdvanceOnFail: boolean): Promise<void> {
   // Punto único de reset del flag de cancelación: cada ítem arranca limpio, sea elegido desde el
   // selector o por FIFO automático. Una parada vieja (de un ítem ya resuelto) no debe abortar este.
   cancelRequested.delete(chatId);
@@ -1004,15 +1004,26 @@ async function startStarredItem(deps: ResumirDeps, chatId: number, item: Starred
   } catch {
     failed = true;
   }
-  // Si run() NO dejó una propuesta real (sin contenido o error), el lock sigue placeholder → limpiar y seguir.
+  // Si run() NO dejó una propuesta real (sin contenido o error), el lock sigue placeholder → limpiar.
   const cur = readJsonSafe<PendingProposal | null>(pendingPath(chatId), null);
   if (failed || (cur && cur.placeholder)) {
     try { unlinkSync(pendingPath(chatId)); } catch { /* noop */ }
-    // Ya quedó marcado como 'seen' (no se reprocesa) → des-estrellar también, para no dejar
-    // una estrella huérfana en Feedbin de algo que el sistema descartó. Esperar antes de avanzar.
-    await unstarFeedbinEntry(item.id);
-    await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(item.title)}" (sin contenido en Feedbin); lo descarto y le quito la estrella.`);
-    await advanceStarredQueue(deps, chatId); // el siguiente crea su propio mensaje
+    if (autoAdvanceOnFail) {
+      // Ya quedó marcado como 'seen' (no se reprocesa) → des-estrellar también, para no dejar
+      // una estrella huérfana en Feedbin de algo que el sistema descartó. Esperar antes de avanzar.
+      await unstarFeedbinEntry(item.id);
+      await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(item.title)}" (sin contenido en Feedbin); lo descarto y le quito la estrella.`);
+      await advanceStarredQueue(deps, chatId); // el siguiente crea su propio mensaje
+    } else {
+      // Selección puntual de Cal: NO auto-avanzar ni des-estrellar — devolver a la cola y avisar.
+      const q = readJsonSafe<{ items: StarredItem[]; mode?: "batch" }>(STARRED_QUEUE, { items: [] });
+      q.items.unshift(item);
+      writeJsonSafe(STARRED_QUEUE, q);
+      await setCardMessage(
+        deps.botToken, chatId, anchor,
+        `⚠️ No pude resumir "${escapeHtml(item.title)}" (sin contenido en Feedbin). Lo dejé de nuevo en la cola — no seguí con otro automáticamente. Decime "revisá los starred" para ver el selector de nuevo.`,
+      );
+    }
   }
 }
 
@@ -1031,7 +1042,7 @@ async function advanceStarredQueue(deps: ResumirDeps, chatId: number, anchorMsgI
     return;
   }
   writeJsonSafe(STARRED_QUEUE, q);
-  await startStarredItem(deps, chatId, next, anchorMsgId);
+  await startStarredItem(deps, chatId, next, anchorMsgId, true);
 }
 
 // Cron + on-demand: revisa los starred, encola los nuevos y arranca el primero.
@@ -1117,10 +1128,13 @@ async function listPlaylistVideos(url: string): Promise<PlaylistVideo[]> {
   } catch { return []; }
 }
 
-// Arranca a procesar UN video ya elegido (reserva el lock, edita el ancla, corre run(), y si
-// falla limpia + avanza al siguiente). Compartida entre el camino FIFO (shift(), modo batch) y
-// el camino "por id" (splice desde resu-pick:v:{id}) — ver pickPlaylistItem.
-async function startPlaylistItem(deps: ResumirDeps, chatId: number, video: PlaylistVideo, anchorMsgId?: number): Promise<void> {
+// Arranca a procesar UN video ya elegido (reserva el lock, edita el ancla, corre run()).
+// Compartida entre el camino FIFO (shift(), modo batch) y el camino "por id" (splice desde
+// resu-pick:v:{id}) — ver pickPlaylistItem. `autoAdvanceOnFail`: en modo batch, si falla, sigue
+// solo con el siguiente (comportamiento de siempre); en una selección puntual de Cal, si falla,
+// NO sigue con otro por su cuenta — avisa y para, para que Cal decida (pedido explícito de Cal,
+// 2026-07-03: "no debería continuar sino preguntarme qué hacer si falla uno").
+async function startPlaylistItem(deps: ResumirDeps, chatId: number, video: PlaylistVideo, anchorMsgId: number | undefined, autoAdvanceOnFail: boolean): Promise<void> {
   // Punto único de reset del flag de cancelación (ver startStarredItem): cada ítem arranca limpio,
   // sea elegido desde el selector o por FIFO automático.
   cancelRequested.delete(chatId);
@@ -1134,12 +1148,23 @@ async function startPlaylistItem(deps: ResumirDeps, chatId: number, video: Playl
   } catch {
     failed = true;
   }
-  // Si run() NO dejó una propuesta real (error o early-return), el lock sigue siendo placeholder → limpiar y avanzar al siguiente.
+  // Si run() NO dejó una propuesta real (error o early-return), el lock sigue siendo placeholder → limpiar.
   const cur = readJsonSafe<PendingProposal | null>(pendingPath(chatId), null);
   if (failed || (cur && cur.placeholder)) {
     try { unlinkSync(pendingPath(chatId)); } catch { /* noop */ }
-    await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(video.title)}", paso al siguiente.`);
-    await advancePlaylistQueue(deps, chatId); // el siguiente crea su propio mensaje
+    if (autoAdvanceOnFail) {
+      await setCardMessage(deps.botToken, chatId, anchor, `⚠️ No pude resumir "${escapeHtml(video.title)}", paso al siguiente.`);
+      await advancePlaylistQueue(deps, chatId); // el siguiente crea su propio mensaje
+    } else {
+      // Devolver el video a la cola (al principio) para no perderlo — Cal decide si reintentar.
+      const q = readJsonSafe<{ videos: PlaylistVideo[]; mode?: "batch" }>(PLAYLIST_QUEUE, { videos: [] });
+      q.videos.unshift(video);
+      writeJsonSafe(PLAYLIST_QUEUE, q);
+      await setCardMessage(
+        deps.botToken, chatId, anchor,
+        `⚠️ No pude resumir "${escapeHtml(video.title)}". Lo dejé de nuevo en la cola — no seguí con otro automáticamente. Decime "revisá la playlist" para ver el selector de nuevo.`,
+      );
+    }
   }
 }
 
@@ -1159,7 +1184,7 @@ async function advancePlaylistQueue(deps: ResumirDeps, chatId: number, anchorMsg
     return;
   }
   writeJsonSafe(PLAYLIST_QUEUE, q);
-  await startPlaylistItem(deps, chatId, next, anchorMsgId);
+  await startPlaylistItem(deps, chatId, next, anchorMsgId, true);
 }
 
 // Tras resolver una propuesta, sacar el item de su origen y devolver una nota corta para PLEGAR en la
@@ -1269,7 +1294,8 @@ async function pickPlaylistItem(deps: ResumirDeps, chatId: number, id: string, a
   }
   const [video] = q.videos.splice(idx, 1);
   writeJsonSafe(PLAYLIST_QUEUE, q);
-  await startPlaylistItem(deps, chatId, video, anchorMsgId);
+  // false: selección puntual de Cal — si falla, avisar y parar, no auto-avanzar a otro.
+  await startPlaylistItem(deps, chatId, video, anchorMsgId, false);
 }
 
 async function pickPlaylistAll(deps: ResumirDeps, chatId: number, anchorMsgId: number): Promise<void> {
@@ -1294,7 +1320,8 @@ async function pickStarredItem(deps: ResumirDeps, chatId: number, id: number, an
   }
   const [item] = q.items.splice(idx, 1);
   writeJsonSafe(STARRED_QUEUE, q);
-  await startStarredItem(deps, chatId, item, anchorMsgId);
+  // false: selección puntual de Cal — si falla, avisar y parar, no auto-avanzar a otro.
+  await startStarredItem(deps, chatId, item, anchorMsgId, false);
 }
 
 async function pickStarredAll(deps: ResumirDeps, chatId: number, anchorMsgId: number): Promise<void> {

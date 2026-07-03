@@ -42,11 +42,18 @@
   7 items con paginado de filas de máx 5, ids string vs number, 0 items, truncado de títulos
   largos). Solo las funciones puras — la extracción real (yt-dlp/Feedbin/filesystem) sigue sin
   mocks, verificación manual + build limpio.
-- **Decisión de alcance:** si un ítem falla al procesarse (transcripción/fetch sin contenido), el
-  recovery sigue haciendo auto-skip FIFO al siguiente (`advance*Queue`) independientemente del
-  modo — no vuelve a mostrar el selector en ese caso puntual. Es el mismo comportamiento que ya
-  existía antes de esta feature; no se tocó porque es manejo de errores, no el flujo feliz de
-  selección.
+### Fix — falla al procesar una selección puntual ya no auto-avanza sola
+
+- **Bug de diseño (reportado por Cal el mismo día, con un caso real: video en vivo sin
+  transcripción utilizable):** si Cal elegía un ítem puntual del selector (`resu-pick:{v|s}:{id}`)
+  y ese ítem fallaba al procesarse (sin captions/contenido, error de transcripción), el sistema
+  auto-avanzaba solo al SIGUIENTE de la cola (comportamiento heredado del modo FIFO/batch) —
+  contradice el propósito del selector: Cal eligió ESE, no "cualquiera que venga después".
+- **Fix:** `startPlaylistItem`/`startStarredItem` reciben un flag `autoAdvanceOnFail`. En modo
+  batch (`resu-pick:{v|s}:all`, FIFO de siempre) sigue siendo `true` — auto-avanza como antes. En
+  una selección puntual es `false` — si falla, el ítem se devuelve al principio de la cola (no se
+  pierde, no se des-estrella/saca de la playlist), se avisa a Cal explícitamente que falló y que
+  NO se siguió con otro solo, y se lo invita a pedir el selector de nuevo para decidir.
 
 ## 2026-06-21
 
