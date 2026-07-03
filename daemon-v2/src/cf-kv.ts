@@ -29,12 +29,19 @@ export class CfKv {
     const url = ttlSeconds != null && ttlSeconds > 0
       ? `${this.url(key)}?expiration_ttl=${ttlSeconds}`
       : this.url(key);
+    const body = JSON.stringify(value);
     const res = await fetch(url, {
       method: "PUT",
       headers: { ...this.headers(), "content-type": "application/json" },
-      body: JSON.stringify(value),
+      body,
     });
-    if (!res.ok) throw new Error(`KV set failed: ${res.status}`);
+    if (!res.ok) {
+      // Diagnóstico (2026-07-03): "KV set failed: 400" venía sin detalle — capturamos el body
+      // de error de CF (suele traer el motivo real: value/key size, TTL inválido, etc.) y el
+      // tamaño+key del value que se intentó escribir, para poder diagnosticar sin adivinar.
+      const errBody = await res.text().catch(() => "");
+      throw new Error(`KV set failed: ${res.status} key=${key} valueBytes=${body.length} body=${errBody.slice(0, 500)}`);
+    }
   }
 
   async delete(key: string): Promise<void> {
