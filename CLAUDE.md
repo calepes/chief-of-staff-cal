@@ -83,6 +83,16 @@ Fuente: `daemon-v2/src/index.ts`.
 - Integración "Claude CoS" (DB Tareas + People). Prefijo MCP: `mcp__claude_ai_Notion__*`.
 - Referencia cross-project: `~/Claude Projects/notion-reference.md` (bajo demanda).
 
+## Gap conocido — bulk review parcial en approval-flow (2026-07-02, familia 3)
+
+`buildApprovalFlow`/`stepApprovalWizard` (`tools/approval-flow.ts`) solo ofrece "revisar uno a uno"
+o "confirmar/descartar todo" — no se puede aprobar un subconjunto (ej. "estos 3 sí, esos 2 después")
+sin pasar por el wizard completo. Investigado como parte del proyecto de rediseño de mensajes
+Telegram (familia 3, bulk review); impacto evaluado como bajo (único uso activo hoy es
+meetings→Foco Log, bajo volumen) — **decisión de Cal: documentar nada más, no implementar** por
+ahora. Si el volumen de uso crece o se reactiva algún cron que dispare este wizard con más
+frecuencia, reconsiderar.
+
 ## Referencias (cargar bajo demanda)
 - Menú interactivo + callbacks + flujos de tareas: `docs/references/menu-telegram.md`
 - Viajes, calendarios, briefings, health, audio, /today: `docs/references/viajes-calendarios.md`
