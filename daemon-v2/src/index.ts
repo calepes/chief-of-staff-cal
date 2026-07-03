@@ -70,10 +70,14 @@ const LEARNINGS_PATH = `${process.env.HOME}/.cos-agent/learnings.md`;
 const ALERT_CHAT_ID = 94137698;
 const ALERT_THRESHOLD = 3;
 const BACKOFF_MAX_MS = 120_000;
-// TTL corto del lock anti-doble-tap sobre las tarjetas mlog:/mskip:/msel: — suficiente para
-// cubrir el procesamiento típico de processMessage (agente + edit), sin bloquear de verdad
-// si algo se cuelga. Mismo valor que Pecunia (CALLBACK_LOCK_TTL_SEC).
-const MEETING_FLOW_LOCK_TTL_SEC = 20;
+// TTL corto del lock anti-doble-tap sobre las tarjetas mlog:/mskip:/msel:/resu-pick: —
+// suficiente para cubrir el procesamiento típico de processMessage (agente + edit), sin
+// bloquear de verdad si algo se cuelga. 60s = mínimo que acepta la API de Cloudflare KV
+// (expiration_ttl) — un valor menor (era 20) devuelve 400 "Invalid expiration_ttl" y
+// tryAcquireLock tira una excepción sin capturar, rompiendo el callback ENTERO en silencio.
+// Bug real: encontrado 2026-07-03 vía log detallado en cf-kv.ts tras reportar Cal que tocar
+// un ítem del selector "no hacía nada" — 28+ fallas silenciosas desde que se agregó el lock.
+const MEETING_FLOW_LOCK_TTL_SEC = 60;
 
 function log(obj: Record<string, unknown>) {
   console.log(JSON.stringify({ ts: Date.now(), ...obj }));
