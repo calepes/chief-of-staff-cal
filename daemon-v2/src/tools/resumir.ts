@@ -21,7 +21,9 @@ const PLAYWRIGHT_BROWSERS_PATH = `${HOME}/Library/Caches/ms-playwright`;
 
 const FETCH_TIMEOUT_MS = 60_000;        // safari-fetch
 const TRANSCRIBE_TIMEOUT_MS = 600_000;  // yt-dlp + whisper (hasta 10 min)
-const SUMMARIZE_TIMEOUT_SEC = 180;      // subprocess claude
+const SUMMARIZE_TIMEOUT_SEC = 360;       // subprocess claude — subido de 180s (2026-07-03):
+                                          // transcripciones muy largas (streams/programas en
+                                          // vivo de +1h) pueden tardar más de 3 min en resumirse
 const TG_MAX = 4000;                    // límite seguro por mensaje Telegram
 const PENDING_DIR = `${HOME}/.cos-agent`; // estado de propuestas pendientes (entre runs)
 
