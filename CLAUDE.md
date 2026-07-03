@@ -39,7 +39,7 @@ El watchdog re-setea el webhook solo cada 1 min. Re-set manual de webhook + debu
 
 ## Índice de tools + MCPs
 Implementación y detalle en código (ver "dónde vive qué"). Inventario:
-- **Custom (`cos-tools`):** getOutlookEvents · runBriefing · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody.
+- **Custom (`cos-tools`):** getOutlookEvents · runBriefing · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`).
 
 ### Resumidor (`tools/resumir.ts`) — checkpoint con tarjeta + colas
 Resumidor universal con checkpoint antes de guardar a Readwise. Reusa los scripts del skill `resumir` vía spawn (sin Bash); cookies Safari con `~/.claude/bin/node-fda` (requiere FDA bajo launchd).
@@ -67,6 +67,7 @@ Fuente: `daemon-v2/src/index.ts`.
 - **`ntn api` query:** usar `/v1/data_sources/{ds_id}/query`, NO `/v1/databases/{id}/query` (devuelve 400). El `data_source_id` ≠ `db_id`.
 - **SDK librería NO lee `~/.claude/.mcp.json`:** registrar MCPs custom en `BASE_OPTIONS.mcpServers` (`daemon-v2/src/index.ts`). Sin esto: "permissions not granted".
 - **Formato Telegram = HTML:** parse mode HTML, escapar solo `< > &`. NO MarkdownV2. `sanitizeForTelegram()` convierte Markdown rezagado. Detalle en `system-prompt.ts`.
+- **Emojis de dominio Mundial (lexicon extendido):** además del lexicon estándar (`telegram-bot-ux/references/lexicon.md`), Jano puede usar para fútbol/Mundial 2026: `⚽` (header deportivo), `🥇 🥈 🥉` (podio/ranking de goleadores/posiciones/power ranking), y banderas de país (`🇦🇷 🇧🇷 …`) junto al nombre de la selección. **Regla:** las banderas NO van dentro de bloques `<pre>` (rompen la alineación monoespaciada → usar código de 3 letras tipo ARG/FRA ahí). Para rankings de datos preferir **lista** (bullets `•` + `<b>`) sobre tabla `<pre>`, salvo que la densidad de columnas lo justifique.
 - **PDF/DOCX:** `processDocument()` en `index.ts` (pdf-parse v2 / mammoth), trunca a 50K. API pdf-parse v2: `const { PDFParse } = require("pdf-parse")` (named export, NO la clase directa) → `new PDFParse({data}).getText()` → `.text`. Mismo patrón obligatorio en `tools/schedule-cal.ts` (`extractPdfUrl`, PDFs de Notion) — archivo compartido con Vesta; al tocarlo copiar a ambos y rebuildar. Bug histórico (fix 2026-06-21): require sin destructurar + `parsed.text` sin `.getText()` → TypeError enmascarado como `"[PDF — error al procesar]"`.
 - **SNI filtering bloquea Telegram** en algunas redes (WiFi guest/hoteles): "Connection reset" en TLS. Daemon arranca pero el bot queda mudo. Diagnóstico: `curl -s https://api.telegram.org/bot$TOKEN/getMe` vacío mientras google.com funciona. Fix: cambiar red.
 - **Debug estado launchd:** `launchctl print gui/$(id -u)/com.cal.cos-agent-v2` (más útil que `launchctl list | grep`).
@@ -102,6 +103,16 @@ Hay dos mecanismos de proactividad independientes:
 - `scheduleFocoCheckinsLocal()` — **DESACTIVADO 2026-06-17** (Foco CAL am/md/pm, `proactive/foco-check.ts`).
 
 Ambos comentados juntos en `loop()`. Reactivar: descomentar la llamada correspondiente + rebuild + restart.
+
+**Al reactivar (familia 6 del rediseño de mensajes Telegram, 2026-07-02):** `scheduleFlightCheckin`,
+`scheduleFocoCheckinsLocal` y el monitor de combustible (abajo) mandan cada uno su propio
+`sendMessage` independiente. Si dos coinciden en la misma ventana (ej. foco check-in y una alerta
+de vuelo), hoy saldrían como 2 mensajes separados. Vesta ya resolvió el mismo problema entre sus
+4 crons con un módulo `digest-queue.ts` (cola en memoria, debounce ~15s, sin KV — ver
+`Vesta/daemon-v2/src/digest-queue.ts` + `Vesta/CLAUDE.md` sección "Digest-queue entre crons" y
+el spec `Vesta/docs/superpowers/specs/2026-07-02-digest-queue-crons-design.md`). Al reactivar
+cualquiera de estas proactivas en Jano, copiar ese mismo patrón desde el día uno (adaptado a
+`resumidor.ts`'s cola existente si aplica) en vez de volver a `sendMessage` suelto por mecanismo.
 
 **Estado real (2026-06-19):** sin crons internos de proactividad (solo webhook watchdog, infra) Y **sin proactividad por evento externo** — el monitor de combustible se apagó 2026-06-19 (ver abajo). Hoy NO hay ninguna proactividad automática hacia Cal. Verificar qué crons internos arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
 
