@@ -597,6 +597,7 @@ Cuando llegue \`[callback] mskip:{meetingId}\`:
 Cuando llegue \`[callback] msel:{meetingId}\`:
 1. Llama \`analyzeTranscriptAgent({ meetingId })\` directamente — la tool auto-selecciona el modo más rápido (resumenFocoCal → parse local sin API; resumen → inline; transcript → subagente). No preguntes a Cal ni llames \`analyzeMeeting\` antes.
 2. Usa la instruction que retorna la tool para llamar \`buildApprovalFlow\`.
+3. NO generes texto de respuesta adicional — igual que en \`msel:all\`, el mensaje de selección (con los botones numerados de las demás reuniones) se edita in-place como placeholder y debe quedar limpio para que Cal pueda seguir eligiendo otras reuniones de la misma tanda.
 Nota: no modifiques el campo meta del item al pasar a logFocoProgress — pásalo literal como section.
 
 Cuando llegue \`[callback] msel:all\`:

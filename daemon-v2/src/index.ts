@@ -431,7 +431,11 @@ async function processDocument(
   }
 }
 
-async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts?: { existingPlaceholderId?: number }): Promise<void> {
+async function processMessage(
+  payload: TelegramUpdate,
+  queueWaitMs: number,
+  opts?: { existingPlaceholderId?: number; clearKeyboard?: boolean },
+): Promise<void> {
   if (!payload.message && !payload.callback_query) {
     log({ msg: "skip_unsupported_update", update_id: payload.update_id });
     return;
@@ -518,7 +522,24 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         from: cb.from ? { id: cb.from.id, first_name: cb.from.first_name } : undefined,
       },
     };
-    await processMessage(synthetic, queueWaitMs);
+    // Meetings → Foco (mlog:/mskip:/msel:): reusar la tarjeta/mensaje que Cal tocó como
+    // placeholder en vez de crear uno nuevo (evita el bug de mensajes que se apilan) y limpiar
+    // su teclado (esa tarjeta ya no representa "una reunión sin procesar" — sin esto Telegram
+    // deja el reply_markup viejo pegado al mensaje editado y Cal podría re-tocar botones de una
+    // tarjeta ya procesada). Ver gotcha en CLAUDE.md.
+    const isMeetingFlowCallback = /^(mlog:|mskip:|msel:)/.test(cb.data ?? "");
+    // Ack inmediato: apaga el spinner del botón cuanto antes para desalentar un doble-tap
+    // mientras se reusa la misma tarjeta como placeholder (editMessageText concurrente sobre
+    // el mismo message_id si Cal toca 2 veces seguido — no hay lock, esto solo reduce la
+    // ventana, no la elimina; ver gotcha en CLAUDE.md).
+    if (isMeetingFlowCallback) {
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+    }
+    await processMessage(
+      synthetic,
+      queueWaitMs,
+      isMeetingFlowCallback ? { existingPlaceholderId: cb.message.message_id, clearKeyboard: true } : undefined,
+    );
     return;
   }
 
@@ -705,7 +726,13 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
     const warm = await warmPromise;
     const warmAcquireMs = Date.now() - t1;
 
-    void editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, "💭 Pensando...").catch(() => {});
+    // Si el placeholder es una tarjeta reciclada con botones (mlog:/mskip:/msel:), limpiar el
+    // reply_markup en cada edit — editMessageText NO toca el teclado si reply_markup se omite,
+    // así que sin esto los botones viejos ("✅ Loguear"/"⏭ Saltar"/etc.) quedarían tocables
+    // encima del resultado final.
+    const clearMarkup = opts?.clearKeyboard ? { inline_keyboard: [] } : undefined;
+
+    void editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, "💭 Pensando...", "HTML", clearMarkup).catch(() => {});
 
     log({
       msg: "agent_run_start",
@@ -724,7 +751,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         history,
         contextHeader,
         onProgress: async (progressText) => {
-          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, progressText).catch(() => {});
+          await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, progressText, "HTML", clearMarkup).catch(() => {});
         },
       });
       // Safety net: convert Markdown → HTML before sending and storing.
@@ -772,12 +799,12 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
           const chunk = chunks[i];
           if (i === 0) {
             try {
-              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML");
+              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML", clearMarkup);
             } catch (parseErr) {
               log({ msg: "html_parse_failed", err: String(parseErr) });
               // Fallback: reintentar sin HTML; si el mensaje tampoco se puede editar (p.ej. tiene
               // reply keyboard o fue borrado), entregar como mensaje nuevo en vez de romper el turno.
-              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null).catch(() =>
+              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null, clearMarkup).catch(() =>
                 sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk }).catch(() => {}),
               );
             }
@@ -811,6 +838,7 @@ async function processMessage(payload: TelegramUpdate, queueWaitMs: number, opts
         placeholderMsgId,
         "⚠️ <b>No pude procesar tu mensaje</b>\nHubo un error interno. Intenta de nuevo o usa <code>/reset</code>.",
         "HTML",
+        clearMarkup,
       );
     }
   } finally {
