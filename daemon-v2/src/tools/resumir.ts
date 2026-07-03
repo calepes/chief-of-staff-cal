@@ -1001,7 +1001,10 @@ async function startStarredItem(deps: ResumirDeps, chatId: number, item: Starred
     const content = await fetchStarredContent(item.id, item.url);
     if (!content) failed = true;
     else await run(deps, chatId, "article", { source: item.url }, { fromStarred: true, feedbinId: item.id, prefetched: content, anchorMsgId: anchor });
-  } catch {
+  } catch (e) {
+    // Motivo real del fallo (ej. timeout de summarize a los 180s) — antes se tragaba en
+    // silencio, sin forma de diagnosticar por qué falló un ítem puntual (visto 2026-07-03).
+    console.error(`[resumir] startStarredItem falló (id=${item.id}, "${item.title}"): ${e instanceof Error ? e.message : String(e)}`);
     failed = true;
   }
   // Si run() NO dejó una propuesta real (sin contenido o error), el lock sigue placeholder → limpiar.
@@ -1145,7 +1148,10 @@ async function startPlaylistItem(deps: ResumirDeps, chatId: number, video: Playl
   let failed = false;
   try {
     await run(deps, chatId, "video", { source: video.url }, { fromPlaylist: true, videoId: video.id, anchorMsgId: anchor });
-  } catch {
+  } catch (e) {
+    // Motivo real del fallo (ej. timeout de summarize a los 180s) — antes se tragaba en
+    // silencio, sin forma de diagnosticar por qué falló un ítem puntual (visto 2026-07-03).
+    console.error(`[resumir] startPlaylistItem falló (id=${video.id}, "${video.title}"): ${e instanceof Error ? e.message : String(e)}`);
     failed = true;
   }
   // Si run() NO dejó una propuesta real (error o early-return), el lock sigue siendo placeholder → limpiar.
