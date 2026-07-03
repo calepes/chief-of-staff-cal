@@ -54,6 +54,12 @@
   una selección puntual es `false` — si falla, el ítem se devuelve al principio de la cola (no se
   pierde, no se des-estrella/saca de la playlist), se avisa a Cal explícitamente que falló y que
   NO se siguió con otro solo, y se lo invita a pedir el selector de nuevo para decidir.
+- **Logging del motivo real de la falla:** el `catch` de `run()` en `startPlaylistItem`/
+  `startStarredItem` tragaba el error en silencio — imposible diagnosticar por qué falló un ítem
+  puntual. Ahora loguea `err.message` (`console.error`). Caso real que motivó esto: un video en
+  vivo larguísimo — `audio-transcribe.sh` probado manualmente SÍ transcribe bien, la sospecha es
+  que la transcripción resultante es tan larga que el resumen (`summarize()`, subprocess `claude
+  -p`) excede `SUMMARIZE_TIMEOUT_SEC` (180s).
 
 ## 2026-06-21
 
