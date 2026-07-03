@@ -39,7 +39,8 @@ const BASE_ENTRY: Omit<FocoProgressEntry, "date"> = {
 describe("appendFocoProgress", () => {
   it("crea el archivo si no existe y agrega la entrada", () => {
     const path = makeTmpPath();
-    const entry: FocoProgressEntry = { ...BASE_ENTRY, date: "2026-05-21" };
+    const today = new Date().toISOString().slice(0, 10);
+    const entry: FocoProgressEntry = { ...BASE_ENTRY, date: today };
     appendFocoProgress(entry, path);
     const result = readFocoProgress(30, path);
     expect(result).toHaveLength(1);
@@ -48,8 +49,9 @@ describe("appendFocoProgress", () => {
 
   it("agrega entradas sucesivas sin sobreescribir", () => {
     const path = makeTmpPath();
-    appendFocoProgress({ ...BASE_ENTRY, date: "2026-05-21" }, path);
-    appendFocoProgress({ ...BASE_ENTRY, date: "2026-05-21", itemText: "Decir más No" }, path);
+    const today = new Date().toISOString().slice(0, 10);
+    appendFocoProgress({ ...BASE_ENTRY, date: today }, path);
+    appendFocoProgress({ ...BASE_ENTRY, date: today, itemText: "Decir más No" }, path);
     const result = readFocoProgress(30, path);
     expect(result).toHaveLength(2);
   });

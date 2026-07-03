@@ -54,18 +54,19 @@ describe("searchCover", () => {
     fetchMock.mockReset();
   });
 
-  it("returns Open Library URL when ISBN cover exists (302)", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 302, redirected: false });
+  it("returns Open Library URL when ISBN cover exists", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
     const { searchCover } = await import("./books.js");
     const url = await searchCover("9781578514373");
     expect(url).toBe("https://covers.openlibrary.org/b/isbn/9781578514373-L.jpg");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://covers.openlibrary.org/b/isbn/9781578514373-L.jpg",
+      "https://covers.openlibrary.org/b/isbn/9781578514373-L.jpg?default=false",
       expect.objectContaining({ method: "HEAD" })
     );
   });
 
-  it("falls back to Google Books when no ISBN", async () => {
+  it("returns Google Books cover when available (primary source)", async () => {
+    process.env.GOOGLE_BOOKS_API_KEY = "test-key";
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -75,6 +76,7 @@ describe("searchCover", () => {
     const { searchCover } = await import("./books.js");
     const url = await searchCover(undefined, "Leadership on the Line", "Heifetz");
     expect(url).toBe("https://books.google.com/thumb.jpg");
+    delete process.env.GOOGLE_BOOKS_API_KEY;
   });
 
   it("returns null when no cover found", async () => {
@@ -218,11 +220,21 @@ describe("logReadingProgress", () => {
   });
 
   it("creates tracking entry with correct body", async () => {
-    mockSpawn.mockReturnValue({
-      status: 0,
-      stdout: '{"id":"track-1","url":"https://notion.so/track-1"}',
-      stderr: "",
-    } as ReturnType<typeof childProcess.spawnSync>);
+    mockSpawn
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: '{"id":"track-1","url":"https://notion.so/track-1"}',
+        stderr: "",
+      } as ReturnType<typeof childProcess.spawnSync>)
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: JSON.stringify({
+          id: "book-id",
+          url: "https://notion.so/book-id",
+          properties: { Name: { title: [{ plain_text: "Leadership on the Line" }] } },
+        }),
+        stderr: "",
+      } as ReturnType<typeof childProcess.spawnSync>);
 
     const { logReadingProgress } = await import("./books.js");
     const result = await logReadingProgress({
@@ -234,6 +246,7 @@ describe("logReadingProgress", () => {
 
     expect(result).toContain("10% → 25%");
     expect(result).toContain("+15%");
+    expect(result).toContain("Leadership on the Line");
 
     const ntnArgs = mockSpawn.mock.calls[0][1] as string[];
     const body = JSON.parse(ntnArgs[ntnArgs.indexOf("-d") + 1]);
@@ -248,7 +261,7 @@ describe("setBookCover", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 302, redirected: false }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 }));
   });
 
   it("patches page with cover and icon using same URL", async () => {
