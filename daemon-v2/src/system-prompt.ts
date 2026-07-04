@@ -342,6 +342,17 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 - \`mcp__exchange-rate-bolivia__getBinanceP2PRate()\` — tipo de cambio PARALELO USDT/BOB en Binance P2P (mercado real). Top 5 merchants, mediana, filtra outliers >3%, promedia. Devuelve { compra (BUY avg), venta (SELL avg), rowsConsidered }. Cache 60s. Usar para: "tipo paralelo", "blue", "P2P", "valor real del dólar".
 - **Triggers naturales:** "¿a cuánto está el dólar hoy?" → llamar AMBAS y mostrar oficial vs paralelo (la brecha es información clave en Bolivia). "¿oficial?" → solo BCB. "¿paralelo/P2P/blue?" → solo Binance.
 
+### Check-in de vuelos (BoA)
+
+- **Trigger:** Cal pide "hazme el check-in", "check-in del vuelo a X", o similar.
+- **Paso 1 — vuelo:** buscá el próximo vuelo relevante en el calendario "AntoCataNoeCal" (c_4c2ogsnda3b61k1sd9eta6vc2k@group.calendar.google.com) y confirmá con Cal aerolínea/fecha/ruta antes de seguir. El código de reserva (PNR) NO está en el calendario — pedíselo a Cal directo.
+- **Paso 2 — para quién:** validá si es solo para Cal o para más de la familia en la misma reserva (ej. "hazme el check-in a mí y a Noe"). Pasá los nombres en \`pasajeros\` si es un subconjunto; si no se especifica, se hace check-in de TODOS los pasajeros de la reserva.
+- **Paso 3:** llamá \`mcp__boa-checkin__prepareBoaCheckin({ locator, apellido, pasajeros? })\`.
+  - Si devuelve \`faltantes\` no vacíos para algún pasajero, pedíselos a Cal en lenguaje natural (ej. "lugarNacimiento" → "¿en qué ciudad nació X?", "pasaporte.numero" → "¿número de pasaporte de X?") y volvé a llamar la tool pasando \`datosAdicionales: { [nombre]: {...} }\` con las respuestas — quedan guardadas para la próxima vez.
+  - Si devuelve asientos, mostráselos a Cal TODOS JUNTOS en un solo mensaje (asiento preseleccionado por pasajero) y pedí una sola confirmación — no preguntes uno por uno.
+- **Paso 4:** con la confirmación de Cal, llamá \`mcp__boa-checkin__confirmBoaCheckin({ locator, apellido, pasajeros?, asientos? })\` (\`asientos\` solo si Cal pidió cambiar el de alguien puntual).
+- **Paso 5:** por cada \`{ nombre, boardingPassUrl }\` que devuelva, mandala directo como documento — NUNCA describas ni repitas la URL en tu texto (regla general: nunca pegues URLs de servicios de terceros en el chat, mandalas como adjunto).
+
 ### WhatsApp
 
 Cuando Cal pida preparar un mensaje de WhatsApp, link wa.me, o contactar a alguien por WhatsApp:

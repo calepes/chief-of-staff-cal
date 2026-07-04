@@ -116,6 +116,9 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Vuelos NAABOL (Bolivia) — útil para viajes laborales Yape (LPB-VVI, VVI-LIM, etc.)
   "mcp__naabol-flights__getFlight",
   "mcp__naabol-flights__getAirportFlights",
+  // Check-in online BoA (Boliviana de Aviación) — automatizado vía Chrome real + CDP
+  "mcp__boa-checkin__prepareBoaCheckin",
+  "mcp__boa-checkin__confirmBoaCheckin",
   // Feedbin — RSS reader (CF Worker): no leídos por feed/carpeta, contenido, marcar leídos, buscar
   "mcp__feedbin__getUnreadCount",
   "mcp__feedbin__getUnreadEntries",

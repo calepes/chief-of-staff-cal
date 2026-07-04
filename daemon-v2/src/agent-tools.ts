@@ -337,6 +337,31 @@ export function buildSdkTools(deps: ToolDeps) {
       },
     ),
     tool(
+      "enviarDocumentoUrl",
+      [
+        "Manda al chat, como documento, un archivo que ya está en una URL pública (ej. el boarding pass que devuelve mcp__boa-checkin__confirmBoaCheckin).",
+        "Args: { url: string (URL pública y directa del archivo), caption?: string (texto corto, sin HTML) }.",
+        "Telegram descarga el archivo server-side desde esa URL — NO la pegues como link en tu texto, mandala SIEMPRE con esta tool.",
+        "Después de invocar esta tool no repitas la URL ni la describas: ya se envió. Responde solo una frase corta (o el error si status != sent).",
+      ].join(" "),
+      {
+        url: z.string(),
+        caption: z.string().optional(),
+      },
+      async ({ url, caption }) => {
+        const chatId = deps.getCurrentChatId?.();
+        const token = deps.botToken;
+        if (!chatId || !token) return asText({ status: "error", error: "No chatId/token disponible" });
+        try {
+          await sendChatAction(token, chatId, "upload_document").catch(() => {});
+          await sendDocument(token, chatId, url, caption ? { caption } : {});
+          return asText({ status: "sent" });
+        } catch (err) {
+          return asText({ status: "send_failed", error: String(err) });
+        }
+      },
+    ),
+    tool(
       "generarQrAduanaBolivia",
       [
         "Genera el QR de salida/ingreso de Bolivia (Formulario N° 250 de la Aduana — Declaración Jurada) para un viajero y lo MANDA directo al chat como imagen.",

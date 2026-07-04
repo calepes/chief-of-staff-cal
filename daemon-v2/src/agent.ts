@@ -63,6 +63,8 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__health__getWorkouts":                          "🏋️ Leyendo entrenamientos...",
   "mcp__exchange-rate-bolivia__getBcbRate":             "💱 Consultando tipo de cambio...",
   "mcp__exchange-rate-bolivia__getBinanceP2PRate":      "💱 Consultando Binance P2P...",
+  "mcp__boa-checkin__prepareBoaCheckin":                "🎫 Preparando tu check-in...",
+  "mcp__boa-checkin__confirmBoaCheckin":                "🎫 Confirmando el check-in...",
   "mcp__worldcup__getFixtures":                        "📅 Buscando partidos...",
   "mcp__worldcup__getStandings":                       "📊 Revisando las tablas...",
   "mcp__worldcup__getMatchDetail":                     "⚽ Revisando el partido...",

@@ -203,6 +203,8 @@ const ACHORADAZOS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/achoradazos/dist/index.js";
 const WORLDCUP_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/worldcup/dist/index.js";
+const BOA_CHECKIN_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/boa-checkin/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -220,6 +222,15 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: "node",
       args: [EXCHANGE_RATE_DIST],
+    },
+    // Automatiza el check-in de BoA lanzando el Chrome real del sistema y
+    // conectando vía CDP (chromium.launch() propio es bloqueado por el WAF
+    // Imperva de BoA — spike validado 2026-07-04, ver
+    // docs/superpowers/specs/2026-07-04-boa-checkin-mcp-design.md).
+    "boa-checkin": {
+      type: "stdio",
+      command: "node",
+      args: [BOA_CHECKIN_DIST],
     },
     // Vía worker CF (mcp-remote), NO el stdio local: el CLI local usa Node fetch (undici)
     // que se cuelga ~8s contra fids.naabol.gob.bo desde la red de Cal (curl al mismo host
