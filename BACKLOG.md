@@ -1,4 +1,4 @@
-> 🌀 **15 items migrados a Atenea (Notion)** el 2026-05-08 — ver DBs Projects/Stories. Los items unchecked originales se conservan abajo como historia. El backlog vivo está en Notion.
+> ✅ Este `BACKLOG.md` es la fuente viva (Atenea/Notion dado de baja 2026-07-02, ver `~/Claude Projects/BACKLOG.md` para el índice general).
 
 # Backlog — Jano
 
