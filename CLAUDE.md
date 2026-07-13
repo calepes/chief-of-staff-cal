@@ -91,6 +91,7 @@ Fuente: `daemon-v2/src/index.ts`.
 
 ## Notion
 - Integración "Claude CoS" (DB Tareas + People). Prefijo MCP: `mcp__claude_ai_Notion__*`.
+- **Ese MCP es SOLO del daemon.** En sesión interactiva de Claude Code no existe — usar el CLI `ntn` (skill `notion-ntn`) para cualquier query/escritura a Notion sobre este repo (ej. sync de docs a la DB "Agentes AI").
 - Referencia cross-project: `~/Claude Projects/notion-reference.md` (bajo demanda).
 
 ## Gap conocido — bulk review parcial en approval-flow (2026-07-02, familia 3)
