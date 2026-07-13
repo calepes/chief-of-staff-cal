@@ -304,7 +304,7 @@ const BASE_OPTIONS: Options = {
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
   disallowedTools: DISALLOWED_BUILTINS,
   maxTurns: 12,
-  model: "claude-sonnet-4-6",
+  model: "claude-sonnet-5",
 };
 
 // NOT using a warm pool. Pecunia v2 / Vesta v2 documented "Warm pool stale rompe
@@ -674,8 +674,9 @@ async function processMessage(
       : document
         ? "📄 Leyendo documento..."
         : "⏳ Pensando...";
-  const placeholderMsgId: number = opts?.existingPlaceholderId != null
-    ? opts.existingPlaceholderId
+  const reusedPlaceholder = opts?.existingPlaceholderId != null;
+  let placeholderMsgId: number = reusedPlaceholder
+    ? opts!.existingPlaceholderId!
     // OJO: NO adjuntar reply keyboard acá — Telegram no permite editMessageText sobre un mensaje
     // con ReplyKeyboardMarkup → "message can't be edited" y el turno falla. El teclado persistente
     // "📋 Menú" se fija una sola vez con un mensaje aparte (no editado) y persiste server-side.
@@ -710,13 +711,26 @@ async function processMessage(
       text = transcript;
       voiceTranscript = transcript;
       contextHeader = `${dateCtx}\n(Audio transcrito) chat_type=${chatType}`;
-      await editMessage(
-        env.COS_TELEGRAM_BOT_TOKEN,
+      // Transcripción como mensaje propio, en reply al audio — queda en el historial
+      // de Telegram aunque el placeholder de abajo se sobreescriba con la respuesta final.
+      await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
         chatId,
-        placeholderMsgId,
-        `🎤 <i>"${escapeHtml(transcript)}"</i>\n\n⏳ Procesando...`,
-        "HTML",
-      );
+        text: `🎤 <i>"${escapeHtml(transcript)}"</i>`,
+        parseMode: "HTML",
+        replyToMessageId: m.message_id,
+      }).catch((err) => log({ msg: "voice_transcript_reply_error", err: String(err) }));
+      // El placeholder "Transcribiendo audio..." se creó ANTES de mandar la transcripción de
+      // arriba, así que quedaría por encima de ella en el historial. Lo reemplazamos por uno
+      // nuevo creado DESPUÉS de la transcripción, para que la respuesta final (que edita este
+      // placeholder) quede debajo de lo que Cal dijo, no arriba (pedido de Cal 2026-07-11).
+      if (reusedPlaceholder) {
+        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, "⏳ Procesando...", "HTML");
+      } else {
+        await deleteMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId).catch(() => {});
+        placeholderMsgId = (
+          await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: "⏳ Procesando..." })
+        ).message_id;
+      }
     } else if (photo) {
       void editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, "📸 Analizando foto con IA...").catch(() => {});
       const photoData = await processPhoto(env.COS_TELEGRAM_BOT_TOKEN, photo.file_id, caption);

@@ -24,6 +24,11 @@ export const DISALLOWED_BUILTINS: string[] = [
   "ListMcpResourcesTool",
   "ReadMcpResourceTool",
   "ToolSearch",
+  // Interactiva de Claude Code CLI: en un daemon headless no hay quién responda,
+  // falla siempre con "Answer questions?" y hace perder ~1min por turno mientras
+  // el modelo reintenta con otra tool (visto en flujo de tags del resumidor y en
+  // confirmación de fechas de calendario, 2026-07-12).
+  "AskUserQuestion",
   // "Skill" intentionally NOT blocked — CoS needs it to invoke global skills
   // (vuelos-bolivia, telegram-bot-ux, briefing-pais).
   "ScheduleWakeup",
@@ -119,6 +124,9 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Check-in online BoA (Boliviana de Aviación) — automatizado vía Chrome real + CDP
   "mcp__boa-checkin__prepareBoaCheckin",
   "mcp__boa-checkin__confirmBoaCheckin",
+  "mcp__boa-checkin__manageBoaSeat",
+  "mcp__boa-checkin__getBoaBoardingPass",
+  "mcp__boa-checkin__setBoaFrequentFlyer",
   // Feedbin — RSS reader (CF Worker): no leídos por feed/carpeta, contenido, marcar leídos, buscar
   "mcp__feedbin__getUnreadCount",
   "mcp__feedbin__getUnreadEntries",
@@ -175,9 +183,14 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__worldcup__predictMatch",
   "mcp__worldcup__forecastTournament",
   "mcp__worldcup__syncResults",
+  "mcp__worldcup__getFifaStatDictionary",
   "mcp__worldcup__getFifaMatchStats",
   "mcp__worldcup__getFifaPlayerStats",
   "mcp__worldcup__getFifaPowerRanking",
+  "mcp__worldcup__getFifaMatchTimeline",
+  "mcp__worldcup__getFifaLineups",
+  "mcp__worldcup__getFifaTeamHistory",
+  "mcp__worldcup__getFifaStandings",
   "mcp__worldcup__getMatchReport",
   "mcp__worldcup__getMatchPreview",
   "mcp__worldcup__getWorldcupCapabilities",

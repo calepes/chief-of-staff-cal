@@ -92,6 +92,7 @@ import {
   qrPngBuffer,
   enviarFotoBuffer,
   ImpresionUrl,
+  getBoaFrequentFlyer,
 } from "./tools/qr-aduana.js";
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
@@ -427,6 +428,13 @@ export function buildSdkTools(deps: ToolDeps) {
           });
         }
       },
+    ),
+    tool(
+      "getBoaFrequentFlyer",
+      "Devuelve el número de viajero frecuente (Elévate/BoA) guardado para un viajero en ~/.claude/datos-viaje.json, si existe. Llamar ANTES de preguntarle a Cal el número — solo preguntar si esta tool devuelve numero=null. Args: { viajero: string } (nombre o alias, ej. 'Cal', 'Noe').",
+      { viajero: z.string().describe("Nombre o alias del viajero, ej. 'Cal', 'Noe'") },
+      async ({ viajero }) => asText({ numero: getBoaFrequentFlyer(viajero) }),
+      READ_ONLY,
     ),
     tool(
       "manageLearnEntry",

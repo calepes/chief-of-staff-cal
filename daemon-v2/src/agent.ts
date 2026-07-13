@@ -14,6 +14,11 @@ export interface AgentResult {
   firstEventMs: number;
 }
 
+// El SDK a veces aborta un turno internamente (contexto creciendo sin control dentro
+// de la sesión warm) y devuelve su propio texto de diagnóstico marcado como "success".
+// Sin este filtro ese texto se reenvía a Telegram tal cual, como si fuera la respuesta del agente.
+const SDK_DIAGNOSTIC_PATTERNS = [/autocompact is thrashing/i, /context refilled to the limit/i];
+
 const TOOL_MESSAGES: Record<string, string> = {
   // Custom cos-tools
   "mcp__cos-tools__getOutlookEvents":    "📋 Leyendo calendario Outlook...",
@@ -65,6 +70,9 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__exchange-rate-bolivia__getBinanceP2PRate":      "💱 Consultando Binance P2P...",
   "mcp__boa-checkin__prepareBoaCheckin":                "🎫 Preparando tu check-in...",
   "mcp__boa-checkin__confirmBoaCheckin":                "🎫 Confirmando el check-in...",
+  "mcp__boa-checkin__manageBoaSeat":                    "💺 Gestionando tu asiento...",
+  "mcp__boa-checkin__getBoaBoardingPass":               "🎫 Buscando tu boarding pass...",
+  "mcp__boa-checkin__setBoaFrequentFlyer":               "✈️ Guardando tu número de viajero frecuente...",
   "mcp__worldcup__getFixtures":                        "📅 Buscando partidos...",
   "mcp__worldcup__getStandings":                       "📊 Revisando las tablas...",
   "mcp__worldcup__getMatchDetail":                     "⚽ Revisando el partido...",
@@ -83,6 +91,11 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__worldcup__predictMatch":                       "⚽ Prediciendo el partido...",
   "mcp__worldcup__forecastTournament":                 "🏆 Simulando el Mundial...",
   "mcp__worldcup__syncResults":                        "🔄 Sincronizando resultados...",
+  "mcp__worldcup__getFifaStatDictionary":               "📖 Buscando el stat en el diccionario FIFA...",
+  "mcp__worldcup__getFifaMatchTimeline":                "⏱️ Cargando la cronología FIFA...",
+  "mcp__worldcup__getFifaLineups":                      "📋 Buscando la alineación FIFA...",
+  "mcp__worldcup__getFifaTeamHistory":                  "🆚 Revisando el historial FIFA...",
+  "mcp__worldcup__getFifaStandings":                    "📊 Calculando la tabla del grupo...",
   "mcp__serpapi-flights__searchFlights":               "✈️ Buscando vuelos...",
   "mcp__serpapi-flights__getReturnFlights":            "✈️ Buscando vuelos de regreso...",
   "mcp__feedbin__getUnreadEntries":                    "📰 Leyendo artículos...",
@@ -214,6 +227,12 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
   }
 
   console.log(JSON.stringify({ ts: Date.now(), msg: "turn_summary", toolCalls }));
+
+  if (SDK_DIAGNOSTIC_PATTERNS.some((p) => p.test(finalText))) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "sdk_diagnostic_leak", finalText }));
+    finalText =
+      "Se me acumuló demasiado contexto procesando eso y tuve que cortar la respuesta. ¿Puedes repetirme la pregunta? Si vuelve a pasar en la misma conversación, probemos de nuevo en un rato.";
+  }
 
   return {
     reply: finalText.trim(),

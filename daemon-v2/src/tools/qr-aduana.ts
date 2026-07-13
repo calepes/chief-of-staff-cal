@@ -22,6 +22,7 @@ export interface Traveler {
   docNumero: string;
   ocupacion: string;
   alias?: string[];
+  boaViajeroFrecuente?: string;
 }
 
 const MOTIVO_MAP: Record<string, string> = {
@@ -59,6 +60,12 @@ export function listTravelerKeys(): string[] {
   } catch {
     return [];
   }
+}
+
+/** Número de viajero frecuente (Elévate/BoA) guardado para un viajero, si existe. */
+export function getBoaFrequentFlyer(name: string): string | null {
+  const t = resolveTraveler(name);
+  return t?.boaViajeroFrecuente ?? null;
 }
 
 export interface QrTripArgs {
