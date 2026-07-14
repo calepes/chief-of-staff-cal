@@ -23,7 +23,14 @@ export const DISALLOWED_BUILTINS: string[] = [
   "TaskStop",
   "ListMcpResourcesTool",
   "ReadMcpResourceTool",
-  "ToolSearch",
+  // "ToolSearch" intentionally NOT blocked (desde 2026-07-14, experimento): estaba bloqueada
+  // desde el día 1 del daemon (28 abr) junto a otros builtins de orquestación de CLI, sin
+  // relación con tool-bloat — en ese momento Jano tenía 9 tools, no 164. Es el mecanismo nativo
+  // del SDK para diferir la carga de schemas de tools (mismo patrón que recomienda Anthropic en
+  // "code execution / tool search" para evitar el piso fijo de tokens por tool call). Hipótesis:
+  // bloquearla fuerza a cargar los 164 tools completos en CADA llamada interna del turno, dejando
+  // poco margen antes de "autocompact is thrashing" (visto 4 veces: Readwise 23-may, FIFA x2
+  // 6-jul, BoA 13-jul — ver Jano/CLAUDE.md). Agregada también a CLAUDE_AI_COS_TOOLS abajo.
   // Interactiva de Claude Code CLI: en un daemon headless no hay quién responda,
   // falla siempre con "Answer questions?" y hace perder ~1min por turno mientras
   // el modelo reintenta con otra tool (visto en flujo de tags del resumidor y en
@@ -80,6 +87,8 @@ export const DISALLOWED_BUILTINS: string[] = [
 export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Skills globales (vuelos-bolivia, telegram-bot-ux, briefing-pais)
   "Skill",
+  // Deferred tool loading (experimento 2026-07-14, ver comentario en DISALLOWED_BUILTINS)
+  "ToolSearch",
   // Resumidor universal — link (artículo/paywall, YouTube, podcast/audio) o título de libro.
   // Reutiliza los scripts del skill `resumir` vía spawn (sin Bash). Lee cookies de Safari
   // con ~/.claude/bin/node-fda (requiere Full Disk Access en ese binario).

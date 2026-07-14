@@ -316,6 +316,19 @@ const BASE_OPTIONS: Options = {
 // when the WarmQuery is consumed. Sharing one instance across concurrent agents causes
 // "No such tool available" errors. Fix: create a new mcpServer per takeWarm() call so
 // each agent gets an isolated server lifecycle.
+// Todo `return` temprano que decide NO usar el warmPromise (foto/doc/voz fallidos, sin
+// texto tras preprocessing) debe descartarlo explícitamente. Si se abandona sin cerrar, el
+// subprocess pre-warmeado queda vivo indefinidamente — leak de recursos en un daemon que
+// corre semanas sin reiniciar (mismo patrón encontrado y arreglado en Pecunia el 2026-07-14,
+// commit 4ccc44c — acá no rompe el turno siguiente porque cada takeWarm() ya usa un
+// mcpServer fresco y aislado, pero el leak de subprocess igual aplica). NO cubre excepciones
+// reales lanzadas antes de `await warmPromise` (ej. state.load, editMessage sin .catch en las
+// ramas de voz/foto/documento) — esas escapan sin cerrar el warm ni avisarle a Cal; gap
+// preexistente, señalado por daemon-health-reviewer 2026-07-14, sin resolver todavía.
+function discardWarm(warmPromise: Promise<WarmQuery>): void {
+  warmPromise.then((w) => w.close()).catch(() => {});
+}
+
 async function takeWarm(): Promise<WarmQuery> {
   const t0 = Date.now();
   const options: Options = {
@@ -706,6 +719,7 @@ async function processMessage(
           "⚠️ <b>No pude transcribir el audio</b>\nReintenta o escríbelo, por favor.",
           "HTML",
         );
+        discardWarm(warmPromise);
         return;
       }
       text = transcript;
@@ -742,6 +756,7 @@ async function processMessage(
           "⚠️ <b>No pude leer la foto</b>\nReenvíala, por favor.",
           "HTML",
         );
+        discardWarm(warmPromise);
         return;
       }
       photoLocalPath = photoData.localPath;
@@ -767,6 +782,7 @@ async function processMessage(
           "⚠️ <b>No pude leer el documento</b>\nFormato no soportado o archivo corrupto.",
           "HTML",
         );
+        discardWarm(warmPromise);
         return;
       }
       if (docResult.localPath) photoLocalPath = docResult.localPath;
@@ -784,6 +800,7 @@ async function processMessage(
 
     if (!text) {
       log({ msg: "no_text_after_preprocessing", chatId });
+      discardWarm(warmPromise);
       return;
     }
 
@@ -1043,12 +1060,11 @@ async function loop(): Promise<void> {
   // Resiliencia: limpiar locks de propuesta huérfanos que dejó un restart a mitad de un resumen.
   const staleCleaned = cleanStalePlaceholders();
   if (staleCleaned > 0) log({ msg: "resumir_stale_placeholders_cleaned", count: staleCleaned });
-  // Auto-resumidor de playlist de YouTube — ACTIVADO 2026-06-20 (Cal opt-in): 1×/día revisa la
-  // playlist "Para resumir", encola videos nuevos y los propone de a uno con checkpoint.
-  scheduleResumirPlaylist();
-  // Proactividad DESACTIVADA 2026-06-17 — Cal va a repensar los flujos proactivos.
-  // Jano queda 100% reactivo (solo webhook watchdog, que es infra necesaria).
+  // Auto-resumidor de playlist de YouTube — DESACTIVADO 2026-07-14 (pedido de Cal). Estuvo activo
+  // desde 2026-06-20 (opt-in). Jano queda 100% reactivo salvo el webhook watchdog (infra).
   // Reactivar: descomentar la línea correspondiente + rebuild + restart.
+  // scheduleResumirPlaylist();
+  // Proactividad DESACTIVADA 2026-06-17 — Cal va a repensar los flujos proactivos.
   // scheduleFlightCheckin();
   // scheduleFocoCheckinsLocal();
   void ensureWebhook();

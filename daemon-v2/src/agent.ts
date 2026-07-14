@@ -20,6 +20,7 @@ export interface AgentResult {
 const SDK_DIAGNOSTIC_PATTERNS = [/autocompact is thrashing/i, /context refilled to the limit/i];
 
 const TOOL_MESSAGES: Record<string, string> = {
+  "ToolSearch":                                         "🔎 Buscando la herramienta correcta...",
   // Custom cos-tools
   "mcp__cos-tools__getOutlookEvents":    "📋 Leyendo calendario Outlook...",
   "mcp__cos-tools__runBriefing":         "📰 Generando briefing...",
@@ -160,6 +161,8 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
   const q = deps.warm.query(prompt);
   let firstEventMs = 0;
   let finalText = "";
+  let terminalReason: string | undefined;
+  let deferredToolUse: { id: string; name: string; input: unknown } | undefined;
   const toolCalls: Array<{ name: string; ok?: boolean; err?: string }> = [];
 
   for await (const message of q) {
@@ -204,7 +207,14 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
     }
 
     if (message.type === "result" && message.subtype === "success") {
-      finalText = (message as { result?: string }).result ?? "";
+      const result = message as {
+        result?: string;
+        terminal_reason?: string;
+        deferred_tool_use?: { id: string; name: string; input: unknown };
+      };
+      finalText = result.result ?? "";
+      terminalReason = result.terminal_reason;
+      deferredToolUse = result.deferred_tool_use;
       const modelUsage = (
         message as {
           modelUsage?: Record<
@@ -228,7 +238,15 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
 
   console.log(JSON.stringify({ ts: Date.now(), msg: "turn_summary", toolCalls }));
 
-  if (SDK_DIAGNOSTIC_PATTERNS.some((p) => p.test(finalText))) {
+  // Desde que "ToolSearch" dejó de estar bloqueada (2026-07-14), el SDK puede cortar el turno
+  // con subtype "success" pero terminal_reason "tool_deferred" — el modelo intentó usar una tool
+  // que todavía no había buscado/cargado. `result` en ese caso no es una respuesta real; sin este
+  // chequeo se le reenviaría a Cal tal cual (vacía o a medio armar) sin rastro en logs.
+  if (terminalReason === "tool_deferred") {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "tool_deferred_unresolved", deferredToolUse, finalText }));
+    finalText =
+      "Necesitaba cargar una herramienta que no tenía lista y el turno se cortó ahí. ¿Puedes repetirme el pedido?";
+  } else if (SDK_DIAGNOSTIC_PATTERNS.some((p) => p.test(finalText))) {
     console.log(JSON.stringify({ ts: Date.now(), msg: "sdk_diagnostic_leak", finalText }));
     finalText =
       "Se me acumuló demasiado contexto procesando eso y tuve que cortar la respuesta. ¿Puedes repetirme la pregunta? Si vuelve a pasar en la misma conversación, probemos de nuevo en un rato.";
