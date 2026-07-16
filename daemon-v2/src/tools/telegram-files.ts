@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -54,4 +54,30 @@ function inferMime(path: string): string | undefined {
     wav: "audio/wav",
   };
   return map[ext];
+}
+
+/** Manda un archivo LOCAL (no URL pública) como documento — usado por el .pkpass de boa-checkin, que no tiene URL pública. */
+export async function enviarDocumentoLocal(
+  token: string,
+  chatId: number | string,
+  filePath: string,
+  filename: string,
+  caption?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const buf = await readFile(filePath);
+    const fd = new FormData();
+    fd.append("chat_id", String(chatId));
+    if (caption) fd.append("caption", caption);
+    fd.append("document", new Blob([new Uint8Array(buf)]), filename);
+    const res = await fetch(`${TG_API}/bot${token}/sendDocument`, {
+      method: "POST",
+      body: fd,
+      signal: AbortSignal.timeout(30000),
+    });
+    const data = (await res.json()) as { ok: boolean; description?: string };
+    return data.ok ? { ok: true } : { ok: false, error: data.description };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
