@@ -1,6 +1,6 @@
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, basename, sep } from "node:path";
 
 const TG_API = "https://api.telegram.org";
 
@@ -56,7 +56,15 @@ function inferMime(path: string): string | undefined {
   return map[ext];
 }
 
-/** Manda un archivo LOCAL (no URL pública) como documento — usado por el .pkpass de boa-checkin, que no tiene URL pública. */
+/**
+ * Manda un archivo LOCAL (no URL pública) como documento — usado por el
+ * .pkpass de boa-checkin, que no tiene URL pública. `filePath` NUNCA debe
+ * aceptarse tal cual del LLM: sin esta validación, cualquier prompt-injection
+ * (foto/PDF/mensaje de grupo con contenido no confiable) podría inducir a
+ * leer y exfiltrar por Telegram un archivo arbitrario (ej. `~/.ssh/id_ed25519`).
+ * Se restringe a archivos `boa-wallet-*.pkpass` dentro de `tmpdir()` — el
+ * único patrón que `generateBoaWalletPass` produce realmente.
+ */
 export async function enviarDocumentoLocal(
   token: string,
   chatId: number | string,
@@ -64,8 +72,17 @@ export async function enviarDocumentoLocal(
   filename: string,
   caption?: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  const resolved = resolve(filePath);
+  const allowedDir = tmpdir();
+  const allowedName = /^boa-wallet-.+\.pkpass$/;
+  if (!resolved.startsWith(allowedDir + sep) || !allowedName.test(basename(resolved))) {
+    return {
+      ok: false,
+      error: `Path no permitido: solo se puede enviar un .pkpass generado por boa-checkin en ${allowedDir} (patrón boa-wallet-*.pkpass).`,
+    };
+  }
   try {
-    const buf = await readFile(filePath);
+    const buf = await readFile(resolved);
     const fd = new FormData();
     fd.append("chat_id", String(chatId));
     if (caption) fd.append("caption", caption);
