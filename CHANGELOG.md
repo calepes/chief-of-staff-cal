@@ -1,5 +1,55 @@
 # CHANGELOG — Jano
 
+## 2026-07-15
+
+### Feature — Detección de cortes de sync de Apple Health (`getHealthSyncStatus`)
+- **Motivo:** Cal solo usa Apple Watch (sin Strava/WHOOP/Oura/Hevy) y sincroniza vía Health Auto
+  Export (iOS) → `health-worker` (CF). El corte real detectado: HAE solo exporta al abrir la app a
+  mano si no se configura su automatización interna + Background App Refresh en iOS — sin forma de
+  saber si se cortó silenciosamente.
+- **Fix:** nueva tabla `sync_status` en D1 (`health-worker/migrations/0004_sync_status.sql`,
+  aplicada directo con `d1 execute` porque `0002`/`0003` ya estaban aplicadas fuera del tracking de
+  `wrangler d1 migrations` y no son idempotentes). `POST /ingest` ahora hace UPSERT del timestamp
+  del servidor en cada recepción exitosa. Nuevo `GET /status` (+ tool `getHealthSyncStatus` en el
+  MCP JSON-RPC del worker) devuelve `{lastIngestAt, hoursSinceLastIngest, lastMetricsCount,
+  lastWorkoutsCount}`.
+- **Wireado en Jano:** tool agregado al wrapper stdio (`mcp-servers/servers/health`), a
+  `allowedTools` (`agent-options.ts`) y a `system-prompt.ts` (sección `## Salud`) — instruye avisar
+  a Cal si `hoursSinceLastIngest` es `null` o >6h.
+- **Decisión de scope:** implementado reactivo (tool consultable, ej. "¿está sincronizando bien mi
+  salud?"), no proactivo — Jano sigue 100% reactivo por decisión de Cal del 2026-07-14 (0 crons
+  internos activos). Si el corte se repite en la práctica, reconsiderar un cron dedicado.
+- `daemon-health-reviewer` revisó el cambio completo (worker + migración + wrapper MCP + daemon) —
+  sin bloqueantes. Worker deployado, migración aplicada, daemon reiniciado — arranque limpio
+  confirmado (`state=running`).
+
+## 2026-07-14 (auditoría de seguridad — C1 + C4)
+
+### Fix — Allowlist de remitente en Telegram (C1)
+- **Riesgo cerrado:** cualquier usuario que encontrara `@cal_jano_bot` tenía acceso completo a las
+  164 tools (Gmail, Calendar, borrar notas/eventos, datos personales vía `generarQrAduanaBolivia`)
+  — no había ninguna validación de `from.id` en la cadena worker→daemon.
+- **Fix:** allowlist de remitente por `from.id`/`callback_query.from.id` agregada en
+  `worker-v2/src/index.ts` (`/telegram/webhook`) y replicada como defensa en profundidad en
+  `daemon-v2/src/index.ts` (`processMessage`).
+- Fix ya desplegado (worker + daemon) antes de esta sesión.
+
+### Fix — Retirada la tool `runBriefing` (C4)
+- **Riesgo cerrado:** `runBriefing` spawneaba un subproceso `claude -p --dangerously-skip-permissions
+  --allowedTools "Bash,..."` con prompt interpolado libre — escalada de privilegios real. Además
+  estaba rota: las rutas que usaba (`Chief of Staff Cal`, `calepes.github.io`) ya no existen.
+- **Fix:** eliminada la tool del registro (opción de menor riesgo vs. arreglar rutas + acotar el
+  subprocess). Borrado `daemon-v2/src/tools/briefing.ts` completo; sacado el registro de la tool +
+  import + `briefingDeps` de `agent-tools.ts`; sacada la mención de `TOOL_MESSAGES` en `agent.ts`;
+  sacadas las 2 referencias en `system-prompt.ts`. `CLAUDE.md` actualizado (fuera del índice de
+  tools). Build (`@cos/shared` + `@cos/daemon`) verificado limpio.
+- Daemon reiniciado (`launchctl bootout`/`bootstrap`) — arranque limpio confirmado en
+  `~/Library/Logs/cos-agent-v2.{out,err}.log`, sin referencias colgantes a `runBriefing`/`briefingDeps`.
+
+Ambos fixes vienen de la auditoría de seguridad de todo el repo hecha el mismo día (agente de
+solo lectura, modelo Fable) — ver `HANDOFF.md` para el detalle completo y los items pendientes
+(C2, C3, moderados, menores).
+
 ## 2026-07-14
 
 ### Fix — Causa raíz estructural del "autocompact thrashing" recurrente + ToolSearch nativo

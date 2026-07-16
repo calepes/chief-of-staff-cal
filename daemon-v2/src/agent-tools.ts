@@ -4,7 +4,6 @@ import { z } from "zod";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { getOutlookEvents } from "./tools/outlook.js";
-import { runBriefing } from "./tools/briefing.js";
 import { manageLearning } from "./tools/learnings.js";
 import { searchPlaces, travelTime as calcTravelTime } from "./tools/maps.js";
 import { buildApprovalFlowImpl, stepApprovalWizardImpl } from "./tools/approval-flow.js";
@@ -111,8 +110,6 @@ export interface ToolDeps {
 }
 
 export function buildSdkTools(deps: ToolDeps) {
-  const briefingDeps = { botToken: deps.botToken };
-
   return [
     tool(
       "getOutlookEvents",
@@ -120,15 +117,6 @@ export function buildSdkTools(deps: ToolDeps) {
       { when: z.enum(["today", "tomorrow", "both"]).optional() },
       async ({ when }) => asText(await getOutlookEvents(when)),
       READ_ONLY,
-    ),
-    tool(
-      "runBriefing",
-      "Dispara on-demand la generación del briefing ejecutivo de un país (Bolivia, Peru, Colombia). Async: arranca un subprocess en background y retorna inmediatamente. El subprocess genera el HTML, lo pushea a GitHub Pages y manda al chat de Cal un mensaje nuevo con los top 3 titulares y el link cuando termina (suele tardar minutos). Si falla por timeout o error, el daemon manda un aviso. NO uses este tool si Cal solo quiere consultar un briefing existente — para eso usar WebFetch al URL del briefing publicado. Args: { pais: 'Bolivia'|'Peru'|'Colombia', fecha?: 'YYYY-MM-DD' (default: hoy en la zona horaria del país) }.",
-      {
-        pais: z.enum(["Bolivia", "Peru", "Colombia"]),
-        fecha: z.string().optional(),
-      },
-      async (args) => asText(await runBriefing(briefingDeps, deps.getCurrentChatId(), args)),
     ),
     tool(
       "searchPlace",

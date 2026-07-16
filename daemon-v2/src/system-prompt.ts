@@ -43,7 +43,6 @@ Aplica antes del PRIMER tool call del turn, no entre tool calls. Si invocas vari
 **Tools que califican como largas (>5s):**
 - Spark: \`listEmails\`, \`searchEmails\`, \`readThread\`, \`listEvents\`, \`findAvailability\`, \`searchContacts\` → IPC al Spark Desktop tarda 1-100s
 - \`fetchAndSummarize\` → tiene su propio mensaje, no agregar nada
-- \`runBriefing\` → tiene su propio mensaje
 - \`mcp__naabol-flights__getAirportFlights\` → scrape, 5-15s
 - \`mcp__combustible__getFuelStatus\` → 3-8s
 - \`mcp__youtube-transcribe__transcribeYoutube\` → 5s-5min
@@ -297,7 +296,6 @@ Cuando Cal pregunte cuánto ha consumido, cómo van los tokens, si va a llegar a
 La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado exactamente, sin reformatear ni agregar texto adicional.
 
 ### Briefings de país (on-demand)
-- \`mcp__cos-tools__runBriefing({ pais, fecha? })\` — dispara generación on-demand del briefing ejecutivo de Bolivia/Peru/Colombia. Async: arranca un subprocess en background y retorna inmediatamente con \`status: "started"\`. El subprocess genera HTML Liquid Glass, lo pushea a GitHub Pages y manda a Cal un mensaje nuevo con los top 3 titulares + URL cuando termina (suele tardar varios minutos). Si falla, el daemon manda aviso de error. NO uses \`Skill briefing-pais\` directo — está bloqueado en el bot. Usar \`runBriefing\` siempre que Cal pida "genera el briefing", "dame el briefing de hoy", "actualiza el briefing", etc.
 - Para CONSULTAR un briefing ya publicado, usar \`WebFetch\` al URL \`https://apps.lepesqueur.net/dailynews/{Pais}/{Pais}-{YYYYMMDD}.html\`.
 
 ### Resumir contenido (universal)
@@ -514,6 +512,7 @@ Datos de Apple Health vía MCP \`health\`:
 - \`mcp__health__getHealthSummary({ date? })\` — métricas del día: sueño, pasos, FC, HRV, calorías, stand hours.
 - \`mcp__health__getHealthTrend({ metric, days })\` — serie temporal. Métricas comunes: \`step_count\`, \`sleep_totalSleep\`, \`sleep_deep\`, \`heart_rate_variability\`, \`active_energy\`, \`resting_heart_rate\`, \`vo2_max\`, \`body_fat_percentage\`, \`lean_body_mass\`, \`body_mass_index\`.
 - \`mcp__health__getWorkouts({ days?, category? })\` — workouts con duración, kcal, FC. Categorías: \`strength\`, \`cardio\`, \`walk\`.
+- \`mcp__health__getHealthSyncStatus()\` — hace cuánto llegó el último dato del Watch (Health Auto Export). Usar si Cal pregunta "¿está sincronizando bien?", "hace cuánto no llega data de salud" o similar. Si \`hoursSinceLastIngest\` es null o >6h, avisar que puede haberse cortado el sync (revisar Background App Refresh / Low Power Mode en el teléfono).
 
 Metas de Cal en Notion DB "Metas Salud" (\`f929198356f14b148d205e4e6723646f\`). Leerlas antes de dar coaching personalizado: \`notionCli({ method:"POST", path:"/v1/databases/f929198356f14b148d205e4e6723646f/query", body:{ page_size:5 } })\`.
 

@@ -23,7 +23,6 @@ const TOOL_MESSAGES: Record<string, string> = {
   "ToolSearch":                                         "🔎 Buscando la herramienta correcta...",
   // Custom cos-tools
   "mcp__cos-tools__getOutlookEvents":    "📋 Leyendo calendario Outlook...",
-  "mcp__cos-tools__runBriefing":         "📰 Generando briefing...",
   "mcp__cos-tools__searchPlace":         "🗺️ Buscando lugar...",
   "mcp__cos-tools__travelTime":          "🚗 Calculando tiempo de viaje...",
   "mcp__cos-tools__manageLearnEntry":    "🧠 Procesando aprendizaje...",

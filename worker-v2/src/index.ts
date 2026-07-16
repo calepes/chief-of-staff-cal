@@ -65,6 +65,17 @@ app.post("/telegram/webhook", async (c) => {
   }
   const update = (await c.req.json()) as TelegramUpdate;
 
+  // Allowlist de remitente: Jano es un bot 1:1 de Cal, sin soporte de grupos/otros
+  // usuarios. El secret token solo prueba que el update viene de Telegram, no de Cal
+  // — sin este check, cualquiera que encuentre el bot tiene acceso a las 164 tools
+  // (Gmail, Calendar, borrar notas/eventos, datos de documentos de la familia vía QR
+  // de aduana). Se descarta con 200 "ok" (no con 401) para que Telegram no reintente.
+  const senderId = update.callback_query?.from?.id ?? update.message?.from?.id;
+  if (senderId !== undefined && senderId !== CAL_CHAT_ID) {
+    console.log(JSON.stringify({ msg: "unauthorized_sender", senderId, ts: Date.now() }));
+    return c.text("ok");
+  }
+
   // Spotify callbacks: ack y descartar (Spotify out of scope v2)
   if (update.callback_query?.data?.startsWith("spotify:")) {
     return c.text("ok");

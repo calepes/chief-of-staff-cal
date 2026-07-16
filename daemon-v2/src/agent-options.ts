@@ -166,6 +166,7 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__health__getHealthSummary",
   "mcp__health__getHealthTrend",
   "mcp__health__getWorkouts",
+  "mcp__health__getHealthSyncStatus",
   // Learning system — MCP externo (evita warm pool stale del in-process cos-tools)
   "mcp__agent-learnings__addLearning",
   // Combustible Santa Cruz — disponibilidad y distancia a estaciones de gasolina

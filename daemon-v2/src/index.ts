@@ -153,8 +153,8 @@ const kv = new CfKv({
 const state = new ConversationState(kv, compactHistory);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
-// (ej. runBriefing, que dispara un subprocess que después manda follow-up) lo
-// leen via getCurrentChatId(). Se setea al inicio de cada processMessage.
+// (ej. checkPlaylistsResumir/checkStarredResumir, que disparan un flujo fire-and-forget
+// que después manda follow-up) lo leen via getCurrentChatId(). Se setea al inicio de cada processMessage.
 // Safe porque el daemon procesa mensajes serialmente (1 worker en queue).
 let currentChatId = 0;
 
@@ -470,6 +470,16 @@ async function processMessage(
 ): Promise<void> {
   if (!payload.message && !payload.callback_query) {
     log({ msg: "skip_unsupported_update", update_id: payload.update_id });
+    return;
+  }
+
+  // Allowlist de remitente (defensa en profundidad — el worker ya filtra en el
+  // webhook, esto cubre un update que llegue a la cola sin pasar por ahí, ej. un
+  // push directo con CF_API_TOKEN). Jano es un bot 1:1 de Cal, sin soporte de
+  // grupos/otros usuarios.
+  const senderId = payload.callback_query?.from?.id ?? payload.message?.from?.id;
+  if (senderId !== undefined && senderId !== ALERT_CHAT_ID) {
+    log({ msg: "unauthorized_sender", senderId, update_id: payload.update_id });
     return;
   }
 
