@@ -21,6 +21,7 @@ import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick } from "./tools/resumir.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
+import { checkHealthSync } from "./proactive/health-sync-check.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf } from "./tools/vision.js";
@@ -1019,6 +1020,19 @@ function scheduleFlightCheckin(): void {
   log({ msg: "flight_checkin_scheduled", interval: "every 30min 7-22h" });
 }
 
+function scheduleHealthSyncCheck(): void {
+  cron.schedule("0,30 7-22 * * *", () => {
+    void checkHealthSync({
+      kv,
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      apiKey: env.HEALTH_API_KEY,
+      thresholdHours: 4,
+    }).catch((err) => log({ msg: "health_sync_check_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
+}
+
 function scheduleFocoCheckinsLocal(): void {
   scheduleFocoCheckins({
     kv,
@@ -1070,8 +1084,12 @@ async function loop(): Promise<void> {
   // Resiliencia: limpiar locks de propuesta huérfanos que dejó un restart a mitad de un resumen.
   const staleCleaned = cleanStalePlaceholders();
   if (staleCleaned > 0) log({ msg: "resumir_stale_placeholders_cleaned", count: staleCleaned });
+  // Corte de sync de Apple Health (2026-07-16, pedido de Cal) — reabre la proactividad puntualmente
+  // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
+  scheduleHealthSyncCheck();
   // Auto-resumidor de playlist de YouTube — DESACTIVADO 2026-07-14 (pedido de Cal). Estuvo activo
-  // desde 2026-06-20 (opt-in). Jano queda 100% reactivo salvo el webhook watchdog (infra).
+  // desde 2026-06-20 (opt-in). Jano queda 100% reactivo salvo el webhook watchdog (infra) y el
+  // health-sync-check (arriba).
   // Reactivar: descomentar la línea correspondiente + rebuild + restart.
   // scheduleResumirPlaylist();
   // Proactividad DESACTIVADA 2026-06-17 — Cal va a repensar los flujos proactivos.
