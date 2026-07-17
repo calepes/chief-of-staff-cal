@@ -83,7 +83,7 @@ import {
   getVacacionDetail,
 } from "./tools/schedule-cal.js";
 import { fetchNotionAttachments } from "./tools/notion-files.js";
-import { enviarDocumentoLocal } from "./tools/telegram-files.js";
+import { enviarDocumentoLocal, enviarFotoLocal } from "./tools/telegram-files.js";
 import { sendPhoto, sendDocument, sendChatAction } from "@cos/shared";
 import {
   resolveTraveler,
@@ -370,6 +370,33 @@ export function buildSdkTools(deps: ToolDeps) {
         try {
           await sendChatAction(token, chatId, "upload_document").catch(() => {});
           const sent = await enviarDocumentoLocal(token, chatId, path, filename, caption);
+          return asText(sent.ok ? { status: "sent" } : { status: "send_failed", error: sent.error });
+        } catch (err) {
+          return asText({ status: "send_failed", error: String(err) });
+        }
+      },
+    ),
+    tool(
+      "enviarFotoLocal",
+      [
+        "Manda al chat una imagen que existe LOCALMENTE en este filesystem (ej. la tarjeta .png con el diseño navy/dorado que devuelve mcp__boa-checkin__generateBoaWalletPass junto al .pkpass) — NO uses esta tool para URLs públicas. Se envía sin recomprimir (preserva transparencia), a diferencia de una foto normal de Telegram.",
+        "Args: { path: string (path local absoluto), filename: string (nombre con el que llega a Telegram), caption?: string }.",
+        "Después de invocar esta tool no repitas el path ni lo describas: ya se envió. Responde solo una frase corta (o el error si status != sent).",
+      ].join(" "),
+      {
+        path: z.string(),
+        filename: z.string(),
+        caption: z.string().optional(),
+      },
+      async ({ path, filename, caption }) => {
+        const chatId = deps.getCurrentChatId?.();
+        const token = deps.botToken;
+        if (!chatId || !token) return asText({ status: "error", error: "No chatId/token disponible" });
+        try {
+          // upload_document (no upload_photo): enviarFotoLocal manda vía
+          // sendDocument para preservar transparencia — ver telegram-files.ts.
+          await sendChatAction(token, chatId, "upload_document").catch(() => {});
+          const sent = await enviarFotoLocal(token, chatId, path, filename, caption);
           return asText(sent.ok ? { status: "sent" } : { status: "send_failed", error: sent.error });
         } catch (err) {
           return asText({ status: "send_failed", error: String(err) });

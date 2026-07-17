@@ -1,8 +1,31 @@
-import { writeFile, mkdir, readFile } from "node:fs/promises";
+import { writeFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, basename, sep } from "node:path";
 
 const TG_API = "https://api.telegram.org";
+
+/**
+ * Valida que `filePath` sea un archivo dentro de `tmpdir()` cuyo nombre
+ * matchea `allowedName`, Y resuelve symlinks (`realpath`) antes de confirmar
+ * — `resolve()` solo normaliza `..`/segmentos relativos a nivel de string,
+ * no sigue links. Sin este segundo chequeo, un symlink plantado en `tmpdir()`
+ * con nombre `boa-wallet-*.{pkpass,png}` pero apuntando afuera (ej. a
+ * `~/.ssh/id_ed25519`) pasaría la validación de superficie y se leería/
+ * mandaría igual. Devuelve el path real ya verificado, o `null` si no pasa.
+ */
+async function resolveAllowedLocalFile(filePath: string, allowedName: RegExp): Promise<string | null> {
+  const allowedDir = tmpdir();
+  const resolved = resolve(filePath);
+  if (!resolved.startsWith(allowedDir + sep) || !allowedName.test(basename(resolved))) return null;
+  let real: string;
+  try {
+    real = await realpath(resolved);
+  } catch {
+    return null;
+  }
+  if (!real.startsWith(allowedDir + sep) || !allowedName.test(basename(real))) return null;
+  return real;
+}
 
 export async function downloadTelegramFile(
   token: string,
@@ -72,13 +95,57 @@ export async function enviarDocumentoLocal(
   filename: string,
   caption?: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const resolved = resolve(filePath);
-  const allowedDir = tmpdir();
-  const allowedName = /^boa-wallet-.+\.pkpass$/;
-  if (!resolved.startsWith(allowedDir + sep) || !allowedName.test(basename(resolved))) {
+  const resolved = await resolveAllowedLocalFile(filePath, /^boa-wallet-.+\.pkpass$/);
+  if (!resolved) {
     return {
       ok: false,
-      error: `Path no permitido: solo se puede enviar un .pkpass generado por boa-checkin en ${allowedDir} (patrón boa-wallet-*.pkpass).`,
+      error: `Path no permitido: solo se puede enviar un .pkpass generado por boa-checkin en ${tmpdir()} (patrón boa-wallet-*.pkpass).`,
+    };
+  }
+  try {
+    const buf = await readFile(resolved);
+    const fd = new FormData();
+    fd.append("chat_id", String(chatId));
+    if (caption) fd.append("caption", caption);
+    fd.append("document", new Blob([new Uint8Array(buf)]), filename);
+    const res = await fetch(`${TG_API}/bot${token}/sendDocument`, {
+      method: "POST",
+      body: fd,
+      signal: AbortSignal.timeout(30000),
+    });
+    const data = (await res.json()) as { ok: boolean; description?: string };
+    return data.ok ? { ok: true } : { ok: false, error: data.description };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Manda una foto LOCAL (no URL pública) — usada por la tarjeta .png
+ * decorativa de boa-checkin (diseño navy/dorado aprobado, generada junto al
+ * .pkpass). Mismo criterio de seguridad que `enviarDocumentoLocal`: `filePath`
+ * NUNCA se acepta tal cual del LLM — se restringe a `boa-wallet-*.png` dentro
+ * de `tmpdir()`, el único patrón que `generateBoaWalletPass` produce.
+ *
+ * Usa el endpoint `sendDocument` (no `sendPhoto`): Telegram recomprime toda
+ * foto enviada por `sendPhoto` a JPEG, que no soporta canal alfa — las
+ * esquinas redondeadas de la tarjeta (transparentes en el PNG original)
+ * volvían a verse blancas del lado de Telegram, aunque el archivo estuviera
+ * bien (confirmado con Cal probando ambos caminos, 2026-07-17).
+ * `sendDocument` no recomprime, preserva el PNG (y su transparencia) tal cual.
+ */
+export async function enviarFotoLocal(
+  token: string,
+  chatId: number | string,
+  filePath: string,
+  filename: string,
+  caption?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const resolved = await resolveAllowedLocalFile(filePath, /^boa-wallet-.+\.png$/);
+  if (!resolved) {
+    return {
+      ok: false,
+      error: `Path no permitido: solo se puede enviar una tarjeta .png generada por boa-checkin en ${tmpdir()} (patrón boa-wallet-*.png).`,
     };
   }
   try {
