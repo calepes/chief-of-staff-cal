@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sendMessage } from "@cos/shared";
@@ -84,6 +84,8 @@ export async function checkKpiCardDaily(opts: CheckKpiCardDailyOpts): Promise<vo
   if (!sent.ok) {
     await notifyFailure(botToken, chatId, "no pude mandarte la tarjeta por Telegram", sent.error);
   }
+
+  await unlink(imagePath).catch(() => {});
 }
 
 function todayIso(): string {
