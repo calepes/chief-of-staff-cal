@@ -22,6 +22,7 @@ import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick } from "./tools/resumir.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
+import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf } from "./tools/vision.js";
@@ -1033,6 +1034,17 @@ function scheduleHealthSyncCheck(): void {
   log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
 }
 
+function scheduleKpiCardDaily(): void {
+  cron.schedule("30 9 * * *", () => {
+    void checkKpiCardDaily({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      notionToken: env.NOTION_TOKEN,
+    }).catch((err) => log({ msg: "kpi_card_daily_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "kpi_card_daily_scheduled", interval: "daily 09:30" });
+}
+
 function scheduleFocoCheckinsLocal(): void {
   scheduleFocoCheckins({
     kv,
@@ -1087,6 +1099,9 @@ async function loop(): Promise<void> {
   // Corte de sync de Apple Health (2026-07-16, pedido de Cal) — reabre la proactividad puntualmente
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
+  // Tarjeta diaria de KPIs Yape (TRX + Activos DAU) para reenviar por WhatsApp
+  // (2026-07-17, pedido de Cal, ver docs/superpowers/specs/2026-07-17-kpi-card-diario-design.md).
+  scheduleKpiCardDaily();
   // Auto-resumidor de playlist de YouTube — DESACTIVADO 2026-07-14 (pedido de Cal). Estuvo activo
   // desde 2026-06-20 (opt-in). Jano queda 100% reactivo salvo el webhook watchdog (infra) y el
   // health-sync-check (arriba).
