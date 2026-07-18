@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { fetchDailyKpis } from "./kpi-card-daily.js";
+import { unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { vi, afterEach } from "vitest";
+
+vi.mock("./kpi-card-image.js", () => ({
+  renderKpiCardImage: vi.fn(async () => Buffer.from("fake-png-bytes")),
+}));
+vi.mock("../tools/telegram-files.js", () => ({
+  enviarFotoLocal: vi.fn(async () => ({ ok: true })),
+}));
+vi.mock("@cos/shared", () => ({
+  sendMessage: vi.fn(async () => ({})),
+}));
+
+import { renderKpiCardImage } from "./kpi-card-image.js";
+import { enviarFotoLocal } from "../tools/telegram-files.js";
+import { sendMessage } from "@cos/shared";
+import { fetchDailyKpis, checkKpiCardDaily } from "./kpi-card-daily.js";
 
 function notionResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -57,5 +75,58 @@ describe("fetchDailyKpis", () => {
     const fetchFn = (async () => new Response("", { status: 401 })) as unknown as typeof fetch;
 
     await expect(fetchDailyKpis("fake-token", fetchFn)).rejects.toThrow("401");
+  });
+});
+
+const todayFile = () => join(tmpdir(), `kpi-card-${new Date().toISOString().slice(0, 10)}.png`);
+
+afterEach(async () => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  try {
+    await unlink(todayFile());
+  } catch {
+    // no existía, ok
+  }
+});
+
+describe("checkKpiCardDaily", () => {
+  it("manda la tarjeta cuando todo sale bien", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(notionResponse()), { status: 200 })));
+
+    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
+
+    expect(renderKpiCardImage).toHaveBeenCalledTimes(1);
+    expect(enviarFotoLocal).toHaveBeenCalledTimes(1);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("avisa por texto si falla la consulta a Notion", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
+
+    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
+
+    expect(renderKpiCardImage).not.toHaveBeenCalled();
+    expect(enviarFotoLocal).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("avisa por texto si falla el render de la imagen", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(notionResponse()), { status: 200 })));
+    vi.mocked(renderKpiCardImage).mockRejectedValueOnce(new Error("logo no encontrado"));
+
+    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
+
+    expect(enviarFotoLocal).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("avisa por texto si Telegram rechaza el envío", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(notionResponse()), { status: 200 })));
+    vi.mocked(enviarFotoLocal).mockResolvedValueOnce({ ok: false, error: "chat not found" });
+
+    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 });

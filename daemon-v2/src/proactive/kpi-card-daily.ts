@@ -1,4 +1,10 @@
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { sendMessage } from "@cos/shared";
 import type { DailyKpis } from "./kpi-card-image.js";
+import { renderKpiCardImage } from "./kpi-card-image.js";
+import { enviarFotoLocal } from "../tools/telegram-files.js";
 
 const KPI_DB_ID = "d4996efa-4053-44cf-8149-c6aee5eba52a";
 
@@ -45,4 +51,56 @@ export async function fetchDailyKpis(
     activosDauPctChange: props["DAU vs. Sem. anterior (%)"]?.number ?? null,
     fecha,
   };
+}
+
+export interface CheckKpiCardDailyOpts {
+  botToken: string;
+  chatId: number;
+  notionToken: string;
+}
+
+export async function checkKpiCardDaily(opts: CheckKpiCardDailyOpts): Promise<void> {
+  const { botToken, chatId, notionToken } = opts;
+
+  let kpis: DailyKpis;
+  try {
+    kpis = await fetchDailyKpis(notionToken);
+  } catch (err) {
+    await notifyFailure(botToken, chatId, "no pude leer los KPIs desde Notion", err);
+    return;
+  }
+
+  let imagePath: string;
+  try {
+    const png = await renderKpiCardImage(kpis);
+    imagePath = join(tmpdir(), `kpi-card-${todayIso()}.png`);
+    await writeFile(imagePath, png);
+  } catch (err) {
+    await notifyFailure(botToken, chatId, "no pude generar la imagen de la tarjeta", err);
+    return;
+  }
+
+  const sent = await enviarFotoLocal(botToken, chatId, imagePath, "kpi-card.png");
+  if (!sent.ok) {
+    await notifyFailure(botToken, chatId, "no pude mandarte la tarjeta por Telegram", sent.error);
+  }
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function notifyFailure(
+  botToken: string,
+  chatId: number,
+  motivo: string,
+  err: unknown,
+): Promise<void> {
+  console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_daily_failure", motivo, err: String(err) }));
+  const text = `⚠️ No pude armar la tarjeta de KPIs de hoy (${motivo}). Revisa los logs del daemon.`;
+  try {
+    await sendMessage(botToken, { chatId, text });
+  } catch (sendErr) {
+    console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_daily_notify_failed", err: String(sendErr) }));
+  }
 }
