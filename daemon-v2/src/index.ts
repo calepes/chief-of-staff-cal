@@ -1035,14 +1035,14 @@ function scheduleHealthSyncCheck(): void {
 }
 
 function scheduleKpiCardDaily(): void {
-  cron.schedule("30 9 * * *", () => {
+  cron.schedule("0 10 * * *", () => {
     void checkKpiCardDaily({
       botToken: env.COS_TELEGRAM_BOT_TOKEN,
       chatId: ALERT_CHAT_ID,
       notionToken: env.NOTION_TOKEN,
     }).catch((err) => log({ msg: "kpi_card_daily_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
-  log({ msg: "kpi_card_daily_scheduled", interval: "daily 09:30" });
+  log({ msg: "kpi_card_daily_scheduled", interval: "daily 10:00" });
 }
 
 function scheduleFocoCheckinsLocal(): void {
