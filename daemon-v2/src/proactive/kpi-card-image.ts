@@ -139,7 +139,7 @@ function formatFecha(isoDate: string): string {
 }
 
 function formatValue(raw: number): string {
-  return `${(raw / 1_000_000).toFixed(1)}M`;
+  return `${(raw / 1_000_000).toFixed(2)}M`;
 }
 
 function drawColumn(
