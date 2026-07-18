@@ -128,6 +128,7 @@ Hay dos mecanismos de proactividad independientes:
 - `scheduleFlightCheckin()` — **DESACTIVADO 2026-06-17** (check-ins de vuelos, every 30min 7-22h).
 - `scheduleFocoCheckinsLocal()` — **DESACTIVADO 2026-06-17** (Foco CAL am/md/pm, `proactive/foco-check.ts`).
 - `scheduleHealthSyncCheck()` — **ACTIVO 2026-07-16** (pedido de Cal, ver gotcha "Detección de cortes de sync de Apple Health" arriba). Cron `0,30 7-22 * * *`, mecánico (sin LLM/`takeWarm`) — chequea `GET /status` del health-worker y avisa por Telegram si `hoursSinceLastIngest >= 4h`, con dedup en CF KV (TTL 24h) para no repetir el aviso mientras dure el mismo corte.
+- `scheduleKpiCardDaily()` — **ACTIVO 2026-07-17** (pedido de Cal, ver `docs/superpowers/specs/2026-07-17-kpi-card-diario-design.md`). Cron `30 9 * * *`, mecánico (sin agente SDK) — lee TRX + Activos DAU de la DB Notion "KPIs diarios" (misma fuente que Ulanzi), renderiza una tarjeta PNG 1080×1080 con `@napi-rs/canvas` y la manda a Cal por Telegram (`enviarFotoLocal`) para que la reenvíe manualmente al grupo de WhatsApp del equipo. Si falla la consulta, el render o el envío, manda un texto de error en vez de la tarjeta.
 
 Los otros 3 (resumidor/flight-checkin/foco-checkin) siguen comentados en `loop()`. Reactivar: descomentar la llamada correspondiente + rebuild + restart.
 
@@ -145,10 +146,11 @@ las proactivas hoy desactivadas en Jano, copiar ese mismo patrón desde el día 
 (único proactivo activo en ese momento) y un futuro `fuel_alert` reactivado — nunca se confirmó en la
 práctica ni se implementó nada, y quedó sin objeto al apagarse `scheduleResumirPlaylist` el 2026-07-14.
 
-**Estado real (actualizado 2026-07-16):** **1 proactivo interno activo** — `scheduleHealthSyncCheck()`
-(alerta de corte de sync de Apple Health, ver arriba), además del webhook watchdog (infra, no le
-manda nada a Cal). Los otros 3 crons de dominio (resumidor, flight check-in, Foco check-in) siguen
-desactivados. Jano ya no es 100% reactivo — es la única excepción puntual a esa decisión del 2026-07-14.
+**Estado real (actualizado 2026-07-17):** **2 proactivos internos activos** — `scheduleHealthSyncCheck()`
+(alerta de corte de sync de Apple Health) y `scheduleKpiCardDaily()` (tarjeta diaria de KPIs de Yape,
+ver arriba), además del webhook watchdog (infra, no le manda nada a Cal). Los otros 3 crons de dominio
+(resumidor, flight check-in, Foco check-in) siguen desactivados. Jano ya no es 100% reactivo — son las
+dos excepciones puntuales a esa decisión del 2026-07-14.
 **Sin proactividad por evento externo** — el monitor de combustible sigue apagado (`crons = []` en
 `combustible-proxy/wrangler.toml`, verificado 2026-07-03), ver abajo. Verificar qué crons internos
 arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
