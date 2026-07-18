@@ -26,12 +26,17 @@
 cd "/Users/calepes/Claude Projects/Personal/Agents/Jano"
 # Build (REQUERIDO antes de restart si tocaste shared/ o daemon/)
 npm -w @cos/shared run build && npm -w @cos/daemon run build
+# Tests / typecheck
+npm run test -w @cos/daemon
+npm run typecheck -w @cos/daemon
 # Restart daemon
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
 # Logs / estado del proceso
 tail -f ~/Library/Logs/cos-agent-v2.{out,err}.log
 launchctl print gui/$(id -u)/com.cal.cos-agent-v2 | grep -E "state|pid"
+# Generar/mandar la tarjeta de KPIs de Yape on-demand (fuera del cron 10:00)
+cd daemon-v2 && npm run kpi-card:send-now
 # Deploy worker CF (tras cambiar worker-v2/)
 cd worker-v2 && npx wrangler deploy
 ```
@@ -51,7 +56,7 @@ Resumidor universal con checkpoint antes de guardar a Readwise. Reusa los script
 - **Título + autor/canal antes del TL;DR (2026-07-03):** el resumen entregado antepone `<b>{título}</b>` + `{emoji} {autor}` (🎬 canal YouTube para video/podcast, 📰 fuente para artículo/libro) vía `buildResumenHeader()` (pura, testeada). Canal de YouTube viene de `audio-transcribe.sh` (nuevo campo `channel` en el JSON, pide `%(uploader)s` a yt-dlp en ambas ramas — captions y descarga+whisper); autor de Feedbin viene de `fetchStarredContent`. Artículos vía `safari-fetch` no tienen autor estructurado hoy (solo título).
 - **Built-ins:** Skill · WebFetch · WebSearch.
 - **MCPs heredados (OAuth Max):** Google Calendar · Notion · Gmail (lectura).
-- **MCPs custom:** youtube-transcribe · exchange-rate-bolivia · naabol-flights · health · apple-reminders · combustible · feedbin · readwise · inversiones-query · worldcup · spark · panini-mundial · **boa-checkin** (check-in online BoA vía Chrome real + CDP — `prepareBoaCheckin`/`confirmBoaCheckin`/`manageBoaSeat`/`getBoaBoardingPass`/`setBoaFrequentFlyer`, agregado 2026-07-04; 5 bugs reales de automatización encontrados y arreglados el mismo día (incluido uno silencioso: boarding pass del pasajero equivocado en reservas multi-pax) — ver `Personal/MCP Servers/mcp-servers/servers/boa-checkin/` y skill `boa-checkin-bolivia`). **`generateBoaWalletPass`** (agregado 2026-07-16, certificado de Apple Developer de Cal activo desde 2026-07-17 — desbloqueado y funcionando con reservas reales) genera un `.pkpass` escaneable del boarding pass MÁS una imagen `.png` decorativa (`cardImagePath`) con el diseño navy/dorado aprobado por Cal (mismo BCBP real como barcode, renderizada con Playwright + bwip-js en `wallet-image.ts`). Se entregan con dos tools: `enviarDocumentoLocal` (el `.pkpass`) y `enviarFotoLocal` (la tarjeta — vía `sendDocument`, no `sendPhoto`, porque Telegram recomprime fotos a JPEG y pierde la transparencia de las esquinas redondeadas). Ambas en `agent-tools.ts`/`tools/telegram-files.ts` — suben un archivo LOCAL a Telegram vía multipart, restringidas por seguridad a `tmpdir()` + patrón `boa-wallet-*.{pkpass,png}` con `realpath()` (resuelve symlinks antes de validar), ya que `enviarDocumentoUrl` solo acepta URLs públicas.
+- **MCPs custom:** youtube-transcribe · exchange-rate-bolivia · naabol-flights · health · agent-learnings · combustible · feedbin · serpapi-flights · apple-notes · inversiones-query · worldcup · spark · achoradazos · **boa-checkin** (check-in online BoA vía Chrome real + CDP — `prepareBoaCheckin`/`confirmBoaCheckin`/`manageBoaSeat`/`getBoaBoardingPass`/`setBoaFrequentFlyer`, agregado 2026-07-04; 5 bugs reales de automatización encontrados y arreglados el mismo día (incluido uno silencioso: boarding pass del pasajero equivocado en reservas multi-pax) — ver `Personal/MCP Servers/mcp-servers/servers/boa-checkin/` y skill `boa-checkin-bolivia`). **`generateBoaWalletPass`** (agregado 2026-07-16, certificado de Apple Developer de Cal activo desde 2026-07-17 — desbloqueado y funcionando con reservas reales) genera un `.pkpass` escaneable del boarding pass MÁS una imagen `.png` decorativa (`cardImagePath`) con el diseño navy/dorado aprobado por Cal (mismo BCBP real como barcode, renderizada con Playwright + bwip-js en `wallet-image.ts`). Se entregan con dos tools: `enviarDocumentoLocal` (el `.pkpass`) y `enviarFotoLocal` (la tarjeta — vía `sendDocument`, no `sendPhoto`, porque Telegram recomprime fotos a JPEG y pierde la transparencia de las esquinas redondeadas). Ambas en `agent-tools.ts`/`tools/telegram-files.ts` — suben un archivo LOCAL a Telegram vía multipart, restringidas por seguridad a `tmpdir()` + patrón `boa-wallet-*.{pkpass,png}` con `realpath()` (resuelve symlinks antes de validar), ya que `enviarDocumentoUrl` solo acepta URLs públicas.
 
 ## .env / secrets — carga en runtime
 Fuente: `daemon-v2/src/index.ts`.
