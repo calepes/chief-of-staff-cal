@@ -23,7 +23,13 @@ async function resolveAllowedLocalFile(filePath: string, allowedName: RegExp): P
   } catch {
     return null;
   }
-  if (!real.startsWith(allowedDir + sep) || !allowedName.test(basename(real))) return null;
+  // macOS: tmpdir() devuelve /var/folders/... pero /var es symlink a
+  // /private/var, así que realpath(resolved) siempre resuelve a
+  // /private/var/folders/... — comparar contra el allowedDir crudo nunca
+  // matcheaba y rechazaba cualquier archivo real. Resolver también allowedDir
+  // por realpath antes de comparar (mismo lado, misma forma).
+  const allowedDirReal = await realpath(allowedDir);
+  if (!real.startsWith(allowedDirReal + sep) || !allowedName.test(basename(real))) return null;
   return real;
 }
 
@@ -141,11 +147,11 @@ export async function enviarFotoLocal(
   filename: string,
   caption?: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const resolved = await resolveAllowedLocalFile(filePath, /^boa-wallet-.+\.png$/);
+  const resolved = await resolveAllowedLocalFile(filePath, /^(boa-wallet|kpi-card)-.+\.png$/);
   if (!resolved) {
     return {
       ok: false,
-      error: `Path no permitido: solo se puede enviar una tarjeta .png generada por boa-checkin en ${tmpdir()} (patrón boa-wallet-*.png).`,
+      error: `Path no permitido: solo se puede enviar boa-wallet-*.png o kpi-card-*.png dentro de ${tmpdir()}.`,
     };
   }
   try {
