@@ -18,17 +18,18 @@ async function resolveAllowedLocalFile(filePath: string, allowedName: RegExp): P
   const resolved = resolve(filePath);
   if (!resolved.startsWith(allowedDir + sep) || !allowedName.test(basename(resolved))) return null;
   let real: string;
+  let allowedDirReal: string;
   try {
     real = await realpath(resolved);
+    // macOS: tmpdir() devuelve /var/folders/... pero /var es symlink a
+    // /private/var, así que realpath(resolved) siempre resuelve a
+    // /private/var/folders/... — comparar contra el allowedDir crudo nunca
+    // matcheaba y rechazaba cualquier archivo real. Resolver también allowedDir
+    // por realpath antes de comparar (mismo lado, misma forma).
+    allowedDirReal = await realpath(allowedDir);
   } catch {
     return null;
   }
-  // macOS: tmpdir() devuelve /var/folders/... pero /var es symlink a
-  // /private/var, así que realpath(resolved) siempre resuelve a
-  // /private/var/folders/... — comparar contra el allowedDir crudo nunca
-  // matcheaba y rechazaba cualquier archivo real. Resolver también allowedDir
-  // por realpath antes de comparar (mismo lado, misma forma).
-  const allowedDirReal = await realpath(allowedDir);
   if (!real.startsWith(allowedDirReal + sep) || !allowedName.test(basename(real))) return null;
   return real;
 }
