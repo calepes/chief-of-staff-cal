@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { unlink } from "node:fs/promises";
+import { readdir, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi, afterEach } from "vitest";
@@ -76,18 +76,39 @@ describe("fetchDailyKpis", () => {
 
     await expect(fetchDailyKpis("fake-token", fetchFn)).rejects.toThrow("401");
   });
-});
 
-const todayFile = () => join(tmpdir(), `kpi-card-${new Date().toISOString().slice(0, 10)}.png`);
+  it("con fecha, filtra por esa fecha en vez de traer la más reciente", async () => {
+    let capturedBody: string | undefined;
+    const fetchFn = (async (_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify(notionResponse({ Fecha: { date: { start: "2026-07-18" } } })), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const kpis = await fetchDailyKpis("fake-token", fetchFn, "2026-07-18");
+
+    expect(kpis.fecha).toBe("2026-07-18");
+    const body = JSON.parse(capturedBody ?? "{}");
+    expect(body.filter).toEqual({ property: "Fecha", date: { equals: "2026-07-18" } });
+    expect(body.sorts).toBeUndefined();
+  });
+
+  it("con fecha, lanza error explícito si no hay fila para esa fecha", async () => {
+    const fetchFn = (async () => new Response(JSON.stringify({ results: [] }), { status: 200 })) as unknown as typeof fetch;
+
+    await expect(fetchDailyKpis("fake-token", fetchFn, "2026-07-18")).rejects.toThrow("2026-07-18");
+  });
+});
 
 afterEach(async () => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
-  try {
-    await unlink(todayFile());
-  } catch {
-    // no existía, ok
-  }
+  // El nombre del PNG temporal incluye un UUID random (kpi-card-daily.ts) — barrer por prefijo.
+  const files = await readdir(tmpdir()).catch(() => [] as string[]);
+  await Promise.all(
+    files
+      .filter((f) => f.startsWith("kpi-card-") && f.endsWith(".png"))
+      .map((f) => unlink(join(tmpdir(), f)).catch(() => {})),
+  );
 });
 
 describe("checkKpiCardDaily", () => {
@@ -128,5 +149,31 @@ describe("checkKpiCardDaily", () => {
     await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("con fecha, consulta esa fecha y manda la tarjeta", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify(notionResponse({ Fecha: { date: { start: "2026-07-18" } } })), { status: 200 }),
+      ),
+    );
+
+    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn", fecha: "2026-07-18" });
+
+    expect(renderKpiCardImage).toHaveBeenCalledTimes(1);
+    expect(enviarFotoLocal).toHaveBeenCalledTimes(1);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("con fecha sin datos, avisa por texto mencionando la fecha", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 })));
+
+    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn", fecha: "2026-07-18" });
+
+    expect(renderKpiCardImage).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(call.text).toContain("2026-07-18");
   });
 });

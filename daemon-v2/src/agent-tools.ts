@@ -26,6 +26,7 @@ import { readPersistedOutput } from "./tools/read-persisted.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { resumirContenido, guardarResumenReadwise, editarPropuestaResumen, revisarPlaylistResumir, revisarStarredResumir, saltarResumen, detenerResumidor, estadoResumidor } from "./tools/resumir.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
+import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
 import {
   searchBooks,
   addBook,
@@ -401,6 +402,34 @@ export function buildSdkTools(deps: ToolDeps) {
         } catch (err) {
           return asText({ status: "send_failed", error: String(err) });
         }
+      },
+    ),
+    tool(
+      "generarKpiCardYape",
+      [
+        "Genera y MANDA directo al chat la tarjeta PNG diaria de KPIs de Yape Bolivia (TRX + Activos DAU, con variación % vs. semana anterior) leyendo la DB Notion 'KPIs diarios'. Mismo código que el cron de las 10:00.",
+        "Úsalo cuando Cal pida la tarjeta de KPIs on-demand: 'genera la card de hoy', 'mándame la de ayer', 'la tarjeta del 18 de julio', 'ayer y anteayer', etc.",
+        "Args: { fechas?: string[] } — una o más fechas en formato YYYY-MM-DD. Sin fechas: la de HOY (fila más reciente). Resolvé 'ayer'/'anteayer' a fecha absoluta vos mismo antes de llamar. Con varias fechas manda una tarjeta por cada una, en orden.",
+        "NO uses esto para consultar el valor en texto (eso es notionCli sobre la DB 'KPIs diarios') — esta tool siempre genera y ENVÍA la imagen.",
+        "Tras invocar no repitas los números ni describas la tarjeta: ya se mandó. Si una fecha no tiene fila en Notion, a esa fecha le llega un texto de error en vez de la imagen — no lo inventes.",
+      ].join(" "),
+      {
+        fechas: z
+          .array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha inválido, usar YYYY-MM-DD"))
+          .max(10)
+          .optional(),
+      },
+      async ({ fechas }) => {
+        const chatId = deps.getCurrentChatId?.();
+        const botToken = deps.botToken;
+        const notionToken = process.env.NOTION_TOKEN;
+        if (!chatId || !botToken) return asText({ status: "error", error: "No chatId/token disponible" });
+        if (!notionToken) return asText({ status: "error", error: "NOTION_TOKEN no configurado" });
+        const lista = fechas && fechas.length ? fechas : [undefined];
+        for (const fecha of lista) {
+          await checkKpiCardDaily({ botToken, chatId, notionToken, fecha });
+        }
+        return asText({ status: "sent", fechas: fechas ?? ["hoy"] });
       },
     ),
     tool(

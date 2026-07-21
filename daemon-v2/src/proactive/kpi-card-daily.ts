@@ -1,6 +1,7 @@
 import { writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { sendMessage } from "@cos/shared";
 import type { DailyKpis } from "./kpi-card-image.js";
 import { renderKpiCardImage } from "./kpi-card-image.js";
@@ -17,7 +18,12 @@ interface NotionQueryResponse {
 export async function fetchDailyKpis(
   notionToken: string,
   fetchFn: typeof fetch = fetch,
+  fechaFiltro?: string,
 ): Promise<DailyKpis> {
+  const query = fechaFiltro
+    ? { page_size: 1, filter: { property: "Fecha", date: { equals: fechaFiltro } } }
+    : { page_size: 1, sorts: [{ property: "Fecha", direction: "descending" }] };
+
   const res = await fetchFn(`https://api.notion.com/v1/databases/${KPI_DB_ID}/query`, {
     method: "POST",
     headers: {
@@ -25,7 +31,7 @@ export async function fetchDailyKpis(
       "Notion-Version": "2022-06-28",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ page_size: 1, sorts: [{ property: "Fecha", direction: "descending" }] }),
+    body: JSON.stringify(query),
     signal: AbortSignal.timeout(10_000),
   });
 
@@ -33,7 +39,13 @@ export async function fetchDailyKpis(
 
   const data = (await res.json()) as NotionQueryResponse;
   const row = data.results[0];
-  if (!row) throw new Error("Notion query devolvió 0 resultados en KPIs diarios");
+  if (!row) {
+    throw new Error(
+      fechaFiltro
+        ? `No hay KPIs cargados en Notion para la fecha ${fechaFiltro}`
+        : "Notion query devolvió 0 resultados en KPIs diarios",
+    );
+  }
 
   const props = row.properties;
   const trx = props["TRX"]?.number;
@@ -57,32 +69,35 @@ export interface CheckKpiCardDailyOpts {
   botToken: string;
   chatId: number;
   notionToken: string;
+  /** Fecha YYYY-MM-DD a consultar. Sin esto, usa la fila más reciente (hoy). */
+  fecha?: string;
 }
 
 export async function checkKpiCardDaily(opts: CheckKpiCardDailyOpts): Promise<void> {
-  const { botToken, chatId, notionToken } = opts;
+  const { botToken, chatId, notionToken, fecha } = opts;
+  const motivoFecha = fecha ?? "hoy";
 
   let kpis: DailyKpis;
   try {
-    kpis = await fetchDailyKpis(notionToken);
+    kpis = await fetchDailyKpis(notionToken, fetch, fecha);
   } catch (err) {
-    await notifyFailure(botToken, chatId, "no pude leer los KPIs desde Notion", err);
+    await notifyFailure(botToken, chatId, `no pude leer los KPIs de ${motivoFecha} desde Notion`, err);
     return;
   }
 
   let imagePath: string;
   try {
     const png = await renderKpiCardImage(kpis);
-    imagePath = join(tmpdir(), `kpi-card-${todayIso()}.png`);
+    imagePath = join(tmpdir(), `kpi-card-${fecha ?? todayIso()}-${randomUUID()}.png`);
     await writeFile(imagePath, png);
   } catch (err) {
-    await notifyFailure(botToken, chatId, "no pude generar la imagen de la tarjeta", err);
+    await notifyFailure(botToken, chatId, `no pude generar la imagen de la tarjeta de ${motivoFecha}`, err);
     return;
   }
 
   const sent = await enviarFotoLocal(botToken, chatId, imagePath, "kpi-card.png");
   if (!sent.ok) {
-    await notifyFailure(botToken, chatId, "no pude mandarte la tarjeta por Telegram", sent.error);
+    await notifyFailure(botToken, chatId, `no pude mandarte la tarjeta de ${motivoFecha} por Telegram`, sent.error);
   }
 
   await unlink(imagePath).catch(() => {});
@@ -99,7 +114,7 @@ async function notifyFailure(
   err: unknown,
 ): Promise<void> {
   console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_daily_failure", motivo, err: String(err) }));
-  const text = `⚠️ No pude armar la tarjeta de KPIs de hoy (${motivo}). Revisa los logs del daemon.`;
+  const text = `⚠️ No pude armar la tarjeta de KPIs (${motivo}). Revisa los logs del daemon.`;
   try {
     await sendMessage(botToken, { chatId, text });
   } catch (sendErr) {
