@@ -1,0 +1,475 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { sendMessage } from "@cos/shared";
+import {
+  gmailAccessToken,
+  searchSelfServiceEmails,
+  searchSeguimientoDiarioEmails,
+  getGmailMessage,
+  findCsvCandidates,
+  findPdfCandidates,
+  downloadGmailAttachment,
+  downloadGmailAttachmentBuffer,
+  archiveAndMarkRead,
+  type GmailCreds,
+  type GmailMessageRef,
+} from "./kpi-ingest-gmail.js";
+import { parseCsv, applySundayRule, isSunday } from "./kpi-ingest-csv.js";
+import { extractPdfKpis, isFailedReport, parseReportDateFromFilename, type PdfKpiFields } from "./kpi-ingest-pdf.js";
+import {
+  upsertKpiRow,
+  fillDerivedFields,
+  markPdfReportFailed,
+  clearPdfFailNote,
+  type DerivedFillReport,
+  type UpsertResult,
+} from "./kpi-ingest-notion.js";
+import { checkKpiCardDaily } from "./kpi-card-daily.js";
+
+const require = createRequire(import.meta.url);
+const { PDFParse } = require("pdf-parse") as {
+  PDFParse: new (opts: { data: Uint8Array }) => { getText(): Promise<{ text: string }> };
+};
+
+const WAIT_MS = 15 * 60 * 1000;
+const ERROR_DEDUP_MS = 2 * 60 * 60 * 1000;
+const MAX_PROCESSED = 200;
+const MAX_CARD_SENT = 90;
+
+// El PDF ("Seguimiento Diario Yape Bolivia") es la fuente autoritativa de estos 3 campos —
+// el CSV ("Self-Service") ya no los escribe, para que no se pisen entre sí. Ver
+// Jano/CLAUDE.md sección "scheduleKpiIngestCheck" para el diseño completo.
+const PDF_OWNED_RAW_PROPS = ["Afiliaciones diarias", "TRX", "Activos DAU"];
+
+export interface KpiIngestState {
+  processed: string[];
+  pending: Record<string, { receivedAt: number }>;
+  lastErrorNotified: Record<string, number>;
+  /** Fechas para las que ya se mandó la tarjeta automática (evita re-mandarla). */
+  cardSent: string[];
+}
+
+export function defaultStatePath(): string {
+  return `${process.env.HOME}/.cos-agent/kpi-ingest-state.json`;
+}
+
+export function readState(path: string): KpiIngestState {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<KpiIngestState>;
+    // cardSent es un campo nuevo — un state.json escrito antes de este cambio no lo tiene.
+    return {
+      processed: parsed.processed ?? [],
+      pending: parsed.pending ?? {},
+      lastErrorNotified: parsed.lastErrorNotified ?? {},
+      cardSent: parsed.cardSent ?? [],
+    };
+  } catch {
+    return { processed: [], pending: {}, lastErrorNotified: {}, cardSent: [] };
+  }
+}
+
+export function writeState(path: string, state: KpiIngestState): void {
+  try {
+    writeFileSync(path, JSON.stringify(state), "utf8");
+  } catch {
+    /* noop */
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const MAX_REPORT_LINES = 25;
+
+function capLines(lines: string[]): string[] {
+  if (lines.length <= MAX_REPORT_LINES) return lines;
+  return [...lines.slice(0, MAX_REPORT_LINES), `• …+${lines.length - MAX_REPORT_LINES} más (ver logs del daemon)`];
+}
+
+const NO_CALCULABLE_REPORT_WINDOW_DAYS = 30;
+
+// Los "no calculables" de fechas viejas (típicamente enero, sin D-7 porque ahí arranca el
+// histórico) son permanentes — NUNCA se van a poder calcular, y sin este filtro se repiten
+// idénticos en TODOS los reportes desde siempre (ruido puro). Solo lo reciente es accionable
+// (indica un hueco real que vale la pena mirar); el detalle completo, viejo incluido, sigue
+// en el log estructurado `kpi_ingest_(pdf_)?full_report` para debug.
+function isRecentFecha(fecha: string, days = NO_CALCULABLE_REPORT_WINDOW_DAYS): boolean {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return new Date(`${fecha}T00:00:00Z`).getTime() >= cutoff;
+}
+
+// "Afiliaciones vs. Sem. anterior (%)" nunca se puede calcular un domingo — "Afiliaciones
+// diarias" es null ESE mismo día por la regla SEGIP (applySundayRule), no porque falte data.
+// Es tan permanente como el hueco de enero (arriba), solo que en vez de un límite histórico
+// fijo se repite cada semana — sin este filtro, siempre iban a quedar ~4 domingos "recientes"
+// ensuciando el reporte para siempre.
+function isPermanentSundayGap(c: { fecha: string; motivo: string }): boolean {
+  return isSunday(c.fecha) && c.motivo.startsWith("falta afiliacionesDiarias el");
+}
+
+function formatDerivedLines(derived: DerivedFillReport): string[] {
+  return capLines([
+    ...derived.completados.map((c) => `• ${escapeHtml(c.fecha)} → ${escapeHtml(c.campo)} → ${c.valor}`),
+    ...derived.noCalculables
+      .filter((c) => isRecentFecha(c.fecha) && !isPermanentSundayGap(c))
+      .map((c) => `• ${escapeHtml(c.fecha)} → ${escapeHtml(c.campo)} → no calculable (${escapeHtml(c.motivo)})`),
+  ]);
+}
+
+export function formatSuccessReport(ingestSummary: string[], derived: DerivedFillReport): string {
+  const header = "✅ <b>KPIs diarios actualizados</b> · Self-Service";
+  const lines: string[] =
+    ingestSummary.length > 1 ? [header, `📋 ${ingestSummary.length} fechas actualizadas`, ""] : [header, ""];
+  lines.push("<b>Ingesta:</b>");
+  const ingestLines = ingestSummary.length ? capLines(ingestSummary.map((s) => `• ${escapeHtml(s)}`)) : ["• sin filas con Fecha válida"];
+  lines.push(...ingestLines);
+  lines.push("", "<b>Derivados:</b>");
+  const derivedLines = formatDerivedLines(derived);
+  lines.push(...(derivedLines.length ? derivedLines : ["• nada pendiente"]));
+  return lines.join("\n");
+}
+
+function formatMiles(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function formatPct(n: number): string {
+  const arrow = n >= 0 ? "▲" : "▼";
+  const sign = n >= 0 ? "+" : "";
+  return `${arrow} ${sign}${(n * 100).toFixed(1)}%`;
+}
+
+function trendSuffix(vsAyer: number | null, vsSemana: number | null): string {
+  const parts: string[] = [];
+  if (vsAyer != null) parts.push(`${formatPct(vsAyer)} día`);
+  if (vsSemana != null) parts.push(`${formatPct(vsSemana)} sem.`);
+  return parts.length ? `  <i>${parts.join(" · ")}</i>` : "";
+}
+
+export function formatPdfSuccessReport(
+  fecha: string,
+  pdfKpis: PdfKpiFields,
+  result: UpsertResult,
+  derived: DerivedFillReport,
+): string {
+  const lines: string[] = [
+    "✅ <b>KPIs diarios actualizados</b> · Seguimiento Diario",
+    `📅 <b>${escapeHtml(fecha)}</b> (${result.created ? "creado" : "actualizado"})`,
+    "",
+  ];
+
+  if (pdfKpis.afiliacionesDiarias != null) {
+    lines.push(`👥 Afiliaciones diarias: <b>${formatMiles(pdfKpis.afiliacionesDiarias)}</b>${trendSuffix(pdfKpis.afiliacionesVsAyer, pdfKpis.afiliacionesVsSemana)}`);
+  }
+  if (pdfKpis.afiliados7d != null) {
+    lines.push(`👥 Afiliados 7d: <b>${formatMiles(pdfKpis.afiliados7d)}</b>`);
+  }
+  if (pdfKpis.trx != null) {
+    lines.push(`🔁 TRX: <b>${formatMiles(pdfKpis.trx)}</b>${trendSuffix(pdfKpis.trxVsAyer, pdfKpis.trxVsSemana)}`);
+  }
+  if (pdfKpis.trxPromedio7d != null) {
+    lines.push(`🔁 TRX Promedio 7d: <b>${formatMiles(pdfKpis.trxPromedio7d)}</b>`);
+  }
+  if (pdfKpis.activosDau != null) {
+    lines.push(`📊 Activos DAU: <b>${formatMiles(pdfKpis.activosDau)}</b>${trendSuffix(pdfKpis.dauVsAyer, pdfKpis.dauVsSemana)}`);
+  }
+  if (!result.fieldsWritten.length) lines.push("sin campos");
+
+  lines.push("", "<b>Derivados:</b>");
+  const derivedLines = formatDerivedLines(derived);
+  lines.push(...(derivedLines.length ? derivedLines : ["• nada pendiente"]));
+  return lines.join("\n");
+}
+
+function formatErrorReport(accion: string, motivo: string, sugerencia: string): string {
+  return `⚠️ <b>No pude ${escapeHtml(accion)}</b>\n${escapeHtml(motivo)}\n${escapeHtml(sugerencia)}`;
+}
+
+function pdfKpisToRaw(pdf: PdfKpiFields): Record<string, number | null> {
+  return {
+    "Afiliaciones diarias": pdf.afiliacionesDiarias,
+    "Afiliados 7d": pdf.afiliados7d,
+    "TRX": pdf.trx,
+    "TRX Promedio 7d": pdf.trxPromedio7d,
+    "Activos DAU": pdf.activosDau,
+    "Afiliaciones vs. Ayer (%)": pdf.afiliacionesVsAyer,
+    "Afiliaciones vs. Sem. anterior (%)": pdf.afiliacionesVsSemana,
+    "TRX vs. Ayer (%)": pdf.trxVsAyer,
+    "TRX vs. Sem. anterior (%)": pdf.trxVsSemana,
+    "DAU vs. Ayer (%)": pdf.dauVsAyer,
+    "DAU vs. Sem. anterior (%)": pdf.dauVsSemana,
+  };
+}
+
+async function defaultPdfTextExtractor(buf: Buffer): Promise<string> {
+  const parser = new PDFParse({ data: new Uint8Array(buf) });
+  const { text } = await parser.getText();
+  return text;
+}
+
+export interface CheckKpiIngestOpts {
+  botToken: string;
+  chatId: number;
+  notionToken: string;
+  gmail: GmailCreds;
+  /** Override para tests — default: `~/.cos-agent/kpi-ingest-state.json`. */
+  statePath?: string;
+  /** Override para tests — evita instanciar pdf-parse real sobre un binario de PDF de verdad. */
+  pdfTextExtractor?: (buf: Buffer) => Promise<string>;
+}
+
+let running = false;
+
+async function pollAndProcess(
+  state: KpiIngestState,
+  statePath: string,
+  gmail: GmailCreds,
+  searchFn: (accessToken: string) => Promise<GmailMessageRef[]>,
+  processFn: (id: string, state: KpiIngestState, opts: CheckKpiIngestOpts) => Promise<void>,
+  opts: CheckKpiIngestOpts,
+  errLabel: string,
+): Promise<void> {
+  let messageIds: string[];
+  try {
+    const token = await gmailAccessToken(gmail);
+    const found = await searchFn(token);
+    messageIds = found.map((m) => m.id);
+  } catch (err) {
+    console.error(JSON.stringify({ ts: Date.now(), msg: `kpi_ingest_search_error_${errLabel}`, err: String(err) }));
+    return;
+  }
+
+  for (const id of messageIds) {
+    if (state.processed.includes(id)) continue;
+
+    if (!state.pending[id]) {
+      try {
+        const token = await gmailAccessToken(gmail);
+        const detail = await getGmailMessage(id, token);
+        state.pending[id] = { receivedAt: detail.internalDate };
+        writeState(statePath, state);
+      } catch (err) {
+        console.error(JSON.stringify({ ts: Date.now(), msg: `kpi_ingest_metadata_error_${errLabel}`, id, err: String(err) }));
+      }
+      continue;
+    }
+
+    if (Date.now() - state.pending[id].receivedAt < WAIT_MS) continue;
+
+    await processFn(id, state, opts);
+    writeState(statePath, state);
+  }
+}
+
+export async function checkKpiIngest(opts: CheckKpiIngestOpts): Promise<void> {
+  if (running) {
+    console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_check_overlap_skipped" }));
+    return;
+  }
+  running = true;
+  try {
+    const statePath = opts.statePath ?? defaultStatePath();
+    const state = readState(statePath);
+
+    await pollAndProcess(state, statePath, opts.gmail, searchSelfServiceEmails, processCsvMessage, opts, "csv");
+    await pollAndProcess(state, statePath, opts.gmail, searchSeguimientoDiarioEmails, processPdfMessage, opts, "pdf");
+
+    if (state.processed.length > MAX_PROCESSED) {
+      state.processed = state.processed.slice(-MAX_PROCESSED);
+      writeState(statePath, state);
+    }
+    if (state.cardSent.length > MAX_CARD_SENT) {
+      state.cardSent = state.cardSent.slice(-MAX_CARD_SENT);
+      writeState(statePath, state);
+    }
+  } finally {
+    running = false;
+  }
+}
+
+async function processCsvMessage(id: string, state: KpiIngestState, opts: CheckKpiIngestOpts): Promise<void> {
+  const { botToken, chatId, notionToken, gmail } = opts;
+  try {
+    const token = await gmailAccessToken(gmail);
+    const detail = await getGmailMessage(id, token);
+    const candidates = findCsvCandidates(detail.attachments);
+
+    if (candidates.length === 0) {
+      await sendReport(
+        botToken,
+        chatId,
+        formatErrorReport("procesar el Self-Service", "El mail llegó sin ningún CSV adjunto.", "Revisa el mail manualmente si se repite."),
+      );
+      markProcessed(state, id);
+      return;
+    }
+
+    let best: { headerMapped: number; rows: ReturnType<typeof parseCsv>["rows"] } | null = null;
+    for (const candidate of candidates) {
+      const content = await downloadGmailAttachment(id, candidate.attachmentId, token);
+      const parsed = parseCsv(content);
+      if (!best || parsed.headerMapped > best.headerMapped) best = parsed;
+    }
+
+    const ingestSummary: string[] = [];
+    const touchedFechas: string[] = [];
+    for (const row of best!.rows) {
+      if (!row.fecha) continue;
+      const raw = applySundayRule(row.fecha, row.raw);
+      for (const prop of PDF_OWNED_RAW_PROPS) delete raw[prop];
+      const result = await upsertKpiRow(notionToken, row.fecha, raw);
+      touchedFechas.push(result.fecha);
+      const extras = [
+        row.unmapped.length ? `no mapeadas: ${row.unmapped.join(", ")}` : "",
+        row.illegible.length ? `ilegibles: ${row.illegible.join(", ")}` : "",
+      ].filter(Boolean);
+      ingestSummary.push(
+        `${result.fecha}: ${result.created ? "creado" : "actualizado"} (${result.fieldsWritten.join(", ") || "sin campos"})` +
+          (extras.length ? ` · ${extras.join(" · ")}` : ""),
+      );
+    }
+
+    // Solo las fechas recién tocadas en ESTE mail — no todo el histórico (ver fillDerivedFields).
+    const derived = await fillDerivedFields(notionToken, touchedFechas);
+    console.log(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_full_report", id, ingestSummary, derived }));
+    await sendReport(botToken, chatId, formatSuccessReport(ingestSummary, derived));
+    markProcessed(state, id);
+  } catch (err) {
+    const now = Date.now();
+    const last = state.lastErrorNotified[id] ?? 0;
+    if (now - last >= ERROR_DEDUP_MS) {
+      await sendReport(
+        botToken,
+        chatId,
+        formatErrorReport("actualizar los KPIs (Self-Service)", String(err), "Reintento automático en el próximo tick."),
+      );
+      state.lastErrorNotified[id] = now;
+    }
+    console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_process_error", id, err: String(err) }));
+  }
+}
+
+async function processPdfMessage(id: string, state: KpiIngestState, opts: CheckKpiIngestOpts): Promise<void> {
+  const { botToken, chatId, notionToken, gmail } = opts;
+  try {
+    const token = await gmailAccessToken(gmail);
+    const detail = await getGmailMessage(id, token);
+    const candidates = findPdfCandidates(detail.attachments);
+
+    if (candidates.length === 0) {
+      await sendReport(
+        botToken,
+        chatId,
+        formatErrorReport("procesar el Seguimiento Diario", "El mail llegó sin ningún PDF adjunto.", "Revisa el mail manualmente si se repite."),
+      );
+      markProcessed(state, id);
+      return;
+    }
+
+    const attachment = candidates[0];
+    const fecha = parseReportDateFromFilename(attachment.filename);
+    if (!fecha) {
+      throw new Error(`no pude determinar la fecha del reporte desde el nombre del archivo "${attachment.filename}"`);
+    }
+
+    const buf = await downloadGmailAttachmentBuffer(id, attachment.attachmentId, token);
+    const text = await (opts.pdfTextExtractor ?? defaultPdfTextExtractor)(buf);
+
+    if (isFailedReport(text)) {
+      await markPdfReportFailed(notionToken, fecha);
+      await sendReport(
+        botToken,
+        chatId,
+        `⚠️ <b>Reporte de Seguimiento Diario fallido</b>\n${escapeHtml(fecha)} — el PDF llegó marcado "updated fail". No se tocaron los KPIs de esa fecha, queda pendiente de reintento.`,
+      );
+      markProcessed(state, id);
+      return;
+    }
+
+    const pdfKpis = extractPdfKpis(text);
+    if (pdfKpis.afiliacionesDiarias == null && pdfKpis.trx == null && pdfKpis.activosDau == null) {
+      throw new Error("no pude extraer ningún KPI reconocible del PDF (¿cambió el formato del reporte?)");
+    }
+
+    const raw = applySundayRule(fecha, pdfKpisToRaw(pdfKpis));
+    const result = await upsertKpiRow(notionToken, fecha, raw);
+    await clearPdfFailNote(notionToken, fecha);
+    const derived = await fillDerivedFields(notionToken, [fecha]);
+
+    try {
+      await archiveAndMarkRead(id, token);
+    } catch (err) {
+      // Requiere scope gmail.modify — hasta que ese OAuth esté listo, esto falla con 403 y
+      // el mail queda sin archivar (no rompe el resto del flujo). Ver Jano/CLAUDE.md.
+      console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_archive_failed", id, err: String(err) }));
+    }
+
+    console.log(
+      JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_pdf_full_report", id, fecha, fieldsWritten: result.fieldsWritten, derived }),
+    );
+    await sendReport(botToken, chatId, formatPdfSuccessReport(fecha, pdfKpis, result, derived));
+
+    // La tarjeta PNG (TRX + Activos DAU + sus % vs. semana anterior) solo necesita datos del
+    // PDF — el CSV no le aporta nada. Se dispara acá en vez de esperar un cron fijo a las 10:00
+    // (pedido de Cal 2026-07-24, ver Jano/CLAUDE.md). Idempotente por fecha vía state.cardSent.
+    // Try/catch propio (checkKpiCardDaily no debería lanzar — maneja y reporta sus propios
+    // errores por Telegram — pero un fallo puntual acá no debe hacer parecer que TODA la
+    // ingesta falló, ni bloquear markProcessed de un mail ya procesado con éxito).
+    if (!state.cardSent.includes(fecha)) {
+      try {
+        await checkKpiCardDaily({ botToken, chatId, notionToken, fecha });
+        state.cardSent.push(fecha);
+      } catch (err) {
+        console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_daily_trigger_failed", fecha, err: String(err) }));
+      }
+    }
+
+    markProcessed(state, id);
+  } catch (err) {
+    const now = Date.now();
+    const last = state.lastErrorNotified[id] ?? 0;
+    if (now - last >= ERROR_DEDUP_MS) {
+      await sendReport(
+        botToken,
+        chatId,
+        formatErrorReport("actualizar los KPIs (Seguimiento Diario)", String(err), "Reintento automático en el próximo tick."),
+      );
+      state.lastErrorNotified[id] = now;
+    }
+    console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_pdf_process_error", id, err: String(err) }));
+  }
+}
+
+function markProcessed(state: KpiIngestState, id: string): void {
+  state.processed.push(id);
+  delete state.pending[id];
+  delete state.lastErrorNotified[id];
+}
+
+function paginateReport(text: string, limit = 4000): string[] {
+  if (text.length <= limit) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > limit) {
+    let cut = remaining.lastIndexOf("\n\n", limit);
+    if (cut < limit / 2) cut = remaining.lastIndexOf("\n", limit);
+    if (cut < limit / 2) cut = remaining.lastIndexOf(" ", limit);
+    if (cut < limit / 2) cut = limit;
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut).trimStart();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+async function sendReport(botToken: string, chatId: number, text: string): Promise<void> {
+  for (const chunk of paginateReport(text)) {
+    try {
+      await sendMessage(botToken, { chatId, text: chunk, parseMode: "HTML" });
+    } catch (err) {
+      console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_report_send_failed", err: String(err) }));
+      return;
+    }
+  }
+}

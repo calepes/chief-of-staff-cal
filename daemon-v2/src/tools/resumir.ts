@@ -4,31 +4,36 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { sendMessage, editMessage, sendChatAction } from "@cos/shared";
 import { sanitizeForTelegram } from "../format.js";
+import type { CfKv } from "../cf-kv.js";
+import { fetchAsUser } from "./fetch-as-user.js";
+import { addDomainAndSync } from "./cookie-jar.js";
 
 // Resumidor universal para Jano. Reutiliza los MISMOS scripts standalone que el
 // skill `resumir` (~/.claude/scripts/*), invocándolos con spawn(argv) — sin shell,
-// sin Bash, sin riesgo de inyección. El daemon corre bajo launchd, así que para leer
-// cookies de Safari usa ~/.claude/bin/node-fda (que debe tener Full Disk Access).
+// sin Bash, sin riesgo de inyección. La lectura de artículos con paywall ya NO lee
+// Cookies.binarycookies directo (ver fetchAsUser/Cookie Broker) — solo transcripción de
+// audio/video sigue usando node-fda para otras cosas de disco si hiciera falta.
 
 const HOME = homedir();
-const NODE_FDA = `${HOME}/.claude/bin/node-fda`;
-const SAFARI_FETCH = `${HOME}/.claude/scripts/safari-fetch.mjs`;
 const AUDIO_TRANSCRIBE = `${HOME}/.claude/scripts/audio-transcribe.sh`;
 const READWISE_SAVE = `${HOME}/.claude/scripts/readwise-save.sh`;
 const CLAUDE_BIN = `${HOME}/.npm-global/bin/claude`;
 const TIMEOUT_BIN = "/opt/homebrew/bin/timeout";
 const PLAYWRIGHT_BROWSERS_PATH = `${HOME}/Library/Caches/ms-playwright`;
 
-const FETCH_TIMEOUT_MS = 60_000;        // safari-fetch
 const TRANSCRIBE_TIMEOUT_MS = 600_000;  // yt-dlp + whisper (hasta 10 min)
 const SUMMARIZE_TIMEOUT_SEC = 360;       // subprocess claude — subido de 180s (2026-07-03):
                                           // transcripciones muy largas (streams/programas en
                                           // vivo de +1h) pueden tardar más de 3 min en resumirse
 const TG_MAX = 4000;                    // límite seguro por mensaje Telegram
 const PENDING_DIR = `${HOME}/.cos-agent`; // estado de propuestas pendientes (entre runs)
+// umbral bajo el cual un artículo se considera "excerpt/bloqueado" — mismo criterio que ya
+// usaba fetchStarredContent para decidir si vale la pena reintentar con cookie.
+const LOOKS_BLOCKED_CHARS = 1500;
 
 export interface ResumirDeps {
   botToken: string;
+  cookieJarKv: CfKv;
 }
 
 export interface ResumirArgs {
@@ -87,6 +92,31 @@ export interface EditarPropuestaArgs {
 
 function pendingPath(chatId: number): string {
   return join(PENDING_DIR, `pending-resumir-${chatId}.json`);
+}
+
+// Estado del "¿agrego este dominio a la whitelist del Cookie Broker?" — se persiste en disco
+// (mismo patrón que pendingPath) porque el aviso se manda en background, fuera del turno del LLM
+// (Jano no tiene warm pool: el turno donde Cal responda "sí" arranca sin memoria de esta pregunta).
+// Por eso la confirmación va por BOTÓN mecánico (index.ts intercepta el callback sin pasar por el
+// LLM), no por texto libre — hallado por daemon-health-reviewer, ver HANDOFF-cookie-broker-kv.md.
+interface CookieJarPending {
+  domain: string;
+  source: string;
+  instruction?: string;
+  createdAt: number;
+}
+
+function cookieJarPendingPath(chatId: number): string {
+  return join(PENDING_DIR, `cookiejar-pending-${chatId}.json`);
+}
+
+function cookieJarConfirmKeyboard(domain: string): unknown {
+  return {
+    inline_keyboard: [[
+      { text: `✅ Sí, agregar ${domain}`, callback_data: "j:cookiejar:add" },
+      { text: "❌ No", callback_data: "j:cookiejar:no" },
+    ]],
+  };
 }
 
 // Limpia locks de propuesta huérfanos (placeholder:true) que quedaron de un run matado por un
@@ -522,21 +552,28 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     await setAnchor("💭 Resumiendo...", progressKb);
   } else if (kind === "article") {
     await setAnchor("📥 Leyendo el artículo...", progressKb);
-    const r = await runJson(NODE_FDA, [SAFARI_FETCH, args.source], FETCH_TIMEOUT_MS);
-    if (r.status === "needs-fda") {
-      await setAnchor("🔒 No puedo leer las cookies de Safari. Otorgá Full Disk Access a <code>~/.claude/bin/node-fda</code> en Ajustes → Privacidad y seguridad → Acceso completo al disco, y reintentá.");
+    const r = await fetchAsUser(args.source, deps.cookieJarKv);
+    if (!r.ok || !r.text) {
+      await setAnchor(`❌ No pude obtener el artículo (${r.error ?? r.status}).`);
       return;
     }
-    if (r.status === "needs-login") {
-      await setAnchor("🔒 Ese artículo está tras un muro y no detecté sesión. Iniciá sesión en ese sitio en Safari y reintentá.");
-      return;
-    }
-    if (r.status !== "ok" || typeof r.text !== "string" || !r.text) {
-      await setAnchor(`❌ No pude obtener el artículo (${String(r.status ?? "error")}).`);
+    const looksBlocked = r.text.trim().length < LOOKS_BLOCKED_CHARS;
+    if (looksBlocked && !r.domainWhitelisted) {
+      let hostname = args.source;
+      try { hostname = new URL(args.source).hostname; } catch { /* usar source tal cual */ }
+      const domain = hostname.replace(/^www\./, "");
+      writeJsonSafe(cookieJarPendingPath(chatId), {
+        domain, source: args.source, instruction: args.instruction, createdAt: Date.now(),
+      } satisfies CookieJarPending);
+      await setAnchor(
+        `🔒 El artículo se ve corto/bloqueado (posible paywall) y no tengo sesión guardada para <b>${domain}</b>. ` +
+        `¿Lo agrego a la whitelist de sitios paywalled?`,
+        cookieJarConfirmKeyboard(domain),
+      );
       return;
     }
     text = r.text;
-    if (typeof r.title === "string") docTitle = r.title;
+    if (r.title) docTitle = r.title;
     await setAnchor("💭 Resumiendo...", progressKb);
   } else if (kind === "video" || kind === "podcast") {
     await setAnchor(kind === "video" ? "🎬 Transcribiendo el video..." : "🎧 Transcribiendo el audio...", progressKb);
@@ -947,20 +984,21 @@ async function fetchStarredEntries(): Promise<StarredItem[]> {
 }
 
 // Trae el contenido de un starred para resumir. Primero el content de Feedbin; si viene TRUNCADO
-// (excerpt), baja el artículo completo con safari-fetch (full + atraviesa paywall vía cookies de
-// Safari — mejor que el content del feed y que Mercury, que no pasa paywalls).
-async function fetchStarredContent(entryId: number, url?: string): Promise<{ text: string; title: string; author?: string } | null> {
+// (excerpt), baja el artículo completo vía fetchAsUser (full + cookie del Cookie Broker si el
+// dominio está whitelisteado — mejor que el content del feed y que Mercury, que no pasa paywalls).
+// No dispara el flujo de "¿agrego el dominio?" acá (es un fallback en batch, no una petición directa
+// de Cal) — si no hay cookie, simplemente se queda con el content del feed.
+async function fetchStarredContent(entryId: number, url: string | undefined, cookieJarKv: CfKv): Promise<{ text: string; title: string; author?: string } | null> {
   const d = (await feedbinGet(`/entries/${entryId}.json`)) as { title?: string | null; content?: string | null; summary?: string | null; author?: string | null } | null;
   let text = d ? stripHtml(d.content ?? d.summary ?? "") : "";
   let title = (d?.title ?? "").trim();
   const author = (d?.author ?? "").trim();
-  const TRUNCATED = 1500; // bajo este largo asumimos excerpt → intentar full vía safari-fetch
-  if (url && /^https?:\/\//i.test(url) && text.length < TRUNCATED) {
+  if (url && /^https?:\/\//i.test(url) && text.length < LOOKS_BLOCKED_CHARS) {
     try {
-      const r = await runJson(NODE_FDA, [SAFARI_FETCH, url], FETCH_TIMEOUT_MS);
-      if (r.status === "ok" && typeof r.text === "string" && r.text.trim().length > text.length) {
+      const r = await fetchAsUser(url, cookieJarKv);
+      if (r.ok && r.text.trim().length > text.length) {
         text = r.text;
-        if (typeof r.title === "string" && r.title.trim()) title = r.title.trim();
+        if (r.title.trim()) title = r.title.trim();
       }
     } catch { /* fallback falló → quedarse con el content del feed */ }
   }
@@ -1000,7 +1038,7 @@ async function startStarredItem(deps: ResumirDeps, chatId: number, item: Starred
   const anchor = await setCardMessage(deps.botToken, chatId, anchorMsgId, `⭐ <b>${escapeHtml(item.title)}</b>\n⏳ Procesando...`, stopKeyboard());
   let failed = false;
   try {
-    const content = await fetchStarredContent(item.id, item.url);
+    const content = await fetchStarredContent(item.id, item.url, deps.cookieJarKv);
     if (!content) failed = true;
     else await run(deps, chatId, "article", { source: item.url }, { fromStarred: true, feedbinId: item.id, prefetched: content, anchorMsgId: anchor });
   } catch (e) {
@@ -1359,6 +1397,36 @@ export async function handleQueuePick(deps: ResumirDeps, chatId: number, kind: "
   const id = Number(pick);
   if (Number.isNaN(id)) return; // callback_data corrupto/inesperado — no debería pasar
   await pickStarredItem(deps, chatId, id, anchorMsgId);
+}
+
+// Callback mecánico j:cookiejar:add / j:cookiejar:no — respuesta al aviso "¿agrego este dominio a
+// la whitelist?" (ver cookieJarConfirmKeyboard). Lee el estado persistido por run() (kind==="article"),
+// agrega+sincroniza el dominio si Cal confirmó, y reintenta el mismo artículo. Puede tardar hasta
+// ~45s (sync) + el resumen entero — el caller (index.ts) debe llamarlo fire-and-forget con lock,
+// igual que handleQueuePick.
+export async function handleCookieJarConfirm(deps: ResumirDeps, chatId: number, confirm: boolean, anchorMsgId: number): Promise<void> {
+  const path = cookieJarPendingPath(chatId);
+  const pending = readJsonSafe<CookieJarPending | null>(path, null);
+  try { unlinkSync(path); } catch { /* noop */ }
+
+  if (!pending) {
+    await setCardMessage(deps.botToken, chatId, anchorMsgId, "🔒 Ya no tengo ese dominio pendiente guardado (pasó mucho tiempo). Pedime el resumen de nuevo y te vuelvo a preguntar.", { inline_keyboard: [] });
+    return;
+  }
+
+  if (!confirm) {
+    await setCardMessage(deps.botToken, chatId, anchorMsgId, `Ok, no agrego <b>${escapeHtml(pending.domain)}</b> a la whitelist.`, { inline_keyboard: [] });
+    return;
+  }
+
+  await setCardMessage(deps.botToken, chatId, anchorMsgId, `🔄 Agregando <b>${escapeHtml(pending.domain)}</b> y sincronizando...`, { inline_keyboard: [] });
+  const result = await addDomainAndSync(pending.domain);
+  if (!result.synced) {
+    await setCardMessage(deps.botToken, chatId, anchorMsgId, escapeHtml(result.message));
+    return;
+  }
+  await setCardMessage(deps.botToken, chatId, anchorMsgId, `✅ ${escapeHtml(result.message)}\n\nReintentando el artículo...`);
+  await run(deps, chatId, "article", { source: pending.source, instruction: pending.instruction }, { anchorMsgId });
 }
 
 // Tool: reportar el estado del resumidor (propuesta en curso + cola de la playlist).

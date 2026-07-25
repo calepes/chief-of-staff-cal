@@ -25,6 +25,16 @@ export class CfKv {
     return (await res.json()) as T;
   }
 
+  // Lee un value RAW (no JSON) — usado para el KV neutral "cookie-jar", donde el escritor
+  // (sync-safari-cookies.mjs) guarda el header de cookies como texto plano vía `wrangler kv key put`,
+  // no como JSON. get() fallaría acá porque res.json() no puede parsear "a=1; b=2" como JSON.
+  async getText(key: string): Promise<string | null> {
+    const res = await fetch(this.url(key), { headers: this.headers() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`KV getText failed: ${res.status}`);
+    return res.text();
+  }
+
   async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
     const url = ttlSeconds != null && ttlSeconds > 0
       ? `${this.url(key)}?expiration_ttl=${ttlSeconds}`

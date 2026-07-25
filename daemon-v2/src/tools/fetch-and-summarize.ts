@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { sendMessage } from "@cos/shared";
 import { fetchAsUser } from "./fetch-as-user.js";
+import type { CfKv } from "../cf-kv.js";
 
 const CLAUDE_BIN = `${homedir()}/.npm-global/bin/claude`;
 const TIMEOUT_SEC = 120;
 
 export interface FetchAndSummarizeDeps {
   botToken: string;
+  cookieJarKv: CfKv;
 }
 
 export interface FetchAndSummarizeArgs {
@@ -23,10 +25,10 @@ export async function fetchAndSummarize(
   const { url, instruction } = args;
   const { botToken } = deps;
 
-  // 1. Descargar con cookies de Safari (en Node — fuera del contexto del LLM)
+  // 1. Descargar con cookie del Cookie Broker si el dominio está whitelisteado (en Node — fuera del contexto del LLM)
   await sendMessage(botToken, { chatId, text: "📥 Descargando artículo...", parseMode: "HTML" });
 
-  const content = await fetchAsUser(url);
+  const content = await fetchAsUser(url, deps.cookieJarKv);
   if (!content.ok) {
     await sendMessage(botToken, {
       chatId,

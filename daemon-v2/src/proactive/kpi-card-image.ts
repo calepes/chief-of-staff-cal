@@ -63,10 +63,13 @@ export async function renderKpiCardImage(kpis: DailyKpis): Promise<Buffer> {
   const canvas = createCanvas(card.size, card.size);
   const ctx = canvas.getContext("2d");
 
+  // Fondo del canvas ENTERO primero — el canvas nace transparente, y las 4 esquinas fuera de
+  // la curva de roundRect() nunca se pintaban (quedaban transparentes → Telegram las mostraba
+  // negras). El roundRect de abajo queda solo como borde decorativo, ya no como relleno.
   ctx.fillStyle = semantic.colorSurface;
+  ctx.fillRect(0, 0, card.size, card.size);
   ctx.beginPath();
   ctx.roundRect(0, 0, card.size, card.size, card.radius);
-  ctx.fill();
   ctx.strokeStyle = semantic.colorBorder;
   ctx.lineWidth = 2;
   ctx.stroke();

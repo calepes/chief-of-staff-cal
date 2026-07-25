@@ -22,11 +22,13 @@ import {
   type FocoSection,
 } from "./tools/foco-cal.js";
 import { fetchAsUser } from "./tools/fetch-as-user.js";
+import { addDomainAndSync } from "./tools/cookie-jar.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { resumirContenido, guardarResumenReadwise, editarPropuestaResumen, revisarPlaylistResumir, revisarStarredResumir, saltarResumen, detenerResumidor, estadoResumidor } from "./tools/resumir.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
+import { fillDerivedFields } from "./proactive/kpi-ingest-notion.js";
 import {
   searchBooks,
   addBook,
@@ -108,6 +110,7 @@ export interface ToolDeps {
   gmapsApiKey?: string;
   homePin?: string;
   kv: CfKv;
+  cookieJarKv: CfKv;
   getOptions: () => Options;
 }
 
@@ -433,6 +436,38 @@ export function buildSdkTools(deps: ToolDeps) {
       },
     ),
     tool(
+      "reprocesarKpisDerivadosYape",
+      [
+        "Recalcula los campos DERIVADOS de la DB Notion 'KPIs diarios' que estén vacíos: Afiliados 7d, y TRX/DAU/Afiliaciones vs. Sem. anterior (%) — nunca pisa un valor que ya esté cargado, solo completa huecos.",
+        "NO toca 'vs. Ayer (%)' — esos 3 campos son exclusivamente del PDF de Seguimiento Diario (kpi-ingest-pdf.ts), sin fallback calculado; esta tool no puede llenarlos.",
+        "El cron automático (kpi-ingest-check, cada 15 min) SOLO recalcula la fecha del día que acaba de ingestar, no todo el histórico — evita recorrer y reprocesar meses de historial ya resuelto en cada corrida.",
+        "Usa esta tool SOLO cuando Cal pida explícitamente un reproceso — ej. 'reprocesa los KPIs derivados', 'recalcula todo el histórico de KPIs', 'faltan derivados del 15 de julio, reprocesa esa fecha'. No la uses proactivamente ni como parte de otro flujo.",
+        "Args: { fechas?: string[] } — fechas puntuales YYYY-MM-DD a reprocesar. Sin fechas (o array vacío): TODO el histórico completo (recorre todas las filas de la DB, puede tardar varios segundos).",
+        "Devuelve completadosCount/completadosEjemplos (lo que sí se pudo calcular) y noCalculablesCount/noCalculablesEjemplos (lo que sigue sin poder calcularse, con el motivo exacto) — resumilo en 2-3 líneas, no listes cada fila si son muchas.",
+      ].join(" "),
+      {
+        fechas: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha inválido, usar YYYY-MM-DD")).optional(),
+      },
+      async ({ fechas }) => {
+        const notionToken = process.env.NOTION_TOKEN;
+        if (!notionToken) return asText({ status: "error", error: "NOTION_TOKEN no configurado" });
+        const scope = fechas?.length ? fechas : undefined;
+        try {
+          const report = await fillDerivedFields(notionToken, scope);
+          return asText({
+            status: "done",
+            alcance: scope ?? "histórico completo",
+            completadosCount: report.completados.length,
+            completadosEjemplos: report.completados.slice(0, 10),
+            noCalculablesCount: report.noCalculables.length,
+            noCalculablesEjemplos: report.noCalculables.slice(0, 10),
+          });
+        } catch (err) {
+          return asText({ status: "error", error: String(err) });
+        }
+      },
+    ),
+    tool(
       "generarQrAduanaBolivia",
       [
         "Genera el QR de salida/ingreso de Bolivia (Formulario N° 250 de la Aduana — Declaración Jurada) para un viajero y lo MANDA directo al chat como imagen.",
@@ -638,8 +673,16 @@ export function buildSdkTools(deps: ToolDeps) {
       "Si no puede leer las cookies (TCC), indica el paso exacto para otorgar permiso. " +
       "Usar cuando Cal comparte un link de un artículo que requiere login o suscripción.",
       { url: z.string().url().describe("URL completa del artículo o página a leer") },
-      async ({ url }) => asText(await fetchAsUser(url)),
+      async ({ url }) => asText(await fetchAsUser(url, deps.cookieJarKv)),
       READ_ONLY,
+    ),
+    tool(
+      "addCookieJarDomain",
+      "Agrega un dominio a la whitelist del Cookie Broker (sitios paywalled cuya cookie de sesión de Safari se guarda para poder leerlos sin pedir login) y sincroniza su cookie de inmediato. " +
+      "USAR SOLO DESPUÉS de que Cal confirme explícitamente en el chat que quiere agregar ese dominio en particular (ej. respondió 'sí'/'dale' a la pregunta de si lo agrego) — NUNCA llamar esto de forma autónoma ni proponerlo sin que Cal haya pedido leer ese sitio antes. " +
+      "REGLA DURA DE SEGURIDAD: solo dominios de medios de noticias/lectura. NUNCA proponer ni intentar con bancos, financieras, Gmail u otro email — el tool los rechaza por código, pero no se lo debe ni ofrecer a Cal.",
+      { domain: z.string().describe("Dominio a agregar, ej. 'elcomercio.pe' (sin http:// ni www.)") },
+      async ({ domain }) => asText(await addDomainAndSync(domain)),
     ),
     tool(
       "fetchAndSummarize",
@@ -657,7 +700,7 @@ export function buildSdkTools(deps: ToolDeps) {
       },
       async ({ url, instruction }) => {
         const result = await fetchAndSummarize(
-          { botToken: deps.botToken },
+          { botToken: deps.botToken, cookieJarKv: deps.cookieJarKv },
           deps.getCurrentChatId(),
           { url, instruction },
         );
@@ -676,7 +719,7 @@ export function buildSdkTools(deps: ToolDeps) {
       },
       async ({ source, instruction }) => {
         const result = resumirContenido(
-          { botToken: deps.botToken },
+          { botToken: deps.botToken, cookieJarKv: deps.cookieJarKv },
           deps.getCurrentChatId(),
           { source, instruction },
         );
@@ -699,7 +742,7 @@ export function buildSdkTools(deps: ToolDeps) {
       },
       async ({ tags, removeHighlights, retag, fullArticle }) => {
         const result = guardarResumenReadwise(
-          { botToken: deps.botToken },
+          { botToken: deps.botToken, cookieJarKv: deps.cookieJarKv },
           deps.getCurrentChatId(),
           { tags, removeHighlights, retag, fullArticle },
         );
@@ -720,7 +763,7 @@ export function buildSdkTools(deps: ToolDeps) {
       },
       async ({ addTags, setTags, removeHighlights, retag }) => {
         const result = editarPropuestaResumen(
-          { botToken: deps.botToken },
+          { botToken: deps.botToken, cookieJarKv: deps.cookieJarKv },
           deps.getCurrentChatId(),
           { addTags, setTags, removeHighlights, retag },
         );
@@ -734,7 +777,7 @@ export function buildSdkTools(deps: ToolDeps) {
       "Llamar cuando Cal dice 'para'/'detené'/'basta'/'stop'/'no quiero ver más'/'frená la cola'. La tool avisa en Telegram; devolvé respuesta VACÍA (sin texto).",
       {},
       async () => {
-        const result = detenerResumidor({ botToken: deps.botToken }, deps.getCurrentChatId());
+        const result = detenerResumidor({ botToken: deps.botToken, cookieJarKv: deps.cookieJarKv }, deps.getCurrentChatId());
         return asText(result);
       },
       READ_ONLY,
@@ -754,7 +797,7 @@ export function buildSdkTools(deps: ToolDeps) {
       "Descarta la propuesta de resumen pendiente SIN guardarla en Readwise. Llamar cuando Cal dice 'salta'/'salta este'/'descártalo'/'siguiente'/'no lo guardes' sobre una propuesta. Si la propuesta venía del auto-resumidor de playlist o de starred, avanza automáticamente al siguiente (y al item starred igual se le quita la estrella en Feedbin).",
       {},
       async () => {
-        const result = saltarResumen({ botToken: deps.botToken }, deps.getCurrentChatId());
+        const result = saltarResumen({ botToken: deps.botToken, cookieJarKv: deps.cookieJarKv }, deps.getCurrentChatId());
         return asText(result);
       },
       READ_ONLY,
@@ -764,7 +807,7 @@ export function buildSdkTools(deps: ToolDeps) {
       "Revisa AHORA la(s) playlist(s) de YouTube configurada(s) para resumir, encola los videos nuevos y empieza a proponer el primero (mismo flujo de checkpoint). Llamar cuando Cal dice 'revisa la playlist'/'hay videos nuevos para resumir'/'corre el resumidor de la playlist'. Normalmente corre solo 1×/día por cron; esta tool es para dispararlo a demanda.",
       {},
       async () => {
-        const result = revisarPlaylistResumir({ botToken: deps.botToken }, deps.getCurrentChatId());
+        const result = revisarPlaylistResumir({ botToken: deps.botToken, cookieJarKv: deps.cookieJarKv }, deps.getCurrentChatId());
         return asText(result);
       },
       READ_ONLY,
@@ -774,7 +817,7 @@ export function buildSdkTools(deps: ToolDeps) {
       "Revisa AHORA los artículos marcados con estrella (starred) en Feedbin, encola los nuevos y empieza a proponer el primero (mismo flujo de checkpoint que la playlist). Llamar cuando Cal dice 'revisa los starred'/'mira mis favoritos de Feedbin'/'resumime los starred'/'mira la lista de estrellas'. Al guardar o saltar cada uno, se des-estrella en Feedbin y avanza al siguiente. Normalmente corre solo 1×/día por cron; esta tool es para dispararlo a demanda.",
       {},
       async () => {
-        const result = revisarStarredResumir({ botToken: deps.botToken }, deps.getCurrentChatId());
+        const result = revisarStarredResumir({ botToken: deps.botToken, cookieJarKv: deps.cookieJarKv }, deps.getCurrentChatId());
         return asText(result);
       },
       READ_ONLY,

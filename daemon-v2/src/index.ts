@@ -19,10 +19,11 @@ import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, ans
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
-import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick } from "./tools/resumir.js";
+import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick, handleCookieJarConfirm } from "./tools/resumir.js";
+import { COOKIE_JAR_NAMESPACE_ID } from "./tools/cookie-jar.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
-import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
+import { checkKpiIngest } from "./proactive/kpi-ingest-check.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf } from "./tools/vision.js";
@@ -47,6 +48,12 @@ const env = {
   NOTION_TAREAS_DB_ID: requireEnv("NOTION_TAREAS_DB_ID"),
   NOTION_PEOPLE_DB_ID: requireEnv("NOTION_PEOPLE_DB_ID"),
   HEALTH_API_KEY: process.env.HEALTH_API_KEY ?? "",
+  // Cross-project: mismo cliente OAuth y refresh token que ya usa el Ulanzi (gmail-update.sh,
+  // proyecto Google Cloud jano-youtube), cargados desde ~/.claude/secrets/apps.env — no duplicar
+  // en el .env propio de Jano.
+  GMAIL_OAUTH_CLIENT_ID: process.env.YOUTUBE_OAUTH_CLIENT_ID ?? "",
+  GMAIL_OAUTH_CLIENT_SECRET: process.env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "",
+  GMAIL_OAUTH_REFRESH_TOKEN: process.env.GMAIL_OAUTH_REFRESH_TOKEN_LEPESQUEUR ?? "",
   SERPAPI_KEY: process.env.SERPAPI_KEY ?? "",
   API_FOOTBALL_KEY: process.env.API_FOOTBALL_KEY ?? "",
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
@@ -152,6 +159,13 @@ const kv = new CfKv({
   namespaceId: env.CF_KV_NAMESPACE_ID,
   apiToken: env.CF_API_TOKEN,
 });
+// Cookie Broker (ver ~/Claude Projects/HANDOFF-cookie-broker-kv.md) — namespace KV neutral,
+// distinto del propio de Jano (env.CF_KV_NAMESPACE_ID), compartido con el Digest.
+const cookieJarKv = new CfKv({
+  accountId: env.CF_ACCOUNT_ID,
+  namespaceId: COOKIE_JAR_NAMESPACE_ID,
+  apiToken: env.CF_API_TOKEN,
+});
 const state = new ConversationState(kv, compactHistory);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
@@ -166,6 +180,7 @@ const sdkTools = buildSdkTools({
   gmapsApiKey: env.GOOGLE_MAPS_API_KEY || undefined,
   homePin: env.HOME_PIN || undefined,
   kv,
+  cookieJarKv,
   getOptions: () => BASE_OPTIONS,
 });
 
@@ -498,7 +513,7 @@ async function processMessage(
       await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id);
       const rchat = cb.message?.chat.id;
       if (rchat != null) {
-        const rdeps = { botToken: env.COS_TELEGRAM_BOT_TOKEN };
+        const rdeps = { botToken: env.COS_TELEGRAM_BOT_TOKEN, cookieJarKv };
         if (cb.data === "j:resu:save") guardarResumenReadwise(rdeps, rchat, {});
         else if (cb.data === "j:resu:savefull") guardarResumenReadwise(rdeps, rchat, { fullArticle: true });
         else if (cb.data === "j:resu:skip") saltarResumen(rdeps, rchat);
@@ -534,8 +549,32 @@ async function processMessage(
       // chats hasta que termine — mismo motivo por el que j:star/j:ytpl, 15 líneas más abajo,
       // usan `void checkStarredResumir(...)`/`void checkPlaylistsResumir(...)` en vez de await.
       // Hallado por daemon-health-reviewer (bug bloqueante, no cosmético).
-      void handleQueuePick({ botToken: env.COS_TELEGRAM_BOT_TOKEN }, rchat, kindRaw, pick, anchorId)
+      void handleQueuePick({ botToken: env.COS_TELEGRAM_BOT_TOKEN, cookieJarKv }, rchat, kindRaw, pick, anchorId)
         .catch((err) => log({ msg: "resu_pick_error", err: String(err) }))
+        .finally(() => releaseLock(kv, rchat, lockUserId).catch(() => {}));
+      return;
+    }
+
+    // j:cookiejar:add / j:cookiejar:no → mecánico, sin LLM. Respuesta al aviso "¿agrego este
+    // dominio a la whitelist del Cookie Broker?" (ver resumir.ts, HANDOFF-cookie-broker-kv.md).
+    // Mismo lock anti-doble-tap + fire-and-forget que resu-pick: — handleCookieJarConfirm puede
+    // tardar ~45s (sync) + el resumen entero si Cal confirma.
+    if (cb.data === "j:cookiejar:add" || cb.data === "j:cookiejar:no") {
+      const rchat = cb.message?.chat.id;
+      const anchorId = cb.message?.message_id;
+      if (rchat == null || anchorId == null) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+        return;
+      }
+      const lockUserId = cb.from.id;
+      const acquired = await tryAcquireLock(kv, rchat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+      void handleCookieJarConfirm({ botToken: env.COS_TELEGRAM_BOT_TOKEN, cookieJarKv }, rchat, cb.data === "j:cookiejar:add", anchorId)
+        .catch((err) => log({ msg: "cookiejar_confirm_error", err: String(err) }))
         .finally(() => releaseLock(kv, rchat, lockUserId).catch(() => {}));
       return;
     }
@@ -547,7 +586,7 @@ async function processMessage(
       const rchat = cb.message?.chat.id;
       const anchorId = cb.message?.message_id;
       if (rchat != null && anchorId != null) {
-        const rdeps = { botToken: env.COS_TELEGRAM_BOT_TOKEN };
+        const rdeps = { botToken: env.COS_TELEGRAM_BOT_TOKEN, cookieJarKv };
         if (cb.data === "j:star") {
           await editMessage(env.COS_TELEGRAM_BOT_TOKEN, rchat, anchorId, "⭐ Revisando los starred de Feedbin...", "HTML").catch(() => {});
           void checkStarredResumir(rdeps, rchat, anchorId);
@@ -1002,8 +1041,8 @@ function scheduleResumirPlaylist(): void {
   cron.schedule("0 8 * * *", () => {
     // Playlist primero (drena su cola), luego starred — comparten el slot de propuesta.
     void (async () => {
-      await checkPlaylistsResumir({ botToken: env.COS_TELEGRAM_BOT_TOKEN }, ALERT_CHAT_ID);
-      await checkStarredResumir({ botToken: env.COS_TELEGRAM_BOT_TOKEN }, ALERT_CHAT_ID);
+      await checkPlaylistsResumir({ botToken: env.COS_TELEGRAM_BOT_TOKEN, cookieJarKv }, ALERT_CHAT_ID);
+      await checkStarredResumir({ botToken: env.COS_TELEGRAM_BOT_TOKEN, cookieJarKv }, ALERT_CHAT_ID);
     })();
   }, { timezone: "America/La_Paz" });
   log({ msg: "resumir_playlist_scheduled", interval: "daily 08:00" });
@@ -1034,15 +1073,20 @@ function scheduleHealthSyncCheck(): void {
   log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
 }
 
-function scheduleKpiCardDaily(): void {
-  cron.schedule("0 10 * * *", () => {
-    void checkKpiCardDaily({
+function scheduleKpiIngestCheck(): void {
+  cron.schedule("*/15 6-23 * * *", () => {
+    void checkKpiIngest({
       botToken: env.COS_TELEGRAM_BOT_TOKEN,
       chatId: ALERT_CHAT_ID,
       notionToken: env.NOTION_TOKEN,
-    }).catch((err) => log({ msg: "kpi_card_daily_unhandled_error", err: String(err) }));
+      gmail: {
+        clientId: env.GMAIL_OAUTH_CLIENT_ID,
+        clientSecret: env.GMAIL_OAUTH_CLIENT_SECRET,
+        refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN,
+      },
+    }).catch((err) => log({ msg: "kpi_ingest_check_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
-  log({ msg: "kpi_card_daily_scheduled", interval: "daily 10:00" });
+  log({ msg: "kpi_ingest_check_scheduled", interval: "every 15min 6-23h" });
 }
 
 function scheduleFocoCheckinsLocal(): void {
@@ -1099,9 +1143,19 @@ async function loop(): Promise<void> {
   // Corte de sync de Apple Health (2026-07-16, pedido de Cal) — reabre la proactividad puntualmente
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
-  // Tarjeta diaria de KPIs Yape (TRX + Activos DAU) para reenviar por WhatsApp
-  // (2026-07-17, pedido de Cal, ver docs/superpowers/specs/2026-07-17-kpi-card-diario-design.md).
-  scheduleKpiCardDaily();
+  // Tarjeta diaria de KPIs Yape (TRX + Activos DAU) — YA NO tiene cron propio (era 10:00 fijo,
+  // sacado 2026-07-24 a pedido de Cal). Se dispara desde dentro de scheduleKpiIngestCheck()
+  // (pipeline PDF, kpi-ingest-check.ts) apenas ese mail se procesa con éxito — la tarjeta solo
+  // necesita datos del PDF. Sigue disponible on-demand vía el tool `generarKpiCardYape`.
+  // Ingesta de KPIs Yape desde el mail de Self-Service de BCP (2026-07-22, pedido de Cal, ver
+  // docs/superpowers/specs/2026-07-22-kpi-ingest-email-notion-design.md). Requiere que Cal haya
+  // corrido `gcloud auth application-default login --scopes=...gmail.readonly` y cargado las 3
+  // env vars GMAIL_OAUTH_* — si no están, el cron queda sin registrar (no rompe el arranque).
+  if (env.GMAIL_OAUTH_CLIENT_ID && env.GMAIL_OAUTH_CLIENT_SECRET && env.GMAIL_OAUTH_REFRESH_TOKEN) {
+    scheduleKpiIngestCheck();
+  } else {
+    log({ msg: "kpi_ingest_check_skipped_no_credentials" });
+  }
   // Auto-resumidor de playlist de YouTube — DESACTIVADO 2026-07-14 (pedido de Cal). Estuvo activo
   // desde 2026-06-20 (opt-in). Jano queda 100% reactivo salvo el webhook watchdog (infra) y el
   // health-sync-check (arriba).
