@@ -222,6 +222,8 @@ const WORLDCUP_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/worldcup/dist/index.js";
 const BOA_CHECKIN_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/boa-checkin/dist/index.js";
+const CINE_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/cine/dist/index.js";
 
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
@@ -316,6 +318,13 @@ const BASE_OPTIONS: Options = {
       command: "node",
       args: [WORLDCUP_DIST],
       env: { API_FOOTBALL_KEY: env.API_FOOTBALL_KEY },
+    },
+    // Cartelera (BFF Cinemark + scraping Multicine/Cine Center) y compra de entradas.
+    // Corre en su propio proceso: Playwright no bloquea el loop serial del daemon.
+    "cine": {
+      type: "stdio",
+      command: "/usr/local/bin/node",
+      args: [CINE_DIST],
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],

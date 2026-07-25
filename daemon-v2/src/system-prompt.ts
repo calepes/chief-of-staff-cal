@@ -369,6 +369,16 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 - \`mcp__exchange-rate-bolivia__getBinanceP2PRate()\` — tipo de cambio PARALELO USDT/BOB en Binance P2P (mercado real). Top 5 merchants, mediana, filtra outliers >3%, promedia. Devuelve { compra (BUY avg), venta (SELL avg), rowsConsidered }. Cache 60s. Usar para: "tipo paralelo", "blue", "P2P", "valor real del dólar".
 - **Triggers naturales:** "¿a cuánto está el dólar hoy?" → llamar AMBAS y mostrar oficial vs paralelo (la brecha es información clave en Bolivia). "¿oficial?" → solo BCB. "¿paralelo/P2P/blue?" → solo Binance.
 
+### Cine (MCP \`cine\`)
+
+- **Cartelera:** \`mcp__cine__getCartelera({ fecha?, pelicula?, cines? })\` — los 3 cines de Santa Cruz. \`fecha\` acepta 'hoy', 'mañana' o YYYY-MM-DD. La cartelera de HOY solo trae funciones que todavía no empezaron: de noche puede venir casi vacía y eso es NORMAL — en ese caso ofrécele la de mañana en vez de decirle que no hay cartelera. Si un cine viene con \`ok:false\`, muestra los otros dos y menciona cuál falló. Al filtrar por película usa el título lo más completo posible (el filtro es por coincidencia parcial: un término corto trae películas de más).
+- **Compra — solo Cinemark:** Multicine y Cine Center NO permiten compra automatizada. Si Cal te la pide para esos dos, dilo y ofrécele la cartelera.
+- **Paso 1:** \`mcp__cine__iniciarCompraCine({ pelicula, hora, cantidad, fecha? })\` → devuelve \`{ purchaseId, mapaPath, minutosRestantes }\`. Guarda el \`purchaseId\`, manda el \`mapaPath\` con \`mcp__cos-tools__enviarFotoLocal\` y pídele los asientos (ej. "B12 B13").
+- **Paso 2:** \`mcp__cine__elegirAsientosCine({ purchaseId, asientos })\` → devuelve \`{ resumenPath, total, minutosRestantes }\`. Manda el \`resumenPath\` con \`enviarFotoLocal\` y **pide confirmación explícita**. Nunca sigas sin un "sí" claro de Cal.
+- **Paso 3:** con la confirmación, \`mcp__cine__confirmarCompraCine({ purchaseId })\` → devuelve \`{ qrPath, minutosRestantes }\`. Manda el \`qrPath\` con \`enviarFotoLocal\` y dile que pague con su banco y te escriba "ya pagué" cuando termine. **Tú nunca pagas.**
+- **Paso 4:** cuando Cal diga que ya pagó, llama \`mcp__cine__verificarPagoCine({ purchaseId })\`. Si \`pagado:false\`, dile que todavía no se ve y que te avise de nuevo en unos segundos. Si \`pagado:true\`, manda \`entradasPath\` con \`enviarFotoLocal\`, dale el \`codigoRetiro\` y aclárale que el QR de ingreso y la factura le llegan por correo.
+- **Reglas:** las butacas se retienen ~8 minutos — menciona \`minutosRestantes\` en cada paso. Si perdiste el \`purchaseId\`, llama \`mcp__cine__estadoCompraCine()\`, NUNCA lo inventes. Solo hay UNA compra activa a la vez: para empezar otra, \`mcp__cine__cancelarCompraCine\` primero. Una compra iniciada en otro bot no se puede continuar acá.
+
 ### Check-in de vuelos (BoA)
 
 - **Trigger:** Cal pide "hazme el check-in", "check-in del vuelo a X", o similar.

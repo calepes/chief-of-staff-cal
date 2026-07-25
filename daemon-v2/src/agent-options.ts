@@ -175,6 +175,14 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__combustible__getFuelMonitorConfig",
   "mcp__combustible__getFuelMonitorStatus",
   "mcp__combustible__setFuelMonitorConfig",
+  // Cine Santa Cruz — cartelera de los 3 cines + compra de entradas (solo Cinemark)
+  "mcp__cine__getCartelera",
+  "mcp__cine__iniciarCompraCine",
+  "mcp__cine__elegirAsientosCine",
+  "mcp__cine__confirmarCompraCine",
+  "mcp__cine__verificarPagoCine",
+  "mcp__cine__cancelarCompraCine",
+  "mcp__cine__estadoCompraCine",
   // Mundial 2026 — datos en vivo (API-Football) + predicciones (predictor Python)
   "mcp__worldcup__getFixtures",
   "mcp__worldcup__getStandings",
