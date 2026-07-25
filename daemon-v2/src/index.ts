@@ -225,6 +225,11 @@ const BOA_CHECKIN_DIST =
 const CINE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/cine/dist/index.js";
 
+// launchd arranca los daemons con un PATH minimo (/usr/bin:/bin) que NO incluye
+// /usr/local/bin. Con command: "node" el spawn del MCP falla EN SILENCIO: el server
+// no levanta y sus tools simplemente no aparecen, sin error visible en los logs.
+const NODE_BIN = "/usr/local/bin/node";
+
 const BASE_OPTIONS: Options = {
   systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
   mcpServers: {
@@ -234,12 +239,12 @@ const BASE_OPTIONS: Options = {
     // hay que registrar custom MCPs aquí explícitamente.
     "youtube-transcribe": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [YT_TRANSCRIBE_DIST],
     },
     "exchange-rate-bolivia": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [EXCHANGE_RATE_DIST],
     },
     // Automatiza el check-in de BoA lanzando el Chrome real del sistema y
@@ -248,7 +253,7 @@ const BASE_OPTIONS: Options = {
     // docs/superpowers/specs/2026-07-04-boa-checkin-mcp-design.md).
     "boa-checkin": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [BOA_CHECKIN_DIST],
     },
     // Vía worker CF (mcp-remote), NO el stdio local: el CLI local usa Node fetch (undici)
@@ -267,34 +272,34 @@ const BASE_OPTIONS: Options = {
     },
     "health": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [HEALTH_DIST],
       env: { HEALTH_API_KEY: env.HEALTH_API_KEY },
     },
     "agent-learnings": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [AGENT_LEARNINGS_DIST],
     },
     "combustible": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [COMBUSTIBLE_DIST],
     },
     "serpapi-flights": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [SERPAPI_FLIGHTS_DIST],
       env: { SERPAPI_KEY: env.SERPAPI_KEY },
     },
     "apple-notes": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [APPLE_NOTES_BIN],
     },
     "inversiones-query": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [INVERSIONES_QUERY_DIST],
       env: {
         KUBERA_AUTH_TOKEN: env.KUBERA_AUTH_TOKEN,
@@ -304,18 +309,18 @@ const BASE_OPTIONS: Options = {
     },
     "spark": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [SPARK_DIST],
     },
     "achoradazos": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [ACHORADAZOS_DIST],
       env: { AIRTABLE_TOKEN: env.AIRTABLE_TOKEN },
     },
     "worldcup": {
       type: "stdio",
-      command: "node",
+      command: NODE_BIN,
       args: [WORLDCUP_DIST],
       env: { API_FOOTBALL_KEY: env.API_FOOTBALL_KEY },
     },
@@ -323,7 +328,7 @@ const BASE_OPTIONS: Options = {
     // Corre en su propio proceso: Playwright no bloquea el loop serial del daemon.
     "cine": {
       type: "stdio",
-      command: "/usr/local/bin/node",
+      command: NODE_BIN,
       args: [CINE_DIST],
     },
   },
