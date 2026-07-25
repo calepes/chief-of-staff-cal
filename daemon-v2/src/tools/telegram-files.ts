@@ -148,11 +148,13 @@ export async function enviarFotoLocal(
   filename: string,
   caption?: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const resolved = await resolveAllowedLocalFile(filePath, /^(boa-wallet|kpi-card)-.+\.png$/);
+  // boa-wallet-*: tarjeta de embarque BoA. kpi-card-*: tarjeta diaria de KPIs Yape.
+  // cine-*: mapa/resumen/QR/entradas del MCP de cine.
+  const resolved = await resolveAllowedLocalFile(filePath, /^(boa-wallet|kpi-card|cine)-.+\.png$/);
   if (!resolved) {
     return {
       ok: false,
-      error: `Path no permitido: solo se puede enviar boa-wallet-*.png o kpi-card-*.png dentro de ${tmpdir()}.`,
+      error: `Path no permitido: solo se puede enviar boa-wallet-*.png, kpi-card-*.png o cine-*.png dentro de ${tmpdir()}.`,
     };
   }
   try {
