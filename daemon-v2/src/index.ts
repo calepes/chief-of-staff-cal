@@ -222,8 +222,6 @@ const WORLDCUP_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/worldcup/dist/index.js";
 const BOA_CHECKIN_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/boa-checkin/dist/index.js";
-const CINE_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/cine/dist/index.js";
 
 // launchd arranca los daemons con un PATH minimo (/usr/bin:/bin) que NO incluye
 // /usr/local/bin. Con command: "node" el spawn del MCP falla EN SILENCIO: el server
@@ -325,11 +323,15 @@ const BASE_OPTIONS: Options = {
       env: { API_FOOTBALL_KEY: env.API_FOOTBALL_KEY },
     },
     // Cartelera (BFF Cinemark + scraping Multicine/Cine Center) y compra de entradas.
-    // Corre en su propio proceso: Playwright no bloquea el loop serial del daemon.
+    // Proceso HTTP persistente (launchd com.cal.cine-mcp-jano, puerto 8791) — NO se
+    // spawnea por sesión: el flujo de compra necesita mantener el mismo browser vivo
+    // entre iniciarCompraCine/elegirAsientosCine/confirmarCompraCine, y esos pasos caen
+    // en turnos de Telegram distintos. Si se spawneara fresco por startup() (como el
+    // resto de los MCP stdio), el estado de la compra se perdería entre un mensaje y el
+    // siguiente (bug real encontrado 2026-07-25, ver docs/superpowers/plans/2026-07-25-*).
     "cine": {
-      type: "stdio",
-      command: NODE_BIN,
-      args: [CINE_DIST],
+      type: "http",
+      url: "http://127.0.0.1:8791/mcp",
     },
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
