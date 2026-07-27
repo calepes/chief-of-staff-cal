@@ -4,13 +4,22 @@ import {
   resetGmailTokenCache,
   searchSelfServiceEmails,
   searchSeguimientoDiarioEmails,
+  searchLendingReportEmails,
+  searchDailyNoteEmails,
   getGmailMessage,
   findCsvCandidates,
   findPdfCandidates,
   downloadGmailAttachment,
   downloadGmailAttachmentBuffer,
   archiveAndMarkRead,
+  extractPlainTextBody,
+  extractHtmlBody,
+  extractHeader,
 } from "./kpi-ingest-gmail.js";
+
+function b64url(s: string): string {
+  return Buffer.from(s).toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
+}
 
 const creds = { clientId: "cid", clientSecret: "csecret", refreshToken: "rtoken" };
 
@@ -96,6 +105,107 @@ describe("searchSeguimientoDiarioEmails", () => {
   });
 });
 
+describe("searchLendingReportEmails", () => {
+  it("devuelve los IDs de mensajes encontrados con la query esperada", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ messages: [{ id: "m1" }] }), { status: 200 }),
+    );
+    const fetchFn = fetchMock as unknown as typeof fetch;
+
+    const result = await searchLendingReportEmails("atok", fetchFn);
+
+    expect(result).toEqual([{ id: "m1" }]);
+    const calledUrl = String(fetchMock.mock.calls[0][0]);
+    expect(calledUrl).toContain("Reporte+diario");
+    expect(calledUrl).toContain("clepesqueur%40bcp.com.bo");
+  });
+
+  it("lanza si la API de Gmail devuelve error", async () => {
+    const fetchFn = vi.fn(async () => new Response("", { status: 403 })) as unknown as typeof fetch;
+    await expect(searchLendingReportEmails("atok", fetchFn)).rejects.toThrow("403");
+  });
+});
+
+describe("searchDailyNoteEmails", () => {
+  it("devuelve los IDs de mensajes encontrados con la query esperada", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ messages: [{ id: "m1" }] }), { status: 200 }),
+    );
+    const fetchFn = fetchMock as unknown as typeof fetch;
+
+    const result = await searchDailyNoteEmails("atok", fetchFn);
+
+    expect(result).toEqual([{ id: "m1" }]);
+    const calledUrl = String(fetchMock.mock.calls[0][0]);
+    expect(calledUrl).toContain("%28DN%29"); // "(DN)" URL-encoded
+    expect(calledUrl).not.toContain("has%3Aattachment");
+  });
+
+  it("lanza si la API de Gmail devuelve error", async () => {
+    const fetchFn = vi.fn(async () => new Response("", { status: 403 })) as unknown as typeof fetch;
+    await expect(searchDailyNoteEmails("atok", fetchFn)).rejects.toThrow("403");
+  });
+});
+
+describe("extractHeader", () => {
+  it("busca el header por nombre case-insensitive", () => {
+    const headers = [{ name: "Subject", value: "(DN) Hola" }, { name: "From", value: "a@b.com" }];
+    expect(extractHeader(headers, "subject")).toBe("(DN) Hola");
+    expect(extractHeader(headers, "SUBJECT")).toBe("(DN) Hola");
+  });
+
+  it("devuelve null si no encuentra el header o la lista es undefined", () => {
+    expect(extractHeader([{ name: "From", value: "a@b.com" }], "Subject")).toBeNull();
+    expect(extractHeader(undefined, "Subject")).toBeNull();
+  });
+});
+
+describe("extractHtmlBody", () => {
+  it("devuelve el HTML crudo sin stripear, a diferencia de extractPlainTextBody", () => {
+    const payload = { mimeType: "text/html", body: { data: b64url("<p>hola <a href=\"https://x.com\">link</a></p>") } };
+    expect(extractHtmlBody(payload)).toBe('<p>hola <a href="https://x.com">link</a></p>');
+  });
+
+  it("devuelve null si no hay parte text/html", () => {
+    const payload = { mimeType: "text/plain", body: { data: b64url("solo texto") } };
+    expect(extractHtmlBody(payload)).toBeNull();
+  });
+});
+
+describe("extractPlainTextBody", () => {
+  it("prioriza text/plain cuando está presente", () => {
+    const payload = {
+      mimeType: "multipart/alternative",
+      parts: [
+        { mimeType: "text/plain", body: { data: b64url("cierre de la jornada de 2026-07-26") } },
+        { mimeType: "text/html", body: { data: b64url("<p>HTML version</p>") } },
+      ],
+    };
+    expect(extractPlainTextBody(payload)).toBe("cierre de la jornada de 2026-07-26");
+  });
+
+  it("cae a text/html con strip de tags si no hay text/plain", () => {
+    const payload = {
+      mimeType: "multipart/alternative",
+      parts: [{ mimeType: "text/html", body: { data: b64url("<p>cierre de la jornada de <b>2026-07-26</b></p>") } }],
+    };
+    expect(extractPlainTextBody(payload)).toBe("cierre de la jornada de 2026-07-26");
+  });
+
+  it("devuelve null si no hay ninguna parte de texto (ej. mensaje solo con adjuntos)", () => {
+    const payload = {
+      mimeType: "multipart/mixed",
+      parts: [{ filename: "LENDING.pdf", mimeType: "application/pdf", body: { attachmentId: "att1" } }],
+    };
+    expect(extractPlainTextBody(payload)).toBeNull();
+  });
+
+  it("decodifica un body single-part sin sub-parts", () => {
+    const payload = { mimeType: "text/plain", body: { data: b64url("texto simple") } };
+    expect(extractPlainTextBody(payload)).toBe("texto simple");
+  });
+});
+
 describe("getGmailMessage", () => {
   it("extrae internalDate y attachments anidados en multipart", async () => {
     const payload = {
@@ -115,6 +225,46 @@ describe("getGmailMessage", () => {
 
     expect(detail.internalDate).toBe(1753185600000);
     expect(detail.attachments).toEqual([{ filename: "kpis.csv", mimeType: "text/csv", attachmentId: "att1" }]);
+  });
+
+  it("popula bodyText desde la parte text/plain del payload", async () => {
+    const payload = {
+      id: "m3",
+      internalDate: "1753185600000",
+      payload: {
+        mimeType: "multipart/mixed",
+        parts: [
+          { mimeType: "text/plain", body: { data: b64url("cierre de la jornada de 2026-07-26") } },
+          { filename: "LENDING.pdf", mimeType: "application/pdf", body: { attachmentId: "att1" } },
+        ],
+      },
+    };
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })) as unknown as typeof fetch;
+
+    const detail = await getGmailMessage("m3", "atok", fetchFn);
+
+    expect(detail.bodyText).toBe("cierre de la jornada de 2026-07-26");
+  });
+
+  it("popula subject (header) y bodyHtml (parte text/html cruda)", async () => {
+    const payload = {
+      id: "m4",
+      internalDate: "1753185600000",
+      payload: {
+        mimeType: "multipart/alternative",
+        headers: [{ name: "Subject", value: "(DN) Nota de prueba" }],
+        parts: [
+          { mimeType: "text/plain", body: { data: b64url("texto plano") } },
+          { mimeType: "text/html", body: { data: b64url("<p>texto <b>html</b></p>") } },
+        ],
+      },
+    };
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })) as unknown as typeof fetch;
+
+    const detail = await getGmailMessage("m4", "atok", fetchFn);
+
+    expect(detail.subject).toBe("(DN) Nota de prueba");
+    expect(detail.bodyHtml).toBe("<p>texto <b>html</b></p>");
   });
 
   it("devuelve attachments vacío para un mensaje sin parts (single-part, sin adjuntos)", async () => {

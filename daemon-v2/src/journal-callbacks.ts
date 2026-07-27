@@ -109,7 +109,7 @@ export async function handleJournalCallback(
   // Selector del barrido dominical: jnl:sweep:{entryId|all|none}
   if (accion === "sweep") {
     if (shortId === "none") {
-      await editMessage(deps.botToken, chatId, messageId, "👍 Los dejo para la próxima.", "HTML", { inline_keyboard: [] }).catch(() => {});
+      await editMessage(deps.botToken, chatId, messageId, "👍 Quedan para la próxima.", "HTML", { inline_keyboard: [] }).catch(() => {});
       return true;
     }
     // Cota dura: "Revisar todos" con 50 pendientes serían 50 llamadas a Haiku
@@ -198,7 +198,7 @@ export async function handleJournalCallback(
         return true;
       case "edit-title": {
         await deps.store.setPendingEdit(chatId, { campo: "titulo", shortId, messageId });
-        await editMessage(deps.botToken, chatId, messageId, "✏️ <b>Mandame el título que querés</b>\nRespondé con el texto y lo aplico a la propuesta.", "HTML", { inline_keyboard: [] }).catch(() => {});
+        await editMessage(deps.botToken, chatId, messageId, "✏️ <b>Escribe el título que prefieras</b>\nResponde con el texto y lo aplico a la propuesta.", "HTML", { inline_keyboard: [] }).catch(() => {});
         return true;
       }
       case "nometa": {
@@ -266,12 +266,12 @@ export async function handleJournalCallback(
   switch (accion) {
     case "later": {
       await deps.store.clearProposal(chatId, shortId);
-      await editMessage(deps.botToken, chatId, messageId, "⏭️ <b>Queda sin destilar</b>\nTe la vuelvo a mostrar en el barrido del domingo.", "HTML", { inline_keyboard: [] }).catch(() => {});
+      await editMessage(deps.botToken, chatId, messageId, "⏭️ <b>Queda sin destilar</b>\nTe la muestro de nuevo en el barrido del domingo.", "HTML", { inline_keyboard: [] }).catch(() => {});
       return true;
     }
     case "edit-refl": {
       await deps.store.setPendingEdit(chatId, { campo: "reflexion", shortId, messageId });
-      await editMessage(deps.botToken, chatId, messageId, "✏️ <b>Mandame el título de la reflexión</b>\nRespondé con el texto y lo aplico antes de guardar.", "HTML", { inline_keyboard: [] }).catch(() => {});
+      await editMessage(deps.botToken, chatId, messageId, "✏️ <b>Escribe el título de la reflexión</b>\nResponde con el texto y lo aplico antes de guardar.", "HTML", { inline_keyboard: [] }).catch(() => {});
       return true;
     }
     case "resonate": {

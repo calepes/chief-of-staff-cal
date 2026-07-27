@@ -38,6 +38,7 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__fetchAsUser":         "🔐 Accediendo con sesión de Safari...",
   "mcp__cos-tools__fetchAndSummarize":   "🔄 Descargando y resumiendo en background...",
   "mcp__cos-tools__getFocoCalStatus":   "🎯 Revisando Foco CAL...",
+  "mcp__cos-tools__consultarJournal":   "📓 Leyendo tu journal...",
   "mcp__cos-tools__logFocoProgress":    "✅ Loggeando avance en Foco CAL...",
   "mcp__cos-tools__showMeetingCards":          "📋 Enviando tarjetas de reuniones...",
   "mcp__cos-tools__reviewMeetings":            "🔍 Consultando reuniones en Notion...",

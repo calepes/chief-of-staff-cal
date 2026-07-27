@@ -107,7 +107,7 @@ export function renderTopicsPicker(p: MetaProposal, shortId: string): Card {
   ]);
   rows.push([{ text: "⬅️ Volver", callback_data: `jnl:back:${shortId}` }]);
   return {
-    text: "🏷️ <b>Topics</b>\nTap para incluir o excluir.",
+    text: "🏷️ <b>Topics</b>\nToca para incluir o excluir.",
     keyboard: { inline_keyboard: rows },
   };
 }
@@ -125,14 +125,14 @@ export function renderBigThemePicker(p: MetaProposal, shortId: string, themes: N
     { text: "⬅️ Volver", callback_data: `jnl:back:${shortId}` },
   ]);
   return {
-    text: "🎯 <b>Big Theme</b>\nElegí uno.",
+    text: "🎯 <b>Big Theme</b>\nElige uno.",
     keyboard: { inline_keyboard: rows },
   };
 }
 
 export function renderReflexionCard(p: ReflexionProposal, shortId: string): Card {
   const lines = [
-    "🌟 <b>Acá hay una reflexión</b>",
+    "🌟 <b>Aquí hay una reflexión</b>",
     "",
     `• Título — ${esc(p.titulo)}`,
     `• Situación — ${esc(p.situacion) || "—"}`,
@@ -186,13 +186,13 @@ export function renderSweepSelector(
 
 export function renderModeOpen(): Card {
   return {
-    text: "📓 <b>Modo journal abierto</b>\nTodo lo que mandes —texto o voz— se guarda tal cual.",
+    text: "📓 <b>Modo journal abierto</b>\nTodo lo que envíes —texto o voz— se guarda tal cual.",
     keyboard: { inline_keyboard: [[{ text: "⏹️ Cerrar", callback_data: "jnl:mode:close" }]] },
   };
 }
 
 export function renderModeClosed(guardadas: number, pendientes: number): Card {
-  const partes = [`Guardé ${guardadas} ${guardadas === 1 ? "entrada" : "entradas"}`];
+  const partes = [`Guardadas ${guardadas} ${guardadas === 1 ? "entrada" : "entradas"}`];
   if (pendientes > 0) {
     partes.push(`${pendientes} ${pendientes === 1 ? "reflexión pendiente" : "reflexiones pendientes"}`);
   }

@@ -21,9 +21,16 @@ import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick, handleCookieJarConfirm } from "./tools/resumir.js";
 import { COOKIE_JAR_NAMESPACE_ID } from "./tools/cookie-jar.js";
+import { JournalStore } from "./journal-store.js";
+import { captureThought } from "./journal-capture.js";
+import { applyPendingEdit, handleJournalCallback, isJournalCallback } from "./journal-callbacks.js";
+import { parseJournalPrefix } from "./journal-text.js";
+import { renderModeClosed, renderModeOpen } from "./journal-card.js";
+import { checkJournalSweep } from "./proactive/journal-sweep.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
 import { checkKpiIngest } from "./proactive/kpi-ingest-check.js";
+import { checkDailyNotes } from "./proactive/daily-note-check.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf } from "./tools/vision.js";
@@ -167,6 +174,7 @@ const cookieJarKv = new CfKv({
   apiToken: env.CF_API_TOKEN,
 });
 const state = new ConversationState(kv, compactHistory);
+const journalStore = new JournalStore(kv);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
 // (ej. checkPlaylistsResumir/checkStarredResumir, que disparan un flujo fire-and-forget
@@ -524,6 +532,42 @@ async function processMessage(
       return;
     }
 
+    // Callbacks del Journal (jnl:*) → mecánicos, sin LLM. Escriben en Notion, así que
+    // llevan el mismo lock anti-doble-tap que mlog:/mskip:/msel:.
+    if (isJournalCallback(cb.data)) {
+      const jchat = cb.message.chat.id;
+      const janchor = cb.message.message_id;
+
+      // jnl:mode:close — cierra el modo journal y resume la tanda.
+      if (cb.data === "jnl:mode:close") {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+        const mode = await journalStore.getMode(jchat);
+        await journalStore.closeMode(jchat);
+        const card = renderModeClosed(mode?.guardadas ?? 0, mode?.pendientes ?? 0);
+        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, jchat, janchor, card.text, "HTML", card.keyboard).catch(() => {});
+        return;
+      }
+
+      const lockUserId = cb.from.id;
+      const acquired = await tryAcquireLock(kv, jchat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+      // Fire-and-forget por el mismo motivo que resu-pick:: escribir en Notion vía `ntn`
+      // puede tardar segundos y el loop principal del daemon es secuencial.
+      void handleJournalCallback(
+        { botToken: env.COS_TELEGRAM_BOT_TOKEN, store: journalStore, log },
+        jchat,
+        janchor,
+        cb.data!,
+      )
+        .catch((err) => log({ msg: "journal_callback_error", err: String(err) }))
+        .finally(() => releaseLock(kv, jchat, lockUserId).catch(() => {}));
+      return;
+    }
+
     // Checkpoint del resumidor: ✅ Guardar / 📄 Guardar artículo / ⏭️ Saltar / ⏹️ Parar → mecánico (sin LLM, edita la tarjeta).
     if (cb.data === "j:resu:save" || cb.data === "j:resu:savefull" || cb.data === "j:resu:skip" || cb.data === "j:resu:stop") {
       await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id);
@@ -592,6 +636,30 @@ async function processMessage(
       void handleCookieJarConfirm({ botToken: env.COS_TELEGRAM_BOT_TOKEN, cookieJarKv }, rchat, cb.data === "j:cookiejar:add", anchorId)
         .catch((err) => log({ msg: "cookiejar_confirm_error", err: String(err) }))
         .finally(() => releaseLock(kv, rchat, lockUserId).catch(() => {}));
+      return;
+    }
+
+    // 📓 Journal → abre el modo (mecánico, sin LLM).
+    // OJO: tiene que quedar ARRIBA del `startsWith("j:")` genérico de handleMenuCallback,
+    // que retorna incondicionalmente y se comería este callback (mismo motivo por el que
+    // j:star/j:ytpl están acá). Hallado por daemon-health-reviewer 2026-07-27.
+    if (cb.data === "j:journal") {
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+      const jchat = cb.message.chat.id;
+      const card = renderModeOpen();
+      const anchor = await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+        chatId: jchat,
+        text: card.text,
+        parseMode: "HTML",
+        replyMarkup: card.keyboard,
+      });
+      await journalStore.openMode(jchat, {
+        abiertoEn: Date.now(),
+        anchorMessageId: anchor.message_id,
+        origen: "Texto",
+        guardadas: 0,
+        pendientes: 0,
+      });
       return;
     }
 
@@ -738,6 +806,84 @@ async function processMessage(
       replyMarkup: menu.keyboard,
     });
     return;
+  }
+
+  // ---- Captura del Journal (mecánica, ANTES del LLM) ----
+  // Dos entradas: prefijo `journal:`/`diario:` o modo journal abierto.
+  // El texto se persiste sin pasar por el modelo (ver spec 2026-07-27, sección 2).
+  {
+    // Las dos lecturas a KV van en paralelo: se pagan en CADA mensaje (aunque Cal no
+    // use el journal) y son round-trips Mac→Cloudflare de ~100-300ms. Secuenciales
+    // erosionaban el objetivo de "placeholder en <1s".
+    const [pendingEdit, journalMode] = await Promise.all([
+      text ? journalStore.getPendingEdit(chatId) : Promise.resolve(null),
+      journalStore.getMode(chatId),
+    ]);
+
+    // Una edición pendiente (botón ✏️) gana sobre todo lo demás: el próximo texto
+    // es el título nuevo, no un pensamiento nuevo — incluso con el modo abierto.
+    if (text && pendingEdit) {
+      const consumido = await applyPendingEdit(
+        { botToken: env.COS_TELEGRAM_BOT_TOKEN, store: journalStore, log },
+        chatId,
+        text,
+      );
+      if (consumido) return;
+    }
+    let journalTexto: string | null = null;
+    let journalOrigen: "Texto" | "Voz" | "Sesión terapia" = "Texto";
+
+    if (text) {
+      const prefijado = parseJournalPrefix(text);
+      if (prefijado) {
+        journalTexto = prefijado;
+      } else if (journalMode) {
+        journalTexto = text;
+        journalOrigen = journalMode.origen;
+      }
+    } else if (voice && journalMode) {
+      const transcript = await processVoice(env.COS_TELEGRAM_BOT_TOKEN, voice.file_id);
+      if (!transcript) {
+        await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+          chatId,
+          text: "⚠️ <b>No pude transcribir el audio</b>\nReintenta o escríbelo, por favor.",
+          parseMode: "HTML",
+        }).catch(() => {});
+        return;
+      }
+      journalTexto = transcript;
+      journalOrigen = journalMode.origen === "Sesión terapia" ? "Sesión terapia" : "Voz";
+      await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+        chatId,
+        text: `🎤 <i>"${escapeHtml(transcript)}"</i>`,
+        parseMode: "HTML",
+        replyToMessageId: m.message_id,
+      }).catch(() => {});
+    }
+
+    if (journalTexto) {
+      // Fire-and-forget, igual que resu-pick:/j:star: captureThought hace un startup()
+      // del SDK con Haiku más 3 spawnSync de `ntn` (~10-20s). Si se awaitea acá, el poll
+      // loop —estrictamente secuencial, un solo `for` con await— queda congelado para
+      // TODOS los flujos hasta terminar, y en modo journal (mensajes en ráfaga) eso se
+      // acumula a minutos. Hallado por daemon-health-reviewer 2026-07-27.
+      void captureThought(
+        { botToken: env.COS_TELEGRAM_BOT_TOKEN, store: journalStore, log },
+        chatId,
+        journalTexto,
+        journalOrigen,
+      )
+        .then(async (res) => {
+          if (journalMode && res.guardada) {
+            await journalStore.bumpMode(chatId, {
+              guardadas: 1,
+              pendientes: res.conReflexion ? 1 : 0,
+            });
+          }
+        })
+        .catch((err) => log({ msg: "journal_capture_error", err: String(err) }));
+      return;
+    }
   }
 
   // Typing indicator + placeholder en <1s
@@ -1076,6 +1222,20 @@ function scheduleFlightCheckin(): void {
   log({ msg: "flight_checkin_scheduled", interval: "every 30min 7-22h" });
 }
 
+function scheduleJournalSweep(): void {
+  // Domingos 19:00 hora La Paz. Tercera excepción a la arquitectura reactiva
+  // (decisión de Cal, 2026-07-27 — ver CLAUDE.md, "Automatización — dos capas").
+  cron.schedule("0 19 * * 0", () => {
+    void checkJournalSweep({
+      kv,
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      log,
+    });
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "journal_sweep_scheduled", interval: "sundays 19:00" });
+}
+
 function scheduleHealthSyncCheck(): void {
   cron.schedule("0,30 7-22 * * *", () => {
     void checkHealthSync({
@@ -1103,6 +1263,29 @@ function scheduleKpiIngestCheck(): void {
     }).catch((err) => log({ msg: "kpi_ingest_check_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
   log({ msg: "kpi_ingest_check_scheduled", interval: "every 15min 6-23h" });
+}
+
+/**
+ * Mails que Cal reenvía a mano con "(DN)"/"(dn)" en el subject → página nueva en la DB Notion
+ * "Daily Notes Yape" (2026-07-27, pedido de Cal). Mismas credenciales que scheduleKpiIngestCheck
+ * (Gmail cross-project + Notion), pero es un dominio y un ciclo de vida distintos — ver
+ * daily-note-check.ts (procesamiento inmediato, sin el delay de 15min de los pipelines de KPIs)
+ * y daily-note-ingest.ts (parser del tag + conversión HTML→Markdown + creación de la página).
+ */
+function scheduleDailyNoteCheck(): void {
+  cron.schedule("*/15 6-23 * * *", () => {
+    void checkDailyNotes({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      notionToken: env.NOTION_TOKEN,
+      gmail: {
+        clientId: env.GMAIL_OAUTH_CLIENT_ID,
+        clientSecret: env.GMAIL_OAUTH_CLIENT_SECRET,
+        refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN,
+      },
+    }).catch((err) => log({ msg: "daily_note_check_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "daily_note_check_scheduled", interval: "every 15min 6-23h" });
 }
 
 function scheduleFocoCheckinsLocal(): void {
@@ -1159,6 +1342,7 @@ async function loop(): Promise<void> {
   // Corte de sync de Apple Health (2026-07-16, pedido de Cal) — reabre la proactividad puntualmente
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
+  scheduleJournalSweep();
   // Tarjeta diaria de KPIs Yape (TRX + Activos DAU) — YA NO tiene cron propio (era 10:00 fijo,
   // sacado 2026-07-24 a pedido de Cal). Se dispara desde dentro de scheduleKpiIngestCheck()
   // (pipeline PDF, kpi-ingest-check.ts) apenas ese mail se procesa con éxito — la tarjeta solo
@@ -1169,8 +1353,10 @@ async function loop(): Promise<void> {
   // env vars GMAIL_OAUTH_* — si no están, el cron queda sin registrar (no rompe el arranque).
   if (env.GMAIL_OAUTH_CLIENT_ID && env.GMAIL_OAUTH_CLIENT_SECRET && env.GMAIL_OAUTH_REFRESH_TOKEN) {
     scheduleKpiIngestCheck();
+    scheduleDailyNoteCheck();
   } else {
     log({ msg: "kpi_ingest_check_skipped_no_credentials" });
+    log({ msg: "daily_note_check_skipped_no_credentials" });
   }
   // Auto-resumidor de playlist de YouTube — DESACTIVADO 2026-07-14 (pedido de Cal). Estuvo activo
   // desde 2026-06-20 (opt-in). Jano queda 100% reactivo salvo el webhook watchdog (infra) y el

@@ -29,7 +29,7 @@ export class QueuePoller {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ batch_size: batchSize, visibility_timeout_ms: 30000 }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       const errText = await res.text();
@@ -50,7 +50,7 @@ export class QueuePoller {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ acks: leaseIds.map((id) => ({ lease_id: id })) }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       const errText = await res.text();

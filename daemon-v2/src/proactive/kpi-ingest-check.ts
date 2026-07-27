@@ -5,6 +5,7 @@ import {
   gmailAccessToken,
   searchSelfServiceEmails,
   searchSeguimientoDiarioEmails,
+  searchLendingReportEmails,
   getGmailMessage,
   findCsvCandidates,
   findPdfCandidates,
@@ -24,7 +25,16 @@ import {
   type DerivedFillReport,
   type UpsertResult,
 } from "./kpi-ingest-notion.js";
+import { parseReportDateFromBody, parseAndValidateLendingReport, type LendingFunnelFields } from "./kpi-ingest-lending-pdf.js";
+import {
+  upsertLendingRow,
+  markLendingReportFailed,
+  clearLendingFailNote,
+  fillLendingDerivedFields,
+  type DerivedFillReport as LendingDerivedFillReport,
+} from "./kpi-lending-notion.js";
 import { checkKpiCardDaily } from "./kpi-card-daily.js";
+import { checkKpiCardLending } from "./kpi-card-lending-daily.js";
 
 const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse") as {
@@ -45,8 +55,11 @@ export interface KpiIngestState {
   processed: string[];
   pending: Record<string, { receivedAt: number }>;
   lastErrorNotified: Record<string, number>;
-  /** Fechas para las que ya se mandó la tarjeta automática (evita re-mandarla). */
+  /** Fechas para las que ya se mandó la tarjeta automática (KPIs diarios — TRX/DAU). */
   cardSent: string[];
+  /** Fechas para las que ya se mandó la tarjeta de Lending — array propio, no comparte
+   * dedup con `cardSent` (dominios y DBs distintas, aunque coincida la fecha string). */
+  lendingCardSent: string[];
 }
 
 export function defaultStatePath(): string {
@@ -56,15 +69,16 @@ export function defaultStatePath(): string {
 export function readState(path: string): KpiIngestState {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<KpiIngestState>;
-    // cardSent es un campo nuevo — un state.json escrito antes de este cambio no lo tiene.
+    // cardSent/lendingCardSent son campos que un state.json viejo puede no tener todavía.
     return {
       processed: parsed.processed ?? [],
       pending: parsed.pending ?? {},
       lastErrorNotified: parsed.lastErrorNotified ?? {},
       cardSent: parsed.cardSent ?? [],
+      lendingCardSent: parsed.lendingCardSent ?? [],
     };
   } catch {
-    return { processed: [], pending: {}, lastErrorNotified: {}, cardSent: [] };
+    return { processed: [], pending: {}, lastErrorNotified: {}, cardSent: [], lendingCardSent: [] };
   }
 }
 
@@ -182,6 +196,43 @@ export function formatPdfSuccessReport(
   return lines.join("\n");
 }
 
+export function formatLendingSuccessReport(fecha: string, fields: LendingFunnelFields, result: UpsertResult): string {
+  const lines: string[] = [
+    "✅ <b>Funnel Yape Lending actualizado</b> · Riesgos",
+    `📅 <b>${escapeHtml(fecha)}</b> (${result.created ? "creado" : "actualizado"})`,
+    "",
+    `Leads: <b>${formatMiles(fields.leads ?? 0)}</b> → Vistos: <b>${formatMiles(fields.vistos ?? 0)}</b> → Me Interesa: <b>${formatMiles(fields.meInteresa ?? 0)}</b>`,
+    `Contactado: <b>${formatMiles(fields.contactado ?? 0)}</b> → Derivados: <b>${formatMiles(fields.derivados ?? 0)}</b> → Agencia: <b>${formatMiles(fields.agencia ?? 0)}</b>`,
+    `💰 Desembolso: <b>${formatMiles(fields.desembolso ?? 0)}</b> · Rechazado: ${formatMiles(fields.rechazado ?? 0)}`,
+  ];
+  if (!result.fieldsWritten.length) lines.push("sin campos");
+  return lines.join("\n");
+}
+
+function formatLendingFailedReport(fecha: string, detalle: string): string {
+  return `⚠️ <b>Funnel Yape Lending — reporte fallido</b>\n📅 ${escapeHtml(fecha)}\n${escapeHtml(detalle)}\nNo se tocaron los KPIs de esa fecha (quedan en 0 filas nuevas). Revisar el PDF manualmente — el layout puede haber cambiado.`;
+}
+
+function lendingFieldsToRaw(f: LendingFunnelFields): Record<string, number | null> {
+  return {
+    Leads: f.leads,
+    Vistos: f.vistos,
+    "No Vistos": f.noVistos,
+    "Me Interesa": f.meInteresa,
+    "No Me Interesa": f.noMeInteresa,
+    "Sin Interacción": f.sinInteraccion,
+    Contactado: f.contactado,
+    "No Contactado": f.noContactado,
+    Derivados: f.derivados,
+    "No Derivados": f.noDerivados,
+    "En Proceso (Derivados)": f.enProcesoDerivados,
+    Agencia: f.agencia,
+    Desembolso: f.desembolso,
+    "En Proceso (Agencia)": f.enProcesoAgencia,
+    Rechazado: f.rechazado,
+  };
+}
+
 function formatErrorReport(accion: string, motivo: string, sugerencia: string): string {
   return `⚠️ <b>No pude ${escapeHtml(accion)}</b>\n${escapeHtml(motivo)}\n${escapeHtml(sugerencia)}`;
 }
@@ -274,6 +325,7 @@ export async function checkKpiIngest(opts: CheckKpiIngestOpts): Promise<void> {
 
     await pollAndProcess(state, statePath, opts.gmail, searchSelfServiceEmails, processCsvMessage, opts, "csv");
     await pollAndProcess(state, statePath, opts.gmail, searchSeguimientoDiarioEmails, processPdfMessage, opts, "pdf");
+    await pollAndProcess(state, statePath, opts.gmail, searchLendingReportEmails, processLendingMessage, opts, "lending");
 
     if (state.processed.length > MAX_PROCESSED) {
       state.processed = state.processed.slice(-MAX_PROCESSED);
@@ -281,6 +333,10 @@ export async function checkKpiIngest(opts: CheckKpiIngestOpts): Promise<void> {
     }
     if (state.cardSent.length > MAX_CARD_SENT) {
       state.cardSent = state.cardSent.slice(-MAX_CARD_SENT);
+      writeState(statePath, state);
+    }
+    if (state.lendingCardSent.length > MAX_CARD_SENT) {
+      state.lendingCardSent = state.lendingCardSent.slice(-MAX_CARD_SENT);
       writeState(statePath, state);
     }
   } finally {
@@ -438,6 +494,94 @@ async function processPdfMessage(id: string, state: KpiIngestState, opts: CheckK
       state.lastErrorNotified[id] = now;
     }
     console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_pdf_process_error", id, err: String(err) }));
+  }
+}
+
+/**
+ * Pipeline "Funnel Yape Lending" (Riesgos/Créditos) — dominio distinto de "KPIs diarios"
+ * (afiliación/TRX/DAU), DB Notion separada (kpi-lending-notion.ts). Reusa la misma infraestructura
+ * de cron/estado (pollAndProcess/kpi-ingest-state.json) que los otros 2 pipelines — sin riesgo de
+ * colisión porque los IDs de mensaje de Gmail son únicos en todo el buzón.
+ *
+ * A diferencia del PDF de "Seguimiento Diario" (fecha del FILENAME del adjunto), este reporte no
+ * trae fecha en el nombre del PDF — se extrae del CUERPO del mail ("...cierre de la jornada de
+ * 2026-07-26..."). Si no se encuentra, se lanza (retry en el próximo tick, no se marca processed —
+ * podría ser un problema transitorio de formato). Si el parseo/reconciliación del PDF falla, la
+ * fecha SÍ se conoce → se anota el fallo en Notas y se marca processed (reintentar el mismo mail no
+ * va a cambiar su contenido).
+ */
+async function processLendingMessage(id: string, state: KpiIngestState, opts: CheckKpiIngestOpts): Promise<void> {
+  const { botToken, chatId, notionToken, gmail } = opts;
+  try {
+    const token = await gmailAccessToken(gmail);
+    const detail = await getGmailMessage(id, token);
+    const candidates = findPdfCandidates(detail.attachments);
+
+    if (candidates.length === 0) {
+      await sendReport(
+        botToken,
+        chatId,
+        formatErrorReport("procesar el Funnel Yape Lending", "El mail llegó sin ningún PDF adjunto.", "Revisa el mail manualmente si se repite."),
+      );
+      markProcessed(state, id);
+      return;
+    }
+
+    const fecha = parseReportDateFromBody(detail.bodyText ?? "");
+    if (!fecha) {
+      throw new Error('no pude encontrar "cierre de la jornada de YYYY-MM-DD" en el cuerpo del mail');
+    }
+
+    const attachment = candidates[0];
+    const buf = await downloadGmailAttachmentBuffer(id, attachment.attachmentId, token);
+    const text = await (opts.pdfTextExtractor ?? defaultPdfTextExtractor)(buf);
+
+    const parsed = parseAndValidateLendingReport(text);
+    if (!parsed.ok) {
+      const detalle = parsed.errors.join("; ");
+      await markLendingReportFailed(notionToken, fecha, detalle);
+      await sendReport(botToken, chatId, formatLendingFailedReport(fecha, detalle));
+      console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_parse_failed", id, fecha, errors: parsed.errors }));
+      markProcessed(state, id);
+      return;
+    }
+
+    const result = await upsertLendingRow(notionToken, fecha, lendingFieldsToRaw(parsed.fields));
+    await clearLendingFailNote(notionToken, fecha);
+    const derived: LendingDerivedFillReport = await fillLendingDerivedFields(notionToken, [fecha]);
+
+    console.log(
+      JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_full_report", id, fecha, fieldsWritten: result.fieldsWritten, derived }),
+    );
+    await sendReport(botToken, chatId, formatLendingSuccessReport(fecha, parsed.fields, result));
+
+    // Igual patrón que la tarjeta de KPIs diarios desde processPdfMessage: se dispara sola apenas
+    // este mail se procesa con éxito, en vez de esperar un horario fijo. Try/catch propio — un
+    // fallo puntual de la tarjeta no debe hacer parecer que la ingesta completa falló, ni bloquear
+    // el markProcessed de un mail ya procesado. Dedup por fecha vía state.lendingCardSent (array
+    // propio, no comparte el de "KPIs diarios").
+    if (!state.lendingCardSent.includes(fecha)) {
+      try {
+        await checkKpiCardLending({ botToken, chatId, notionToken, fecha });
+        state.lendingCardSent.push(fecha);
+      } catch (err) {
+        console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_lending_trigger_failed", fecha, err: String(err) }));
+      }
+    }
+
+    markProcessed(state, id);
+  } catch (err) {
+    const now = Date.now();
+    const last = state.lastErrorNotified[id] ?? 0;
+    if (now - last >= ERROR_DEDUP_MS) {
+      await sendReport(
+        botToken,
+        chatId,
+        formatErrorReport("actualizar el Funnel Yape Lending", String(err), "Reintento automático en el próximo tick."),
+      );
+      state.lastErrorNotified[id] = now;
+    }
+    console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_process_error", id, err: String(err) }));
   }
 }
 

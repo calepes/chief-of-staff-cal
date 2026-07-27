@@ -195,6 +195,7 @@ vi.mock("./kpi-ingest-gmail.js", () => ({
   gmailAccessToken: vi.fn(async () => "atok"),
   searchSelfServiceEmails: vi.fn(),
   searchSeguimientoDiarioEmails: vi.fn(),
+  searchLendingReportEmails: vi.fn(),
   getGmailMessage: vi.fn(),
   findCsvCandidates: vi.fn(),
   findPdfCandidates: vi.fn(),
@@ -212,13 +213,25 @@ vi.mock("./kpi-ingest-notion.js", async (importOriginal) => {
     clearPdfFailNote: vi.fn(),
   };
 });
+vi.mock("./kpi-lending-notion.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    upsertLendingRow: vi.fn(),
+    markLendingReportFailed: vi.fn(),
+    clearLendingFailNote: vi.fn(),
+    fillLendingDerivedFields: vi.fn(),
+  };
+});
 vi.mock("@cos/shared", () => ({ sendMessage: vi.fn(async () => ({ message_id: 1 })) }));
 vi.mock("./kpi-card-daily.js", () => ({ checkKpiCardDaily: vi.fn() }));
+vi.mock("./kpi-card-lending-daily.js", () => ({ checkKpiCardLending: vi.fn() }));
 
 import {
   gmailAccessToken,
   searchSelfServiceEmails,
   searchSeguimientoDiarioEmails,
+  searchLendingReportEmails,
   getGmailMessage,
   findCsvCandidates,
   findPdfCandidates,
@@ -227,8 +240,10 @@ import {
   archiveAndMarkRead,
 } from "./kpi-ingest-gmail.js";
 import { upsertKpiRow, fillDerivedFields, markPdfReportFailed, clearPdfFailNote } from "./kpi-ingest-notion.js";
+import { upsertLendingRow, markLendingReportFailed, clearLendingFailNote, fillLendingDerivedFields } from "./kpi-lending-notion.js";
 import { sendMessage } from "@cos/shared";
 import { checkKpiCardDaily } from "./kpi-card-daily.js";
+import { checkKpiCardLending } from "./kpi-card-lending-daily.js";
 import { checkKpiIngest } from "./kpi-ingest-check.js";
 
 const gmailCreds = { clientId: "c", clientSecret: "s", refreshToken: "r" };
@@ -242,7 +257,9 @@ beforeEach(() => {
   // Defaults inofensivos — cada test override solo el pipeline que le importa.
   vi.mocked(searchSelfServiceEmails).mockResolvedValue([]);
   vi.mocked(searchSeguimientoDiarioEmails).mockResolvedValue([]);
+  vi.mocked(searchLendingReportEmails).mockResolvedValue([]);
   vi.mocked(checkKpiCardDaily).mockResolvedValue(undefined);
+  vi.mocked(checkKpiCardLending).mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -651,5 +668,224 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toEqual(expect.arrayContaining(["csvMsg", "pdfMsg"]));
     expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Texto real extraído del PDF "LENDING.pdf" (correo del cierre 2026-07-26, verificado a mano).
+const REAL_LENDING_PDF_TEXT =
+  "Power BI Desktop\nLEADS ENVIADOS\n0 \t29.090\n15.720\nNOTIFICACIONES\n0,00K \t15,72K\n12K\nCLICK POP UP\n0,00K \t12,13K\n2066\nCONTACTADOS\n0 \t2066\n1098\nFUNNEL PILOTO YAPE LENDING\nDERIVADOS AGENCIA\n0 \t1098\n435\nDESEMBOLSOS\n0 \t140\n85\nLEADS\n15.720\n100 %\nVISTOS\n12.129\n77,2 %\nNO VISTOS\n3.591\n22,8 %\nME INTERESA\n2.066\nNO ME INTERESA\n3.717\n17,0 %\n30,6 %\nCONTACTADO\n1.098\nNO CONTACTADO\n968\n53,1 %\n46,9 %\nMONTO APROBADO\nAll \t\nCIUDAD\nAll \t\nDESEMBOLSO\n85\nEN PROCESO\n44\n60,7 %\n31,4 %NO DERIVADOS\n663\nDERIVADOS\n435\n60,4 %\n39,6 %\nEN PROCESO\n295\n67,8 %\nAGENCIA\n140\n32,2 %\nRECHAZADO\n11\n7,9 %\nSIN INTERACCIÓN\n6.346\n52,3 %\n\n-- 1 of 1 --\n\n";
+
+const LENDING_BODY_TEXT = "información actualizada al cierre de la jornada de 2026-07-26 .";
+
+describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
+  const lendingAttachment = { filename: "LENDING.pdf", mimeType: "application/pdf", attachmentId: "l1" };
+
+  it("procesa un reporte Lending pending, escribe los 15 campos y limpia la nota de fallo previa", async () => {
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({ processed: [], pending: { m1: { receivedAt: oldTimestamp } }, lastErrorNotified: {} }),
+    );
+    vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m1" }]);
+    vi.mocked(getGmailMessage).mockResolvedValue({
+      id: "m1",
+      internalDate: oldTimestamp,
+      attachments: [lendingAttachment],
+      bodyText: LENDING_BODY_TEXT,
+    });
+    vi.mocked(findPdfCandidates).mockReturnValue([lendingAttachment]);
+    vi.mocked(downloadGmailAttachmentBuffer).mockResolvedValue(Buffer.from("fake-lending-pdf-bytes"));
+    vi.mocked(upsertLendingRow).mockResolvedValue({ fecha: "2026-07-26", created: true, fieldsWritten: ["Leads", "Desembolso"] });
+    vi.mocked(fillLendingDerivedFields).mockResolvedValue({ completados: [], noCalculables: [] });
+
+    await checkKpiIngest({
+      botToken: "t",
+      chatId: 1,
+      notionToken: "n",
+      gmail: gmailCreds,
+      statePath,
+      pdfTextExtractor: async () => REAL_LENDING_PDF_TEXT,
+    });
+
+    expect(upsertLendingRow).toHaveBeenCalledWith(
+      "n",
+      "2026-07-26",
+      expect.objectContaining({ Leads: 15720, Desembolso: 85, "En Proceso (Agencia)": 44, "En Proceso (Derivados)": 295 }),
+    );
+    expect(clearLendingFailNote).toHaveBeenCalledWith("n", "2026-07-26");
+    expect(fillLendingDerivedFields).toHaveBeenCalledWith("n", ["2026-07-26"]);
+    expect(markLendingReportFailed).not.toHaveBeenCalled();
+    expect(checkKpiCardLending).toHaveBeenCalledWith({ botToken: "t", chatId: 1, notionToken: "n", fecha: "2026-07-26" });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(state.processed).toContain("m1");
+    expect(state.lendingCardSent).toEqual(["2026-07-26"]);
+  });
+
+  it("no dispara la tarjeta de Lending dos veces para la misma fecha (dedup vía lendingCardSent)", async () => {
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        processed: [],
+        pending: { m2: { receivedAt: oldTimestamp } },
+        lastErrorNotified: {},
+        lendingCardSent: ["2026-07-26"],
+      }),
+    );
+    vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m2" }]);
+    vi.mocked(getGmailMessage).mockResolvedValue({
+      id: "m2",
+      internalDate: oldTimestamp,
+      attachments: [lendingAttachment],
+      bodyText: LENDING_BODY_TEXT,
+    });
+    vi.mocked(findPdfCandidates).mockReturnValue([lendingAttachment]);
+    vi.mocked(downloadGmailAttachmentBuffer).mockResolvedValue(Buffer.from("fake-lending-pdf-bytes"));
+    vi.mocked(upsertLendingRow).mockResolvedValue({ fecha: "2026-07-26", created: false, fieldsWritten: ["Desembolso"] });
+    vi.mocked(fillLendingDerivedFields).mockResolvedValue({ completados: [], noCalculables: [] });
+
+    await checkKpiIngest({
+      botToken: "t",
+      chatId: 1,
+      notionToken: "n",
+      gmail: gmailCreds,
+      statePath,
+      pdfTextExtractor: async () => REAL_LENDING_PDF_TEXT,
+    });
+
+    expect(checkKpiCardLending).not.toHaveBeenCalled();
+  });
+
+  it("si checkKpiCardLending lanza una excepción, no rompe el resto del flujo ni deja de marcar processed", async () => {
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({ processed: [], pending: { m1: { receivedAt: oldTimestamp } }, lastErrorNotified: {} }),
+    );
+    vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m1" }]);
+    vi.mocked(getGmailMessage).mockResolvedValue({
+      id: "m1",
+      internalDate: oldTimestamp,
+      attachments: [lendingAttachment],
+      bodyText: LENDING_BODY_TEXT,
+    });
+    vi.mocked(findPdfCandidates).mockReturnValue([lendingAttachment]);
+    vi.mocked(downloadGmailAttachmentBuffer).mockResolvedValue(Buffer.from("fake-lending-pdf-bytes"));
+    vi.mocked(upsertLendingRow).mockResolvedValue({ fecha: "2026-07-26", created: false, fieldsWritten: ["Desembolso"] });
+    vi.mocked(fillLendingDerivedFields).mockResolvedValue({ completados: [], noCalculables: [] });
+    vi.mocked(checkKpiCardLending).mockRejectedValue(new Error("boom inesperado"));
+
+    await checkKpiIngest({
+      botToken: "t",
+      chatId: 1,
+      notionToken: "n",
+      gmail: gmailCreds,
+      statePath,
+      pdfTextExtractor: async () => REAL_LENDING_PDF_TEXT,
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1); // el reporte de ingesta sí salió
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(state.processed).toContain("m1");
+    expect(state.lendingCardSent).toEqual([]); // no se marca si tiró excepción — queda para reintentar
+  });
+
+  it("reporta y marca processed si no hay PDF adjunto", async () => {
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({ processed: [], pending: { m1: { receivedAt: oldTimestamp } }, lastErrorNotified: {} }),
+    );
+    vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m1" }]);
+    vi.mocked(getGmailMessage).mockResolvedValue({ id: "m1", internalDate: oldTimestamp, attachments: [], bodyText: LENDING_BODY_TEXT });
+    vi.mocked(findPdfCandidates).mockReturnValue([]);
+
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(call.text).toContain("sin ningún PDF");
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(state.processed).toContain("m1");
+  });
+
+  it("NO marca processed si no encuentra la fecha en el cuerpo del mail — reintenta el próximo tick", async () => {
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({ processed: [], pending: { m1: { receivedAt: oldTimestamp } }, lastErrorNotified: {} }),
+    );
+    vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m1" }]);
+    vi.mocked(getGmailMessage).mockResolvedValue({
+      id: "m1",
+      internalDate: oldTimestamp,
+      attachments: [lendingAttachment],
+      bodyText: "un cuerpo de mail sin la frase esperada",
+    });
+    vi.mocked(findPdfCandidates).mockReturnValue([lendingAttachment]);
+
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+
+    expect(upsertLendingRow).not.toHaveBeenCalled();
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(state.processed).not.toContain("m1");
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(call.text).toContain("cierre de la jornada");
+  });
+
+  it("marca fallo explícito y processed si la reconciliación no cierra — no escribe upsertLendingRow", async () => {
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({ processed: [], pending: { m1: { receivedAt: oldTimestamp } }, lastErrorNotified: {} }),
+    );
+    vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m1" }]);
+    vi.mocked(getGmailMessage).mockResolvedValue({
+      id: "m1",
+      internalDate: oldTimestamp,
+      attachments: [lendingAttachment],
+      bodyText: LENDING_BODY_TEXT,
+    });
+    vi.mocked(findPdfCandidates).mockReturnValue([lendingAttachment]);
+    vi.mocked(downloadGmailAttachmentBuffer).mockResolvedValue(Buffer.from("fake-lending-pdf-bytes"));
+    const brokenText = REAL_LENDING_PDF_TEXT.replace("VISTOS\n12.129", "VISTOS\n99999");
+
+    await checkKpiIngest({
+      botToken: "t",
+      chatId: 1,
+      notionToken: "n",
+      gmail: gmailCreds,
+      statePath,
+      pdfTextExtractor: async () => brokenText,
+    });
+
+    expect(upsertLendingRow).not.toHaveBeenCalled();
+    expect(markLendingReportFailed).toHaveBeenCalledWith("n", "2026-07-26", expect.any(String));
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(call.text).toContain("reporte fallido");
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(state.processed).toContain("m1");
+  });
+
+  it("dedupea la notificación de error del mismo mensaje dentro de 2 horas", async () => {
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    const recentError = Date.now() - 30 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        processed: [],
+        pending: { m1: { receivedAt: oldTimestamp } },
+        lastErrorNotified: { m1: recentError },
+      }),
+    );
+    vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m1" }]);
+    vi.mocked(getGmailMessage).mockRejectedValue(new Error("gmail caído"));
+
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });

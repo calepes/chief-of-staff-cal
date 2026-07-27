@@ -91,7 +91,7 @@ export function extractPdfKpis(text: string): PdfKpiFields {
 }
 
 export function isFailedReport(text: string): boolean {
-  return /updated\s*fail/i.test(text);
+  return /updated?\s*fail/i.test(text);
 }
 
 /** Filename real: "Seguimiento Diario Yape | 22/07/2026.PDF" */

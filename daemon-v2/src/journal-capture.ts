@@ -2,7 +2,7 @@
 // Paso 1 (mecánico) y paso 2 (LLM) están separados a propósito: el texto se
 // persiste ANTES de que el modelo vea nada. Ver el spec, sección 2.
 
-import { editMessage, sendMessage } from "@cos/shared";
+import { editMessage, sendChatAction, sendMessage } from "@cos/shared";
 import { renderMetaCard } from "./journal-card.js";
 import { enrichEntry } from "./journal-enrich.js";
 import { buildExtracto } from "./journal-text.js";
@@ -71,23 +71,39 @@ export async function captureThought(
 ): Promise<{ guardada: boolean; conReflexion: boolean }> {
   const fechaHora = nowInLaPaz();
 
+  // Regla cardinal del skill telegram-bot-ux: typing pulse + placeholder ANTES de
+  // cualquier await. `createRawEntry` es un spawnSync de `ntn` (1-3s) — sin esto Cal
+  // manda su pensamiento y no ve absolutamente nada mientras tanto.
+  void sendChatAction(deps.botToken, chatId, "typing");
+  const ack = await sendMessage(deps.botToken, {
+    chatId,
+    text: "📓 <i>Guardando...</i>",
+    parseMode: "HTML",
+  });
+
   // ---- PASO 1: escritura mecánica, sin LLM ----
   const creada = createRawEntry({ texto, origen, fechaHora });
   if (!creada.ok) {
     deps.log({ msg: "journal_create_failed", err: creada.error });
-    await sendMessage(deps.botToken, {
+    await editMessage(
+      deps.botToken,
       chatId,
-      text: "⚠️ <b>No pude guardar el pensamiento en Notion</b>\nRevisá el log del daemon. Tu texto no se perdió: volvé a mandarlo cuando esté resuelto.",
-      parseMode: "HTML",
-    }).catch(() => {});
+      ack.message_id,
+      "⚠️ <b>No pude guardar el pensamiento en Notion</b>\nRevisa el log del daemon. Tu texto no se perdió: vuelve a enviarlo cuando esté resuelto.",
+      "HTML",
+      { inline_keyboard: [] },
+    ).catch(() => {});
     return { guardada: false, conReflexion: false };
   }
 
-  const ack = await sendMessage(deps.botToken, {
+  await editMessage(
+    deps.botToken,
     chatId,
-    text: "📓 <b>Guardado</b>\n<i>Buscando de qué se trata...</i>",
-    parseMode: "HTML",
-  });
+    ack.message_id,
+    "📓 <b>Guardado</b>\n<i>Buscando de qué se trata...</i>",
+    "HTML",
+    { inline_keyboard: [] },
+  ).catch(() => {});
   deps.log({ msg: "journal_saved", entryId: creada.entryId, origen, chars: texto.length });
 
   // ---- PASO 2: enriquecimiento con LLM ----

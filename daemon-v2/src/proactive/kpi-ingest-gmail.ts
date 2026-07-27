@@ -39,6 +39,13 @@ const SEARCH_QUERY =
 const SEGUIMIENTO_SEARCH_QUERY =
   'to:carlos@lepesqueur.net from:clepesqueur@bcp.com.bo subject:"Seguimiento Diario Yape Bolivia" has:attachment newer_than:3d';
 
+const LENDING_SEARCH_QUERY =
+  'to:carlos@lepesqueur.net from:clepesqueur@bcp.com.bo subject:"Reporte diario Créditos Yape Lending" has:attachment newer_than:3d';
+
+// Sin has:attachment — a diferencia de los reportes de KPIs, un mail marcado (DN) por Cal puede
+// no traer ningún adjunto (el contenido relevante está en el cuerpo).
+const DAILY_NOTE_SEARCH_QUERY = 'to:carlos@lepesqueur.net from:clepesqueur@bcp.com.bo subject:"(DN)" newer_than:3d';
+
 export interface GmailMessageRef {
   id: string;
 }
@@ -73,6 +80,20 @@ export async function searchSeguimientoDiarioEmails(
   return searchEmails(SEGUIMIENTO_SEARCH_QUERY, accessToken, fetchFn);
 }
 
+export async function searchLendingReportEmails(
+  accessToken: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<GmailMessageRef[]> {
+  return searchEmails(LENDING_SEARCH_QUERY, accessToken, fetchFn);
+}
+
+export async function searchDailyNoteEmails(
+  accessToken: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<GmailMessageRef[]> {
+  return searchEmails(DAILY_NOTE_SEARCH_QUERY, accessToken, fetchFn);
+}
+
 export interface GmailAttachmentPart {
   filename: string;
   mimeType: string;
@@ -83,13 +104,24 @@ export interface GmailMessageDetail {
   id: string;
   internalDate: number;
   attachments: GmailAttachmentPart[];
+  /** Opcionales — no rompen los mocks de los pipelines existentes que no los necesitan. */
+  bodyText?: string | null;
+  /** HTML crudo del body (sin strip) — para conversiones que necesitan preservar links/formato. */
+  bodyHtml?: string | null;
+  subject?: string | null;
 }
 
 interface GmailPart {
   filename?: string;
   mimeType?: string;
-  body?: { attachmentId?: string };
+  body?: { attachmentId?: string; data?: string };
   parts?: GmailPart[];
+  headers?: Array<{ name: string; value: string }>;
+}
+
+export function extractHeader(headers: Array<{ name: string; value: string }> | undefined, name: string): string | null {
+  const h = headers?.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  return h?.value ?? null;
 }
 
 function collectAttachments(part: GmailPart, out: GmailAttachmentPart[]): void {
@@ -97,6 +129,63 @@ function collectAttachments(part: GmailPart, out: GmailAttachmentPart[]): void {
     out.push({ filename: part.filename, mimeType: part.mimeType ?? "", attachmentId: part.body.attachmentId });
   }
   for (const p of part.parts ?? []) collectAttachments(p, out);
+}
+
+function decodeBase64Url(data: string): string {
+  const b64 = data.replace(/-/g, "+").replace(/_/g, "/");
+  return Buffer.from(b64, "base64").toString("utf8");
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+/** Extrae texto plano del body de un mensaje (DFS sobre `parts`, sin atarse a un solo pipeline
+ * de KPIs) — prioriza `text/plain`; si el mensaje solo trae `text/html`, hace un strip mínimo de
+ * tags. `null` si no encuentra ninguna parte de texto (ej. mensaje solo con adjuntos). */
+export function extractPlainTextBody(part: GmailPart): string | null {
+  let plain: string | null = null;
+  let html: string | null = null;
+
+  function visit(p: GmailPart): void {
+    if (p.mimeType === "text/plain" && p.body?.data && plain === null) {
+      plain = decodeBase64Url(p.body.data);
+    } else if (p.mimeType === "text/html" && p.body?.data && html === null) {
+      html = decodeBase64Url(p.body.data);
+    }
+    for (const child of p.parts ?? []) visit(child);
+  }
+  visit(part);
+
+  if (plain !== null) return plain;
+  if (html !== null) return stripHtml(html);
+  return null;
+}
+
+/** Igual DFS que extractPlainTextBody, pero devuelve el HTML CRUDO (sin strip) si existe —
+ * lo necesita cualquier conversión que quiera preservar links/formato (ej. a Markdown) en vez
+ * de perderlos con el strip mínimo de stripHtml(). `null` si el mensaje no trae text/html. */
+export function extractHtmlBody(part: GmailPart): string | null {
+  let html: string | null = null;
+  function visit(p: GmailPart): void {
+    if (p.mimeType === "text/html" && p.body?.data && html === null) {
+      html = decodeBase64Url(p.body.data);
+    }
+    for (const child of p.parts ?? []) visit(child);
+  }
+  visit(part);
+  return html;
 }
 
 export async function getGmailMessage(
@@ -114,7 +203,14 @@ export async function getGmailMessage(
   const d = (await res.json()) as { id: string; internalDate: string; payload: GmailPart };
   const attachments: GmailAttachmentPart[] = [];
   collectAttachments(d.payload, attachments);
-  return { id: d.id, internalDate: Number(d.internalDate), attachments };
+  return {
+    id: d.id,
+    internalDate: Number(d.internalDate),
+    attachments,
+    bodyText: extractPlainTextBody(d.payload),
+    bodyHtml: extractHtmlBody(d.payload),
+    subject: extractHeader(d.payload.headers, "Subject"),
+  };
 }
 
 export function findCsvCandidates(attachments: GmailAttachmentPart[]): GmailAttachmentPart[] {

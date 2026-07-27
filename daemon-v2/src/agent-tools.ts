@@ -28,6 +28,7 @@ import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { resumirContenido, guardarResumenReadwise, editarPropuestaResumen, revisarPlaylistResumir, revisarStarredResumir, saltarResumen, detenerResumidor, estadoResumidor } from "./tools/resumir.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
+import { checkKpiCardLending } from "./proactive/kpi-card-lending-daily.js";
 import { fillDerivedFields } from "./proactive/kpi-ingest-notion.js";
 import {
   searchBooks,
@@ -59,6 +60,8 @@ import {
 import { executeRemctl } from "./tools/reminders.js";
 import { executeClings, thingsWrite } from "./tools/things.js";
 import { notionApi, notionPageMarkdown, notionUpdateBody } from "./tools/notion-cli.js";
+import { JOURNAL_DB_ID } from "./journal-ids.js";
+import { compactJournalRows } from "./tools/journal.js";
 import {
   readerListDocuments,
   readerSearchDocuments,
@@ -436,6 +439,34 @@ export function buildSdkTools(deps: ToolDeps) {
       },
     ),
     tool(
+      "generarKpiCardLending",
+      [
+        "Genera y MANDA directo al chat la tarjeta PNG del Funnel Yape Lending (Desembolsos + Derivados Agencia, con incremento vs. día anterior) leyendo la DB Notion 'KPIs Yape Lending'. Mismo código que dispara solo el cron apenas llega el mail de Riesgos.",
+        "Úsalo cuando Cal pida la tarjeta de Lending on-demand: 'la card de Lending de hoy', 'mándame la tarjeta del funnel de créditos', 'la de Lending del 22 de julio', etc.",
+        "Args: { fechas?: string[] } — una o más fechas en formato YYYY-MM-DD. Sin fechas: la fila más reciente. Resolvé 'ayer'/'anteayer' a fecha absoluta vos mismo antes de llamar. Con varias fechas manda una tarjeta por cada una, en orden.",
+        "NO uses esto para consultar el valor en texto (eso es notionCli sobre la DB 'KPIs Yape Lending') — esta tool siempre genera y ENVÍA la imagen.",
+        "Tras invocar no repitas los números ni describas la tarjeta: ya se mandó. Si una fecha no tiene fila en Notion, a esa fecha le llega un texto de error en vez de la imagen — no lo inventes.",
+      ].join(" "),
+      {
+        fechas: z
+          .array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha inválido, usar YYYY-MM-DD"))
+          .max(10)
+          .optional(),
+      },
+      async ({ fechas }) => {
+        const chatId = deps.getCurrentChatId?.();
+        const botToken = deps.botToken;
+        const notionToken = process.env.NOTION_TOKEN;
+        if (!chatId || !botToken) return asText({ status: "error", error: "No chatId/token disponible" });
+        if (!notionToken) return asText({ status: "error", error: "NOTION_TOKEN no configurado" });
+        const lista = fechas && fechas.length ? fechas : [undefined];
+        for (const fecha of lista) {
+          await checkKpiCardLending({ botToken, chatId, notionToken, fecha });
+        }
+        return asText({ status: "sent", fechas: fechas ?? ["más reciente"] });
+      },
+    ),
+    tool(
       "reprocesarKpisDerivadosYape",
       [
         "Recalcula los campos DERIVADOS de la DB Notion 'KPIs diarios' que estén vacíos: Afiliados 7d, y TRX/DAU/Afiliaciones vs. Sem. anterior (%) — nunca pisa un valor que ya esté cargado, solo completa huecos.",
@@ -654,6 +685,40 @@ export function buildSdkTools(deps: ToolDeps) {
           kpisViewUrl: FOCO_KPIS_VIEW_URL,
           tareaViewUrl: FOCO_TAREAS_VIEW_URL,
         });
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "consultarJournal",
+      "Lee entradas del Journal de reflexión de Cal (DB Notion bajo Mental Health). " +
+      "Usar cuando Cal pregunte cómo estuvo su semana, de qué viene hablando, qué ánimo predominó, " +
+      "o quiera repasar sus pensamientos. SOLO LECTURA: para GUARDAR un pensamiento Cal usa el " +
+      "prefijo 'journal:' o el modo journal del menú — no existe tool de escritura.",
+      {
+        desde: z.string().describe("Fecha ISO desde la que leer, ej. '2026-07-01'."),
+        soloSinRevisar: z
+          .boolean()
+          .optional()
+          .describe("Si es true, solo las entradas que todavía no se destilaron."),
+        limite: z
+          .number()
+          .optional()
+          .describe("Cuántas entradas traer (default 15, máximo 30)."),
+      },
+      async ({ desde, soloSinRevisar, limite }) => {
+        const filtros: unknown[] = [{ property: "Fecha y hora", date: { on_or_after: desde } }];
+        if (soloSinRevisar) {
+          filtros.push({ property: "Estado", select: { equals: "Sin revisar" } });
+        }
+        const res = notionApi("POST", `/v1/databases/${JOURNAL_DB_ID}/query`, {
+          filter: { and: filtros },
+          sorts: [{ property: "Fecha y hora", direction: "descending" }],
+          page_size: Math.min(30, Math.max(1, Math.round(limite ?? 15))),
+        });
+        // Compactar ANTES de devolver: las páginas completas de Notion (properties,
+        // relations, created_by, parent, url) pesan 1.5-3 KB c/u y dispararían el
+        // persisted-output loop del SDK (umbral ~25 KB, ver CLAUDE.md).
+        return asText(compactJournalRows(res));
       },
       READ_ONLY,
     ),

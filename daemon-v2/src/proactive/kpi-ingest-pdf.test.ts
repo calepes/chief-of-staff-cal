@@ -90,6 +90,13 @@ describe("isFailedReport", () => {
   it("no detecta falso positivo en un reporte normal", () => {
     expect(isFailedReport(REAL_TEXT)).toBe(false);
   });
+
+  it("detecta 'UPDATE\\nFAILED' (sin 'd' en UPDATE, en líneas separadas) — caso real 2026-07-24", () => {
+    // Fragmento real del PDF de 24/07/2026: BCP marcó el widget de Afiliaciones como
+    // fallido con este texto exacto, sin la 'd' de "updated" y partido en dos líneas.
+    const text = "AFILIACIONES DIARIA\tACTIVOS DIARIOS\tTRANSACCIONES DIARIAS\nUPDATE\nFAILED\n";
+    expect(isFailedReport(text)).toBe(true);
+  });
 });
 
 describe("parseReportDateFromFilename", () => {
