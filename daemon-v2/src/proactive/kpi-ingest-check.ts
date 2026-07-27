@@ -201,7 +201,7 @@ export function formatLendingSuccessReport(fecha: string, fields: LendingFunnelF
     "✅ <b>Funnel Yape Lending actualizado</b> · Riesgos",
     `📅 <b>${escapeHtml(fecha)}</b> (${result.created ? "creado" : "actualizado"})`,
     "",
-    `Leads: <b>${formatMiles(fields.leads ?? 0)}</b> → Vistos: <b>${formatMiles(fields.vistos ?? 0)}</b> → Me Interesa: <b>${formatMiles(fields.meInteresa ?? 0)}</b>`,
+    `Leads: <b>${formatMiles(fields.leads ?? 0)}</b> → Ofertas Vistas: <b>${formatMiles(fields.vistos ?? 0)}</b> → Me Interesa: <b>${formatMiles(fields.meInteresa ?? 0)}</b>`,
     `Contactado: <b>${formatMiles(fields.contactado ?? 0)}</b> → Derivados: <b>${formatMiles(fields.derivados ?? 0)}</b> → Agencia: <b>${formatMiles(fields.agencia ?? 0)}</b>`,
     `💰 Desembolso: <b>${formatMiles(fields.desembolso ?? 0)}</b> · Rechazado: ${formatMiles(fields.rechazado ?? 0)}`,
   ];
@@ -216,8 +216,8 @@ function formatLendingFailedReport(fecha: string, detalle: string): string {
 function lendingFieldsToRaw(f: LendingFunnelFields): Record<string, number | null> {
   return {
     Leads: f.leads,
-    Vistos: f.vistos,
-    "No Vistos": f.noVistos,
+    "Ofertas Vistas": f.vistos,
+    "Ofertas No Vistas": f.noVistos,
     "Me Interesa": f.meInteresa,
     "No Me Interesa": f.noMeInteresa,
     "Sin Interacción": f.sinInteraccion,

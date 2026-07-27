@@ -15,7 +15,7 @@ import { sanitizeForTelegram } from "./format.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv, tryAcquireLock, releaseLock } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
-import { sendMessage, editMessage, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
+import { sendMessage, editMessage, editMessageReplyMarkup, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
@@ -538,13 +538,25 @@ async function processMessage(
       const jchat = cb.message.chat.id;
       const janchor = cb.message.message_id;
 
-      // jnl:mode:close — cierra el modo journal y resume la tanda.
-      if (cb.data === "jnl:mode:close") {
+      // jnl:mode:close[:entryId] — cierra el modo journal y resume la tanda.
+      // Se puede tocar desde el mensaje ancla del modo O desde una tarjeta ya guardada
+      // (ahí viene con el entryId). En ese segundo caso el resumen va SIEMPRE al ancla:
+      // pisar la tarjeta con el resumen borraría el pensamiento y su ↩️ Deshacer.
+      if (cb.data?.startsWith("jnl:mode:close")) {
         await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+        const entryId = cb.data.split(":")[3];
         const mode = await journalStore.getMode(jchat);
         await journalStore.closeMode(jchat);
         const card = renderModeClosed(mode?.guardadas ?? 0, mode?.pendientes ?? 0);
-        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, jchat, janchor, card.text, "HTML", card.keyboard).catch(() => {});
+        const anchorId = mode?.anchorMessageId ?? janchor;
+        await editMessage(env.COS_TELEGRAM_BOT_TOKEN, jchat, anchorId, card.text, "HTML", card.keyboard).catch(() => {});
+        // Si se tocó desde una tarjeta guardada, esa tarjeta conserva su texto y su
+        // ↩️ Deshacer: solo se le quita el botón de cerrar, que ya no aplica.
+        if (entryId && anchorId !== janchor) {
+          await editMessageReplyMarkup(env.COS_TELEGRAM_BOT_TOKEN, jchat, janchor, {
+            inline_keyboard: [[{ text: "↩️ Deshacer", callback_data: `jnl:undo:${entryId}` }]],
+          }).catch(() => {});
+        }
         return;
       }
 

@@ -5,8 +5,8 @@ export const KPI_LENDING_DB_ID = "3aac4876-09dd-8164-8905-e287a7b16f40";
 // funnel ACUMULADO del piloto) de "KPIs diarios" (afiliación/TRX/DAU, flujo diario).
 const RAW_PROPS = [
   "Leads",
-  "Vistos",
-  "No Vistos",
+  "Ofertas Vistas",
+  "Ofertas No Vistas",
   "Me Interesa",
   "No Me Interesa",
   "Sin Interacción",
@@ -22,7 +22,7 @@ const RAW_PROPS = [
   // Derivados, calculados por fillLendingDerivedFields() — nunca vienen del parser del PDF.
   "Incremento Desembolso (D-1)",
   "Incremento Derivados (D-1)",
-  "Incremento Vistos (D-1)",
+  "Incremento Ofertas Vistas (D-1)",
 ] as const;
 
 interface NotionPage {
@@ -206,10 +206,10 @@ export async function fetchLendingHistory(notionToken: string, fetchFn: typeof f
         fecha,
         desembolso: props["Desembolso"]?.number ?? null,
         derivados: props["Derivados"]?.number ?? null,
-        vistos: props["Vistos"]?.number ?? null,
+        vistos: props["Ofertas Vistas"]?.number ?? null,
         incrementoDesembolso: props["Incremento Desembolso (D-1)"]?.number ?? null,
         incrementoDerivados: props["Incremento Derivados (D-1)"]?.number ?? null,
-        incrementoVistos: props["Incremento Vistos (D-1)"]?.number ?? null,
+        incrementoVistos: props["Incremento Ofertas Vistas (D-1)"]?.number ?? null,
       });
     }
     cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -274,8 +274,8 @@ const DERIVED_SPECS: DerivedSpec[] = [
     compute: computeIncrementoDerivados,
   },
   {
-    campo: "Incremento Vistos (D-1)",
-    notionProp: "Incremento Vistos (D-1)",
+    campo: "Incremento Ofertas Vistas (D-1)",
+    notionProp: "Incremento Ofertas Vistas (D-1)",
     getExisting: (r) => r.incrementoVistos,
     compute: computeIncrementoVistos,
   },

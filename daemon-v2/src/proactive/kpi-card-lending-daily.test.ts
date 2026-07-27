@@ -86,9 +86,9 @@ describe("fetchLendingCardKpis", () => {
     await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("0 resultados");
   });
 
-  it("lanza si Vistos viene null en la fila objetivo", async () => {
+  it("lanza si Ofertas Vistas viene null en la fila objetivo", async () => {
     vi.mocked(fetchLendingHistory).mockResolvedValue([row({ fecha: "2026-07-26", derivados: 435, desembolso: 85, vistos: null })]);
-    await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("Vistos");
+    await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("Ofertas Vistas");
   });
 
   it("con fecha, busca esa fila puntual y compara igual contra su dato previo más reciente", async () => {

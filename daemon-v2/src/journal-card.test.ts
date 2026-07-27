@@ -207,4 +207,21 @@ describe("renderModeOpen / renderModeClosed / renderApplied", () => {
     expect(text).toContain("Guardado");
     expect(flat(keyboard)).toEqual(["jnl:undo:entry-1"]);
   });
+
+  it("con el modo journal abierto suma el botón de cerrar", () => {
+    const { keyboard } = renderApplied(meta(), "entry-1", true);
+    expect(flat(keyboard)).toEqual(["jnl:undo:entry-1", "jnl:mode:close:entry-1"]);
+  });
+
+  it("sin modo abierto NO ofrece cerrar — con el prefijo journal: no hay nada que cerrar", () => {
+    expect(flat(renderApplied(meta(), "entry-1", false).keyboard)).not.toContain(
+      "jnl:mode:close:entry-1",
+    );
+  });
+
+  it("el callback de cerrar desde una tarjeta entra en los 64 bytes de Telegram", () => {
+    const uuid = "3aac4876-09dd-81d2-870d-c4159cdfbd31";
+    const datas = flat(renderApplied(meta(), uuid, true).keyboard);
+    for (const d of datas) expect(d.length).toBeLessThanOrEqual(64);
+  });
 });

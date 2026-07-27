@@ -44,7 +44,7 @@ export async function fetchLendingCardKpis(
   }
   const row = rows[index];
 
-  if (row.vistos == null) throw new Error("Propiedad Vistos viene null en la fila más reciente");
+  if (row.vistos == null) throw new Error("Propiedad Ofertas Vistas viene null en la fila más reciente");
   if (row.desembolso == null) throw new Error("Propiedad Desembolso viene null en la fila más reciente");
   if (row.derivados == null) throw new Error("Propiedad Derivados viene null en la fila más reciente");
 

@@ -100,7 +100,7 @@ export async function renderKpiCardLendingImage(kpis: LendingCardKpis): Promise<
   ctx.fillStyle = semantic.colorBrand;
   ctx.textAlign = "left";
   ctx.font = font.heading;
-  ctx.fillText("Funnel Lending · Riesgos", card.padding, 364);
+  ctx.fillText("Funnel Piloto Lending Híbrido", card.padding, 364);
 
   ctx.strokeStyle = "#ECE7F2";
   ctx.lineWidth = 2;
@@ -131,7 +131,7 @@ export async function renderKpiCardLendingImage(kpis: LendingCardKpis): Promise<
     fitFontSize(ctx, desembolsoText, colWidth, font.valueMaxPx, font.valueMinPx),
   );
 
-  drawColumn(ctx, col1X, blockTop, "Vistos", vistosText, sharedValuePx, kpis.vistosDelta, compareLabel(kpis.fecha, kpis.vistosCompareFecha), colWidth);
+  drawColumn(ctx, col1X, blockTop, "Ofertas Vistas", vistosText, sharedValuePx, kpis.vistosDelta, compareLabel(kpis.fecha, kpis.vistosCompareFecha), colWidth);
   drawColumn(
     ctx,
     col2X,

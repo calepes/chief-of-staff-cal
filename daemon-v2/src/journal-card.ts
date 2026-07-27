@@ -202,7 +202,20 @@ export function renderModeClosed(guardadas: number, pendientes: number): Card {
   };
 }
 
-export function renderApplied(p: MetaProposal, entryId: string): Card {
+/**
+ * Teclado de una tarjeta ya guardada. El botón de cerrar el modo solo aparece si
+ * el modo journal está abierto — con el prefijo `journal:` no hay nada que cerrar
+ * y ofrecerlo sería mentira.
+ */
+export function buildSavedKeyboard(entryId: string, modoAbierto: boolean): Keyboard {
+  const rows = [[{ text: "↩️ Deshacer", callback_data: `jnl:undo:${entryId}` }]];
+  if (modoAbierto) {
+    rows.push([{ text: "⏹️ Cerrar journal", callback_data: `jnl:mode:close:${entryId}` }]);
+  }
+  return { inline_keyboard: rows };
+}
+
+export function renderApplied(p: MetaProposal, entryId: string, modoAbierto = false): Card {
   const incluidos = topicsIncluidos(p);
   const lines = [
     `📓 <b>Guardado</b> — ${ddmm(p.fechaHora)} · ${hhmm(p.fechaHora)}`,
@@ -212,10 +225,5 @@ export function renderApplied(p: MetaProposal, entryId: string): Card {
     `🏷️ ${incluidos.length > 0 ? esc(incluidos.map((t) => t.name).join(", ")) : "sin topics"}`,
     `🎯 ${p.bigTheme ? esc(p.bigTheme.name) : "sin big theme"}`,
   ];
-  return {
-    text: lines.join("\n"),
-    keyboard: {
-      inline_keyboard: [[{ text: "↩️ Deshacer", callback_data: `jnl:undo:${entryId}` }]],
-    },
-  };
+  return { text: lines.join("\n"), keyboard: buildSavedKeyboard(entryId, modoAbierto) };
 }

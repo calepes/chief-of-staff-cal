@@ -61,8 +61,8 @@ async function main(): Promise<void> {
     if (write) {
       const raw = {
         Leads: result.fields.leads,
-        Vistos: result.fields.vistos,
-        "No Vistos": result.fields.noVistos,
+        "Ofertas Vistas": result.fields.vistos,
+        "Ofertas No Vistas": result.fields.noVistos,
         "Me Interesa": result.fields.meInteresa,
         "No Me Interesa": result.fields.noMeInteresa,
         "Sin Interacción": result.fields.sinInteraccion,

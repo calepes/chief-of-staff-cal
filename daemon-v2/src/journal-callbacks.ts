@@ -3,6 +3,7 @@
 
 import { answerCallbackQuery, editMessage, sendMessage } from "@cos/shared";
 import {
+  buildSavedKeyboard,
   renderAnimoPicker,
   renderApplied,
   renderBigThemePicker,
@@ -252,7 +253,8 @@ export async function handleJournalCallback(
         // para siempre, re-corriendo Haiku sobre metadata ya aplicada y pisándola.
         // (Hallado por daemon-health-reviewer 2026-07-27.)
         setEstado(p.entryId, "Destilado");
-        const done = renderApplied(p, p.entryId);
+        const modoAbierto = (await deps.store.getMode(chatId)) != null;
+        const done = renderApplied(p, p.entryId, modoAbierto);
         await editMessage(deps.botToken, chatId, messageId, done.text, "HTML", done.keyboard).catch(() => {});
         return true;
       }
@@ -296,13 +298,14 @@ export async function handleJournalCallback(
         resonateId: res.resonateId,
       });
       await deps.store.clearProposal(chatId, shortId);
+      const modoAbierto = (await deps.store.getMode(chatId)) != null;
       await editMessage(
         deps.botToken,
         chatId,
         messageId,
         `🌟 <b>${r.titulo}</b>\nGuardada en Resonate Calendar.`,
         "HTML",
-        { inline_keyboard: [[{ text: "↩️ Deshacer", callback_data: `jnl:undo:${r.entryId}` }]] },
+        buildSavedKeyboard(r.entryId, modoAbierto),
       ).catch(() => {});
       return true;
     }
