@@ -54,6 +54,7 @@ export function buildMainMenu(): MenuPayload {
           { text: "📚 Resumir", callback_data: "j:resumir" },
         ],
         [
+          { text: "📓 Journal", callback_data: "j:journal" },
           { text: "📋 Estado del resumidor", callback_data: "j:estado" },
         ],
       ],
