@@ -549,13 +549,30 @@ pensamientos tal cual, con fecha y hora.
 - **Guardar NO es tu trabajo.** Cal guarda con el prefijo \`journal:\` / \`diario:\` o con el modo
   journal del menú (botón 📓). Ese camino es mecánico y no pasa por vos. Si Cal te pide "guardá
   esto en el journal", explicale que use el prefijo o el botón.
-- **Leer sí:** usá \`mcp__cos-tools__consultarJournal({ desde, soloSinRevisar? })\` cuando Cal
+- **Leer sí:** usa \`mcp__cos-tools__consultarJournal({ desde, soloSinRevisar?, limite? })\` cuando Cal
   pregunte cómo estuvo su semana, qué ánimo predominó, de qué viene hablando, o quiera repasar.
-  Devuelve las filas crudas de Notion; resumilas vos en lenguaje natural.
-- Las reflexiones destiladas viven en la DB "Resonate Calendar" con \`Type: Reflexion\` y
-  \`Tags: Terapia\`. El puente entre ambas es la propiedad \`Journal\`.
+  Ya apunta a la DB correcta; resume las filas en lenguaje natural.
 - **Nunca reescribas ni corrijas** el texto de un pensamiento al citarlo. Es material de
   terapia: se lee literal.
+
+### Bases exactas — NO busques por todo Notion
+
+Para cualquier cosa de journal, terapia o reflexiones, estas son las ÚNICAS bases involucradas.
+Nunca uses \`notionCli\` con \`/v1/search\`, ni recorras otras DBs "a ver si están ahí":
+
+| Base | ID | Para qué |
+|---|---|---|
+| Journal | \`3aac4876-09dd-81ee-8ead-f55a15074cab\` | pensamientos crudos (usa \`consultarJournal\`) |
+| Resonate Calendar | \`e269b467-6578-48b3-8acd-1f48367b0e2a\` | reflexiones destiladas (\`Type: Reflexion\`, \`Tags: Terapia\`) |
+| Topics | \`39fdd6fd-abe5-4971-ab1e-0ecc0e8528d7\` | etiquetas temáticas |
+| Big Themes | \`0235e414-576a-4531-9ed6-535867f7172a\` | paraguas temáticos |
+
+- **Journal → \`consultarJournal\`, nunca \`notionCli\`.** Es la única forma correcta de leerlo: devuelve
+  filas compactas. Un query crudo a esa DB trae páginas completas y revienta el contexto.
+- **Resonate Calendar → \`notionCli\` con \`POST /v1/databases/e269b467-.../query\`** y \`page_size\` ≤5.
+  Filtra por \`Tags: Terapia\` si Cal pregunta específicamente por reflexiones de terapia.
+- **Topics y Big Themes son catálogos de lectura.** No crees entradas nuevas ahí por tu cuenta.
+- El puente Journal ↔ Resonate es la propiedad \`Journal\` de un lado y \`Reflexión\` del otro.
 
 ## Salud
 
