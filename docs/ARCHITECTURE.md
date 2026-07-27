@@ -86,7 +86,7 @@ El resto del sistema (cron agents, hooks globales, scripts standalone) sigue sie
 - npm workspaces: `package.json` define `daemon-v2`, `worker-v2`, `shared-v2`.
 
 ### 4. Cron agents (tareas recurrentes vía launchd)
-> **Estado 2026-06-13:** DESACTIVADOS (dormidos). Los crons/heartbeat/learnings fueron `bootout` + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`. Jano ya NO es 100% reactivo: quedan 3 proactivas INTERNAS del daemon (node-cron, no launchd) — `scheduleHealthSyncCheck()`, `scheduleKpiIngestCheck()` y `scheduleJournalSweep()` (barrido dominical del Journal de terapia, 2026-07-27). Ver CLAUDE.md, sección "Automatización — dos capas". Lo de abajo describe el diseño original; cómo reactivar en `docs/references/hooks-automatizacion.md`.
+> **Estado 2026-06-13:** DESACTIVADOS (dormidos). Los crons/heartbeat/learnings fueron `bootout` + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`. Jano ya NO es 100% reactivo: quedan 4 proactivas INTERNAS del daemon (node-cron, no launchd) — `scheduleHealthSyncCheck()`, `scheduleKpiIngestCheck()`, `scheduleJournalSweep()` (barrido dominical del Journal de terapia, 2026-07-27) y `scheduleDailyNoteCheck()`. Ver CLAUDE.md, sección "Automatización — dos capas". Lo de abajo describe el diseño original; cómo reactivar en `docs/references/hooks-automatizacion.md`.
 
 Invocan `claude -p "<prompt>"` una vez por ejecución (sesión one-shot). Tabla abajo. Estos sí usan el binario CLI; son ortogonales al daemon.
 

@@ -235,14 +235,16 @@ las proactivas hoy desactivadas en Jano, copiar ese mismo patrón desde el día 
 (único proactivo activo en ese momento) y un futuro `fuel_alert` reactivado — nunca se confirmó en la
 práctica ni se implementó nada, y quedó sin objeto al apagarse `scheduleResumirPlaylist` el 2026-07-14.
 
-**Estado real (actualizado 2026-07-27):** **3 proactivos internos activos** — `scheduleHealthSyncCheck()`
+**Estado real (actualizado 2026-07-27):** **4 proactivos internos activos** — `scheduleHealthSyncCheck()`
 (alerta de corte de sync de Apple Health), `scheduleKpiIngestCheck()` (ingesta del mail diario de BCP a
 "KPIs diarios" + tarjeta de KPIs disparada desde ahí mismo, ver arriba) y `scheduleJournalSweep()`
-(barrido dominical del Journal de terapia, ver abajo), además del webhook watchdog
+(barrido dominical del Journal de terapia, ver abajo) y `scheduleDailyNoteCheck()` (ingesta de
+"Daily Notes Yape" por mail, cada 15 min 6-23h — implementado en otra sesión el 2026-07-27,
+**pendiente de documentar en detalle por quien lo hizo**), además del webhook watchdog
 (infra, no le manda nada a Cal). `scheduleKpiCardDaily()` dejó de ser un cron propio el 2026-07-24 —
 ver arriba, quedó absorbido dentro del pipeline PDF de `scheduleKpiIngestCheck()`. Los otros 3 crons de
 dominio (resumidor, flight check-in, Foco check-in) siguen desactivados. Jano ya no es 100% reactivo —
-son las tres excepciones puntuales a esa decisión del 2026-07-14.
+son las cuatro excepciones puntuales a esa decisión del 2026-07-14.
 **Sin proactividad por evento externo** — el monitor de combustible sigue apagado (`crons = []` en
 `combustible-proxy/wrangler.toml`, verificado 2026-07-03), ver abajo. Verificar qué crons internos
 arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
