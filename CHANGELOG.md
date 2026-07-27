@@ -1,5 +1,71 @@
 # CHANGELOG — Jano
 
+## 2026-07-27
+
+### Feature — Journal de reflexión (terapia): DB Notion + captura por Telegram
+- **Motivo:** Cal está en terapia y quería un lugar donde descargar pensamientos sin fricción, que
+  quedaran **tal cual** con fecha y hora, y que de esa descarga cruda salieran las reflexiones que
+  valen la pena conservar. Hasta ahora eso vivía disperso entre párrafos sueltos en la página
+  *Terapia CAL* y entradas cargadas a mano en **Resonate Calendar** (la DB de insights que Cal cura
+  hace años).
+- **Modelo:** DB nueva `Journal` (`3aac4876-09dd-81ee-8ead-f55a15074cab`) bajo la página *Mental
+  Health*, con 10 propiedades y relación bidireccional a Resonate Calendar (`Journal` ↔ `Reflexión`).
+  Reusa los catálogos existentes **Topics** y **Big Themes** en vez de inventar vocabulario nuevo.
+  **El texto literal va al CUERPO de la página, no a una propiedad:** `rich_text` corta a 2000 chars
+  y una descarga de voz larga perdería texto en silencio.
+- **Captura en dos tiempos (la decisión central):** el paso 1 escribe la fila con el texto íntegro
+  de forma **mecánica, sin LLM** (prefijo `journal:`/`diario:` o modo journal con el botón 📓); el
+  paso 2 propone metadata con Haiku (`journal-enrich.ts`, patrón de `compact.ts`) sobre una tarjeta
+  `propose → botones` copiada de Pecunia. Si el paso 2 falla, el pensamiento ya está a salvo. Eso es
+  lo que hace que "Jano escribe tal cual" sea literal: el texto persistido nunca pasa por el modelo.
+- **Destilación a Resonate:** checkpoint en el momento (la misma tarjeta se transforma) + barrido
+  dominical de lo que quedó `Sin revisar`. Nuevo cron interno `scheduleJournalSweep()`
+  (`0 19 * * 0`, La Paz) — **tercera excepción** a la arquitectura reactiva decidida el 2026-07-14.
+- **Archivos nuevos:** `journal-{types,text,payloads,store,card,enrich,capture,callbacks,ids}.ts`,
+  `tools/journal.ts`, `proactive/journal-sweep.ts`. Tool nueva `consultarJournal` (solo lectura).
+
+### Hallazgos del `daemon-health-reviewer` (3 bloqueantes, resueltos antes de producción)
+- **El botón 📓 del menú era código muerto.** `if (cb.data?.startsWith("j:"))` en `index.ts` retorna
+  incondicionalmente; el handler de `j:journal` había quedado 39 líneas más abajo, inalcanzable, y
+  sin dejar rastro en logs. Movido arriba, junto a `j:star`/`j:ytpl`, que están ahí por lo mismo.
+- **`apply` no movía `Estado`.** Un pensamiento sin reflexión quedaba `Sin revisar` para siempre → el
+  barrido se lo reproponía cada domingo, re-corriendo Haiku sobre metadata ya aplicada y pisándola.
+- **`consultarJournal` disparaba el persisted-output loop.** Devolvía páginas completas de Notion
+  (75-150 KB, contra el umbral de ~25 KB documentado). Ahora devuelve filas compactas.
+- Más 6 warnings resueltos: la captura pasó a fire-and-forget (bloqueaba el poll loop secuencial
+  ~10-20s por pensamiento), `enrichEntry` cierra su handle del SDK (corría 1 vez por pensamiento en
+  un daemon que vive semanas), `fetchIndex` ya no cachea un índice vacío ante fallo de Notion, el
+  deshacer restaura título y estado previos, y `sweep:all` quedó acotado a 5 por tanda.
+
+### Validación contra el skill `telegram-bot-ux` (pedida por Cal)
+- **Voseo en toda la copia de las tarjetas** ("Respondé", "Elegí", "Mandame", "Acá") — contra la
+  regla de español neutro. Corregido.
+- **Violación de la regla cardinal de feedback:** `createRawEntry` es un `spawnSync` de `ntn` de 1-3s
+  y el primer mensaje salía *después*. Ahora typing pulse + placeholder antes de tocar Notion.
+- Emojis de dominio del Journal documentados en `CLAUDE.md` (el lexicon del skill no los trae).
+- **Desviación deliberada:** `✅ Revisar todos` manda una tarjeta por pensamiento en vez de
+  consolidar en una sola ancla (bloque B8). Cada pensamiento necesita sus propios pickers de
+  aprobación; consolidarlos es un rediseño, no un ajuste. Acotado a 5 por tanda.
+
+### Dos problemas encontrados con datos reales, el mismo día
+- **Permisos de Notion:** la DB se creó con el token de `ntn` (integración *Notion CLI interactivo*)
+  pero el daemon usa otra (*Claude CoS*) → `404 object_not_found` en el primer guardado. No se puede
+  arreglar por API (Notion no permite agregar integraciones a una página desde la API pública); Cal
+  conectó a mano las 4 bases. Se agregaron al system prompt los IDs exactos con prohibición de
+  `/v1/search`, para que el modelo no se ponga a buscar por todo Notion ahora que ve más.
+- **El modo journal se tragó un pedido real.** Con la ventana de 2h abierta, "Dame el último card de
+  lending" se guardó como pensamiento en vez de responderse — el riesgo que el spec ya declaraba,
+  materializado el primer día. **TTL bajado de 2h a 30 min** (se refresca en cada guardado, así que
+  una descarga larga no se corta) + botón `⏹️ Cerrar journal` en cada tarjeta guardada. La entrada
+  espuria se borró con autorización de Cal.
+
+### Pendientes conocidos (sin resolver, decisión de Cal)
+- Sin idempotencia contra redelivery de la CF Queue: un batch que exceda los 30s de
+  `visibility_timeout_ms` podría duplicar filas en la DB de terapia, en silencio.
+- El picker de Topics no permite crear uno nuevo (`createTopic` existe pero no tiene call site).
+- `Origen: "Sesión terapia"` no tiene UI — el modo siempre abre como `Texto`.
+- El texto crudo del journal sí sale hacia la API de Anthropic en el paso de enriquecimiento.
+
 ## 2026-07-15
 
 ### Feature — Detección de cortes de sync de Apple Health (`getHealthSyncStatus`)
