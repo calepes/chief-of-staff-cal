@@ -107,7 +107,7 @@ export function renderTopicsPicker(p: MetaProposal, shortId: string): Card {
   ]);
   rows.push([{ text: "⬅️ Volver", callback_data: `jnl:back:${shortId}` }]);
   return {
-    text: "🏷️ <b>Topics</b>\nTap para incluir o excluir. Si falta uno, escribime el nombre y lo creo.",
+    text: "🏷️ <b>Topics</b>\nTap para incluir o excluir.",
     keyboard: { inline_keyboard: rows },
   };
 }

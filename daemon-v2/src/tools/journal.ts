@@ -72,6 +72,53 @@ export function parseUnreviewedRows(res: unknown): UnreviewedRow[] {
   });
 }
 
+export interface CompactRow {
+  id: string;
+  titulo: string;
+  fecha: string;
+  animo: string | null;
+  intensidad: number | null;
+  estado: string | null;
+  extracto: string;
+}
+
+/**
+ * Reduce la respuesta cruda de un query a lo que el LLM necesita leer.
+ * Sin esto, 15-50 páginas completas de Notion superan el umbral de ~25 KB que
+ * dispara el persisted-output loop del SDK (ver CLAUDE.md).
+ */
+export function compactJournalRows(res: unknown): CompactRow[] {
+  const results = (res as { results?: unknown[] }).results;
+  if (!Array.isArray(results)) return [];
+  return results.map((r) => {
+    const row = r as {
+      id: string;
+      properties: Record<
+        string,
+        {
+          title?: Array<{ plain_text: string }>;
+          rich_text?: Array<{ plain_text: string }>;
+          date?: { start: string } | null;
+          select?: { name: string } | null;
+          number?: number | null;
+        }
+      >;
+    };
+    const p = row.properties ?? {};
+    const plain = (arr?: Array<{ plain_text: string }>) =>
+      (arr ?? []).map((t) => t.plain_text).join("").trim();
+    return {
+      id: row.id,
+      titulo: plain(p["Pensamiento"]?.title) || "(sin título)",
+      fecha: p["Fecha y hora"]?.date?.start ?? "",
+      animo: p["Ánimo"]?.select?.name ?? null,
+      intensidad: p["Intensidad"]?.number ?? null,
+      estado: p["Estado"]?.select?.name ?? null,
+      extracto: plain(p["Extracto"]?.rich_text),
+    };
+  });
+}
+
 /** Índice nombre→ref de una DB de catálogo (Topics o Big Themes), cacheado 10 min. */
 export function fetchIndex(dbId: string): Map<string, NotionRef> {
   const cached = indexCache.get(dbId);
@@ -90,7 +137,11 @@ export function fetchIndex(dbId: string): Map<string, NotionRef> {
       has_more?: boolean;
       next_cursor?: string;
     };
-    for (const row of res.results ?? []) {
+    // Fallo de Notion (`{error}`) → NO cachear: un índice vacío cacheado 10 min dejaría
+    // todas las capturas de esa ventana sin ningún topic propuesto, y en silencio.
+    // Devolvemos lo último bueno que haya, o vacío sin persistirlo.
+    if (!Array.isArray(res.results)) return cached?.index ?? new Map();
+    for (const row of res.results) {
       const titleProp = Object.values(row.properties).find((p) => p.type === "title");
       const name = (titleProp?.title ?? []).map((t) => t.plain_text).join("").trim();
       if (name.length > 0) index.set(normalize(name), { id: row.id, name });
@@ -152,10 +203,19 @@ export function applyMetadata(
   return res.id ? { ok: true } : { ok: false, error: res.detail ?? res.error ?? "PATCH sin id" };
 }
 
-/** Undo de applyMetadata: vacía los campos que el paso 2 había completado. */
-export function clearMetadata(entryId: string): { ok: boolean } {
+/**
+ * Undo de applyMetadata: vacía los campos que el paso 2 completó y restaura el
+ * título y el estado previos. Sin restaurar el título, el "deshacer" dejaría
+ * puesto el que escribió el LLM y el mensaje "volvió a como estaba" sería falso.
+ */
+export function clearMetadata(
+  entryId: string,
+  previo: { titulo: string; estado: string },
+): { ok: boolean } {
   const res = notionApi("PATCH", `/v1/pages/${entryId}`, {
     properties: {
+      Pensamiento: { title: [{ text: { content: previo.titulo } }] },
+      Estado: { select: { name: previo.estado } },
       "Ánimo": { select: null },
       Intensidad: { number: null },
       Topics: { relation: [] },

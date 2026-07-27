@@ -79,15 +79,15 @@ describe("JournalStore — undo", () => {
   it("guarda el snapshot con TTL de 10 minutos y lo recupera", async () => {
     const kv = new FakeKv();
     const store = new JournalStore(kv as never);
-    await store.setUndo(1, "entry-1", { kind: "journal-meta", entryId: "entry-1" });
+    await store.setUndo(1, "entry-1", { kind: "journal-meta", entryId: "entry-1", tituloPrevio: "hoy...", estadoPrevio: "Sin revisar" });
     expect(kv.ttls.get("jano:journal:undo:1:entry-1")).toBe(600);
-    expect(await store.getUndo(1, "entry-1")).toEqual({ kind: "journal-meta", entryId: "entry-1" });
+    expect(await store.getUndo(1, "entry-1")).toEqual({ kind: "journal-meta", entryId: "entry-1", tituloPrevio: "hoy...", estadoPrevio: "Sin revisar" });
   });
 
   it("clearUndo lo borra", async () => {
     const kv = new FakeKv();
     const store = new JournalStore(kv as never);
-    await store.setUndo(1, "entry-1", { kind: "journal-meta", entryId: "entry-1" });
+    await store.setUndo(1, "entry-1", { kind: "journal-meta", entryId: "entry-1", tituloPrevio: "hoy...", estadoPrevio: "Sin revisar" });
     await store.clearUndo(1, "entry-1");
     expect(await store.getUndo(1, "entry-1")).toBeNull();
   });

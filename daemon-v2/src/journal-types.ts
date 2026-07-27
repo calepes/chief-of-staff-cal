@@ -68,6 +68,11 @@ export type JournalProposal = MetaProposal | ReflexionProposal;
 export interface MetaUndo {
   kind: "journal-meta";
   entryId: string;
+  /** Título previo (el provisional derivado del extracto) — sin esto el deshacer
+   *  dejaría puesto el título que escribió el LLM y no sería un deshacer real. */
+  tituloPrevio: string;
+  /** Estado previo, para revertir el paso a Destilado. */
+  estadoPrevio: Estado;
 }
 
 /** Snapshot para deshacer la creación en Resonate (se archiva la fila creada). */

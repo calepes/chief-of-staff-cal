@@ -27,6 +27,9 @@ import {
   setEstado,
 } from "./tools/journal.js";
 
+/** Máximo de entradas que procesa un "✅ Revisar todos" de una sola vez. */
+const SWEEP_BATCH_MAX = 5;
+
 export interface ParsedCallback {
   accion: string;
   shortId: string;
@@ -90,7 +93,10 @@ export async function handleJournalCallback(
       return true;
     }
     if (snapshot.kind === "journal-meta") {
-      clearMetadata(snapshot.entryId);
+      clearMetadata(snapshot.entryId, {
+        titulo: snapshot.tituloPrevio,
+        estado: snapshot.estadoPrevio,
+      });
     } else {
       archiveResonateEntry(snapshot.resonateId);
       setEstado(snapshot.entryId, "Sin revisar");
@@ -106,7 +112,15 @@ export async function handleJournalCallback(
       await editMessage(deps.botToken, chatId, messageId, "👍 Los dejo para la próxima.", "HTML", { inline_keyboard: [] }).catch(() => {});
       return true;
     }
-    const ids = shortId === "all" ? queryUnreviewed(sevenDaysAgoIso()).map((e) => e.id) : [shortId];
+    // Cota dura: "Revisar todos" con 50 pendientes serían 50 llamadas a Haiku
+    // secuenciales, muy por encima del TTL de 60s del lock anti-doble-tap.
+    // Procesamos de a tandas; el resto vuelve el domingo siguiente.
+    const ids =
+      shortId === "all"
+        ? queryUnreviewed(sevenDaysAgoIso())
+            .slice(0, SWEEP_BATCH_MAX)
+            .map((e) => e.id)
+        : [shortId];
     if (ids.length === 0) {
       await editMessage(deps.botToken, chatId, messageId, "✅ No quedó nada sin destilar.", "HTML", { inline_keyboard: [] }).catch(() => {});
       return true;
@@ -206,7 +220,12 @@ export async function handleJournalCallback(
           await editMessage(deps.botToken, chatId, messageId, "⚠️ No pude escribir la metadata en Notion. La entrada sigue guardada con su texto.", "HTML", { inline_keyboard: [] }).catch(() => {});
           return true;
         }
-        await deps.store.setUndo(chatId, p.entryId, { kind: "journal-meta", entryId: p.entryId });
+        await deps.store.setUndo(chatId, p.entryId, {
+          kind: "journal-meta",
+          entryId: p.entryId,
+          tituloPrevio: p.extracto,
+          estadoPrevio: "Sin revisar",
+        });
         await deps.store.clearProposal(chatId, shortId);
 
         // Si había reflexión, la MISMA tarjeta se transforma en el checkpoint de Resonate.
@@ -228,6 +247,11 @@ export async function handleJournalCallback(
           return true;
         }
 
+        // Sin reflexión el checkpoint termina acá, así que la entrada YA está revisada:
+        // hay que sacarla de `Sin revisar` o el barrido dominical se la vuelve a proponer
+        // para siempre, re-corriendo Haiku sobre metadata ya aplicada y pisándola.
+        // (Hallado por daemon-health-reviewer 2026-07-27.)
+        setEstado(p.entryId, "Destilado");
         const done = renderApplied(p, p.entryId);
         await editMessage(deps.botToken, chatId, messageId, done.text, "HTML", done.keyboard).catch(() => {});
         return true;

@@ -87,11 +87,22 @@ export async function enrichEntry(
   });
 
   let out = "";
-  for await (const event of handle.query(buildEnrichPrompt(texto, topics, bigThemes))) {
-    const e = event as { type?: string; subtype?: string; result?: string };
-    if (e.type === "result" && e.subtype === "success") {
-      out = e.result ?? "";
-      break;
+  try {
+    for await (const event of handle.query(buildEnrichPrompt(texto, topics, bigThemes))) {
+      const e = event as { type?: string; subtype?: string; result?: string };
+      if (e.type === "result" && e.subtype === "success") {
+        out = e.result ?? "";
+        break;
+      }
+    }
+  } finally {
+    // Cerrar SIEMPRE: esto corre una vez por pensamiento (y N veces seguidas en
+    // jnl:sweep:all). Sin close() queda un subprocess huérfano por captura, y el
+    // daemon corre semanas sin reiniciar. Mismo motivo que discardWarm en index.ts.
+    try {
+      await handle.close();
+    } catch {
+      /* cerrar es best-effort: si ya murió, no hay nada que hacer */
     }
   }
   return parseEnrichResult(out);
