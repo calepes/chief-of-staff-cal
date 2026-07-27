@@ -94,11 +94,11 @@ describe("JournalStore — undo", () => {
 });
 
 describe("JournalStore — modo journal", () => {
-  it("abre el modo con TTL de 2 horas", async () => {
+  it("abre el modo con TTL de 30 min", async () => {
     const kv = new FakeKv();
     const store = new JournalStore(kv as never);
     await store.openMode(1, { abiertoEn: 1000, anchorMessageId: 5, origen: "Texto", guardadas: 0, pendientes: 0 });
-    expect(kv.ttls.get("jano:journal-mode:1")).toBe(7200);
+    expect(kv.ttls.get("jano:journal-mode:1")).toBe(1800);
     expect(await store.getMode(1)).toMatchObject({ anchorMessageId: 5 });
   });
 
@@ -115,7 +115,7 @@ describe("JournalStore — modo journal", () => {
     await store.bumpMode(1, { guardadas: 1, pendientes: 1 });
     const mode = await store.getMode(1);
     expect(mode).toMatchObject({ guardadas: 1, pendientes: 1, anchorMessageId: 5 });
-    expect(kv.ttls.get("jano:journal-mode:1")).toBe(7200);
+    expect(kv.ttls.get("jano:journal-mode:1")).toBe(1800);
   });
 
   it("bumpMode no hace nada si el modo ya expiró", async () => {

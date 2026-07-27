@@ -93,6 +93,10 @@ Cada mensaje posterior entra al Journal. Al cerrar, Jano **edita ese mismo mensa
 el resumen de la tanda. El modo vive en CF KV (`jano:journal-mode:{chatId}`) con **TTL de
 2 horas**: si Cal olvida cerrarlo, expira solo y Jano avisa.
 
+> **Revisado el mismo día (2026-07-27):** bajado a **30 minutos** tras el primer uso real —
+> con la ventana de 2h un pedido normal de Cal se guardó como pensamiento. El TTL se
+> refresca en cada guardado, así que una descarga larga no se corta a mitad.
+
 **Voz:** reusa el pipeline de transcripción existente (whisper). La transcripción cruda
 *es* el texto literal, `Origen: Voz`. Sin reescritura ni corrección de estilo.
 
@@ -258,7 +262,8 @@ Tras editar código del daemon, correr el subagent `daemon-health-reviewer`.
 
 - **El modo journal intercepta todos los mensajes mientras está abierto.** Si queda
   abierto y Cal escribe "¿qué vuelos hay mañana?", se guarda como pensamiento en vez de
-  responder. Mitigado con el TTL de 2 horas y el mensaje ancla siempre visible; no
+  responder. Mitigado con el TTL de 30 minutos, el botón ⏹️ Cerrar journal en cada tarjeta guardada,
+  y el mensaje ancla siempre visible; no
   eliminado — es el precio de que el modo no reinterprete nada.
 - **Falsos positivos de detección de reflexión.** Mitigado con el criterio explícito y la
   regla "ante la duda, no propone".

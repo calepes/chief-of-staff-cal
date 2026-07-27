@@ -8,8 +8,14 @@ import type { JournalMode, JournalProposal, JournalUndo, PendingEdit } from "./j
 const PROPOSAL_TTL_SEC = 3600;
 /** 10 min de ventana para deshacer, igual que Pecunia. */
 const UNDO_TTL_SEC = 600;
-/** 2 horas: si el modo queda abierto por olvido, expira solo. */
-const MODE_TTL_SEC = 7200;
+/**
+ * 30 min: si el modo queda abierto por olvido, expira solo.
+ * Bajado de 2h el 2026-07-27, el primer día de uso — con la ventana larga un pedido
+ * real de Cal ("Dame el último card de lending") se guardó como pensamiento en vez
+ * de responderse. Una descarga de journal es una ráfaga de minutos, no de horas.
+ * Cada guardado refresca el TTL (`bumpMode`), así que una sesión larga no se corta.
+ */
+const MODE_TTL_SEC = 1800;
 
 export class JournalStore {
   constructor(private kv: CfKv) {}

@@ -117,7 +117,7 @@ captura cruda de pensamientos con fecha y hora, con puente a **Resonate Calendar
 `docs/superpowers/specs/2026-07-27-journal-terapia-notion-design.md`; plan en `docs/superpowers/plans/`.
 
 - **Captura mecánica, sin LLM:** prefijo `journal:`/`diario:` o modo journal (botón 📓 del menú, estado
-  en KV `jano:journal-mode:{chatId}` con TTL 2h). El texto se persiste ANTES de que el modelo lo vea —
+  en KV `jano:journal-mode:{chatId}` con TTL 30 min, refrescado en cada guardado). El texto se persiste ANTES de que el modelo lo vea —
   por eso "Jano escribe tal cual" es literal. **El texto va al CUERPO de la página, no a una propiedad:**
   `rich_text` corta a 2000 chars y una descarga de voz larga perdería texto en silencio.
 - **Metadata en un segundo paso** (`journal-enrich.ts`: Haiku, `maxTurns:1`, sin tools, patrón de
@@ -143,7 +143,7 @@ captura cruda de pensamientos con fecha y hora, con puente a **Resonate Calendar
   y `j:star`: hace un `startup()` del SDK más 3 `spawnSync` de `ntn` (~10-20s) y el poll loop del
   daemon es estrictamente secuencial — awaitearlo congelaba todos los chats.
 - **Gotcha del modo journal:** mientras está abierto intercepta TODOS los mensajes del chat, incluidos
-  los que eran pedidos normales. Mitigado con el TTL de 2h y el mensaje ancla visible, no eliminado.
+  los que eran pedidos normales. Mitigado con el TTL de 30 min (bajado de 2h el 2026-07-27 tras tragarse un pedido real el primer día), el botón ⏹️ Cerrar journal en cada tarjeta guardada, y el mensaje ancla visible. No eliminado.
 - **Pendientes conocidos** (del review, sin resolver): no hay idempotencia contra redelivery de la CF
   Queue → un batch que exceda los 30s de `visibility_timeout_ms` podría duplicar filas; el picker de
   Topics no permite crear uno nuevo (`createTopic` existe pero no tiene call site); `Origen: "Sesión
