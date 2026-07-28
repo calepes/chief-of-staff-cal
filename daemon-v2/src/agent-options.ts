@@ -168,8 +168,13 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__health__getHealthTrend",
   "mcp__health__getWorkouts",
   "mcp__health__getHealthSyncStatus",
-  // Learning system — MCP externo (evita warm pool stale del in-process cos-tools)
-  "mcp__agent-learnings__addLearning",
+  // Learning system — `mcp__agent-learnings__addLearning` fue SACADA de la allowlist (2026-07-28):
+  // la reemplazan `mcp__cos-tools__recordarAprendizaje` (cuando Cal lo pide explícito) y el pase
+  // nocturno de reflexión (proactive/learning-reflect.ts). El system prompt ya la declara obsoleta,
+  // pero con ToolSearch activo el modelo la encuentra igual y la prosa no lo frena — y escribe a
+  // ~/.claude/learnings/cos/, un store que NO se inyecta en ningún prompt: ese learning se perdía
+  // para siempre sin que nadie se enterara. El MCP `agent-learnings` sigue registrado en index.ts
+  // a propósito (lo comparten Vesta y Pecunia); lo que se corta acá es el permiso de escritura.
   // Combustible Santa Cruz — disponibilidad y distancia a estaciones de gasolina
   "mcp__combustible__getFuelStatus",
   "mcp__combustible__getFuelMonitorConfig",
