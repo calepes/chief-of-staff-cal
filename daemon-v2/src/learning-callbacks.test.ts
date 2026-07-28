@@ -140,6 +140,24 @@ describe("handleLearningCallback", () => {
     expect(final.keyboard.inline_keyboard).toEqual([]);
   });
 
+  it("Fix B: Terminar tras guardar 2 y saltar 1 reporta los totales reales, no 'no guardé ninguno'", async () => {
+    // Batch con un 4to candidato para poder tocar "Terminar" (lrn:none) ANTES de que
+    // el recorrido termine solo por agotar los candidatos (eso ya lo cubre el test de arriba).
+    const batchId = await store.createBatch(1, makeBatch({ candidates: [...CANDS, CANDS[0]!] }));
+    await handleLearningCallback(deps, 1, 99, `lrn:keep:${batchId}`); // guarda 1
+    await handleLearningCallback(deps, 1, 99, `lrn:keep:${batchId}`); // guarda 2
+    await handleLearningCallback(deps, 1, 99, `lrn:skip:${batchId}`); // descarta 1
+    // cursor en 3 de 4 — el batch sigue vivo. Tocar "⏹️ Terminar" (lrn:none).
+    await handleLearningCallback(deps, 1, 99, `lrn:none:${batchId}`);
+
+    expect(await store.getBatch(1, batchId)).toBeNull();
+    const final = edits.at(-1)!.card;
+    expect(final.text).toContain("Guardé 2");
+    expect(final.text).toContain("descarté 1");
+    expect(final.text).not.toContain("No guardé nada");
+    expect(final.keyboard.inline_keyboard).toEqual([]);
+  });
+
   it("batch inexistente avisa que expiró, con teclado vacío explícito", async () => {
     await handleLearningCallback(deps, 1, 99, "lrn:all:nope");
     expect(edits).toHaveLength(1);

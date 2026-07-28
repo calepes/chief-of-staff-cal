@@ -77,6 +77,16 @@ export async function handleLearningCallback(
 
     case "none": {
       await deps.store.clearBatch(chatId, batchId);
+      // "Terminar" del modo uno-a-uno también dispara `lrn:none` — si Cal ya aprobó/descartó
+      // candidatos antes de tocarlo, el cierre debe reportar esos totales reales (mismo defecto
+      // que ya se corrigió para el cierre natural del recorrido), no mentir con "no guardé nada".
+      // `renderNothing()` queda solo para el caso real: tocar "❌ Ninguno" en la tarjeta inicial
+      // sin haber revisado nada todavía.
+      if (batch.guardados > 0 || batch.descartados > 0) {
+        deps.log({ msg: "learning_batch_none_with_progress", batchId, guardados: batch.guardados, descartados: batch.descartados });
+        await deps.editCard(messageId, renderDone(batch.guardados, batch.descartados));
+        return;
+      }
       deps.log({ msg: "learning_batch_none", batchId });
       await deps.editCard(messageId, renderNothing());
       return;
