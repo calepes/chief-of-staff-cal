@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { recordSession, sessionIdsForDay, pruneSessionLog } from "./session-log.js";
+import { recordSession, sessionIdsForDay, sessionIdsSince, pruneSessionLog } from "./session-log.js";
 
 const DIR = join(tmpdir(), "jano-test-session-log");
 const LOG = join(DIR, "sessions-log.jsonl");
@@ -52,6 +52,49 @@ describe("sessionIdsForDay", () => {
   it("ignora líneas corruptas sin romper", () => {
     writeFileSync(LOG, `no es json\n${JSON.stringify({ sessionId: "ok", chatId: 1, startedAt: Date.parse("2026-07-28T12:00:00-04:00") })}\n`);
     expect(sessionIdsForDay(LOG, "2026-07-28")).toEqual(["ok"]);
+  });
+});
+
+describe("sessionIdsSince", () => {
+  const HORA = 3600 * 1000;
+
+  it("incluye una sesión de hace 2 h y excluye una de hace 30 h", () => {
+    const ahora = Date.parse("2026-07-28T22:00:00-04:00");
+    recordSession(LOG, "hace-2h", 42, ahora - 2 * HORA);
+    recordSession(LOG, "hace-30h", 42, ahora - 30 * HORA);
+    expect(sessionIdsSince(LOG, ahora - 24 * HORA)).toEqual(["hace-2h"]);
+  });
+
+  it("una sesión de las 23:00 de ayer entra en el pase de hoy (el caso que el día calendario perdía)", () => {
+    // El cron corre 22:00 La Paz. Una sesión de las 23:08 de AYER queda fechada ayer, así que el
+    // pase de ayer (22:00) ya había corrido y el de hoy, por día calendario, no la miraría nunca.
+    const anoche = Date.parse("2026-07-27T23:08:00-04:00");
+    const pasoDeHoy = Date.parse("2026-07-28T22:00:00-04:00");
+    recordSession(LOG, "nocturna", 42, anoche);
+
+    // Confirmación del punto ciego con la selección vieja:
+    expect(sessionIdsForDay(LOG, "2026-07-28")).toEqual([]);
+    // Y con la ventana móvil sí entra:
+    expect(sessionIdsSince(LOG, pasoDeHoy - 24 * HORA)).toEqual(["nocturna"]);
+  });
+
+  it("incluye el borde exacto (startedAt === sinceMs)", () => {
+    const ahora = Date.parse("2026-07-28T22:00:00-04:00");
+    recordSession(LOG, "borde", 42, ahora - 24 * HORA);
+    expect(sessionIdsSince(LOG, ahora - 24 * HORA)).toEqual(["borde"]);
+  });
+
+  it("devuelve vacío si no hay archivo", () => {
+    expect(sessionIdsSince(join(DIR, "no-existe.jsonl"), 0)).toEqual([]);
+  });
+
+  it("ignora líneas corruptas sin romper", () => {
+    const ahora = Date.parse("2026-07-28T22:00:00-04:00");
+    writeFileSync(
+      LOG,
+      `no es json\n${JSON.stringify({ sessionId: "ok", chatId: 1, startedAt: ahora - HORA })}\n`,
+    );
+    expect(sessionIdsSince(LOG, ahora - 24 * HORA)).toEqual(["ok"]);
   });
 });
 

@@ -95,6 +95,25 @@ export function sessionIdsForDay(path: string, fecha: string): string[] {
     .map((e) => e.sessionId);
 }
 
+/**
+ * sessionIds cuyo `startedAt` es >= `sinceMs`. Esta es la selección que usa el pase nocturno,
+ * NO `sessionIdsForDay`.
+ *
+ * Por qué: el cron corre a las 22:00 de La Paz. Con selección por día calendario, una sesión que
+ * arranca a las 22:30 queda fechada en D, pero el pase de D ya corrió y el de D+1 busca sesiones
+ * de D+1 — nunca se lee. Esa franja (22:00 a medianoche) es justo cuando Cal más usa el bot, así
+ * que era un punto ciego permanente, no un caso de borde.
+ *
+ * Con una ventana móvil de 24 h cada sesión se lee exactamente una vez, con a lo sumo un día de
+ * demora. La clave de dedup del cron sigue siendo diaria (evita doble ejecución el mismo día);
+ * lo que cambia es QUÉ se lee, no CUÁNDO se corre.
+ */
+export function sessionIdsSince(path: string, sinceMs: number): string[] {
+  return readEntries(path)
+    .filter((e) => e.startedAt >= sinceMs)
+    .map((e) => e.sessionId);
+}
+
 /** Purga los registros de más de 30 días. Best-effort: un fallo acá no es crítico. */
 export function pruneSessionLog(path: string, now: number = Date.now()): void {
   try {

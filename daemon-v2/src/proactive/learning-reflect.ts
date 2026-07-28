@@ -20,7 +20,7 @@ import { extractLearnings } from "../learning-extract.js";
 import { LearningStore } from "../learning-store.js";
 import { buildDayTranscript } from "../learning-transcript.js";
 import type { Learning, LearningCandidate } from "../learning-types.js";
-import { pruneSessionLog, sessionIdsForDay, SESSION_LOG_PATH } from "../session-log.js";
+import { pruneSessionLog, sessionIdsSince, SESSION_LOG_PATH } from "../session-log.js";
 
 /**
  * Directorio donde el Agent SDK persiste las sesiones .jsonl. El SDK lo deriva del **cwd del
@@ -46,6 +46,14 @@ export const SDK_SESSIONS_DIR = join(
 export const LEARNINGS_PATH = join(process.env.HOME!, ".cos-agent", "learnings.md");
 
 const DEDUP_TTL_SEC = 48 * 60 * 60;
+
+/**
+ * Ventana de sesiones que mira el pase. Móvil de 24 h desde el momento en que corre, NO día
+ * calendario: el cron es a las 22:00, así que por día calendario las sesiones que arrancan entre
+ * las 22:00 y medianoche no las leería NUNCA (el pase de ese día ya corrió; el del día siguiente
+ * busca sesiones del día siguiente). Ver sessionIdsSince en session-log.ts.
+ */
+const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Clave de dedup con la fecha en hora de La Paz — NUNCA getFullYear()/getMonth()/getDate() del
@@ -121,7 +129,9 @@ export async function checkLearningReflect(opts: ScheduleOpts): Promise<void> {
   try {
     if (await kv.get<boolean>(dedupKey)) return;
 
-    const sessionIds = sessionIdsForDay(SESSION_LOG_PATH, fecha);
+    // Ventana móvil de 24 h, no día calendario — ver LOOKBACK_MS. `fecha` sigue siendo el día de
+    // La Paz, pero solo para la clave de dedup y para etiquetar los logs/el batch.
+    const sessionIds = sessionIdsSince(SESSION_LOG_PATH, now.getTime() - LOOKBACK_MS);
     const transcript = buildDayTranscript(SDK_SESSIONS_DIR, sessionIds);
     const existentesRaw = existsSync(LEARNINGS_PATH) ? readFileSync(LEARNINGS_PATH, "utf8") : "";
     const existentes = parseLearnings(existentesRaw);
