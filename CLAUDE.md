@@ -154,9 +154,27 @@ captura cruda de pensamientos con fecha y hora, con puente a **Resonate Calendar
 Origen: Cal pidió *"toma los valores de los sábados, ¿a este ritmo cuándo llegamos a 5MM?"* y recibió
 "⚠️ No pude procesar tu mensaje". El log mostró `agent_error: Reached maximum number of turns (12)` —
 el turno quemó los 12 turnos en `ToolSearch` con nombre corto (falla; hay que usar el nombre COMPLETO
-`mcp__cos-tools__X`), 6 llamadas a `notionCli` con `body` como **string** (el tool hace
-`JSON.stringify(body)` → doble encode → `400 invalid_json`; pasar `body` como OBJETO) y una query sin
-filtro que devolvió 352 KB. Auditando eso salió el resto.
+`mcp__cos-tools__X`), 6 llamadas a `notionCli` que fallaban con `400 invalid_json` (ver abajo) y una
+query sin filtro que devolvió 352 KB. Auditando eso salió el resto.
+
+- **`notionApi` doble-encodeaba el body — RESUELTO 2026-07-27 (commit `d0b9789`).** Era la causa real
+  del `400 invalid_json`, y el fix quedó fuera de la primera tanda de cambios: `notionApi` hacía
+  `JSON.stringify(body)` asumiendo que `body` siempre llega como objeto, pero el modelo lo manda como
+  **string con JSON adentro** bastante seguido — y `JSON.stringify('{"a":1}')` produce
+  `"{\"a\":1}"`, un string JSON donde Notion espera un objeto.
+  - **Costó dos turnos reales de Cal el mismo día**, 14 llamadas fallidas entre ambos: el primero
+    murió por agotar los turnos, el segundo respondió sin datos tras 233 s y $1.55.
+  - **Se diagnostica pésimo desde afuera:** el error de Notion dice *"Error parsing JSON body"*, que
+    se lee como "el conector está caído" — Jano de hecho le dijo eso a Cal y le ofreció reintentar
+    más tarde, cosa que nunca hubiera funcionado. Y los `GET` andaban perfecto (no llevan body), así
+    que token, permisos y conectividad daban verde. El modelo reintentó 14 veces variando el
+    *contenido* del body y el endpoint, cuando el problema era la *serialización*.
+  - **Fix:** `serializeBody()` en `tools/notion-cli.ts` — objeto → `stringify`; string que ya es JSON
+    válido → pasa tal cual; string que no es JSON → `stringify` (ahí sí la intención era un literal).
+    7 tests de regresión. Se reforzó además la descripción del tool ("body va como OBJETO, no como
+    string") y se lo apunta a `consultarJson` para queries grandes.
+  - **Verificado end-to-end** contra la Notion real llamando al `dist` compilado con el body string
+    exacto que había mandado el modelo: devuelve filas.
 
 - **SDK actualizado 0.2.122 → 0.3.220.** Estaba 98 versiones atrasado; los comentarios del 0.2.x
   todavía decían `'xhigh' — Opus 4.7 only`, o sea era pre-Opus 5. El upgrade exige
