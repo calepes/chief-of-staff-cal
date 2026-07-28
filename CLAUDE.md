@@ -44,7 +44,7 @@ El watchdog re-setea el webhook solo cada 1 min. Re-set manual de webhook + debu
 
 ## Índice de tools + MCPs
 Implementación y detalle en código (ver "dónde vive qué"). Inventario:
-- **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo).
+- **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo) · **mapaBacklogs/leerBacklog/proponerItemBacklog** (leer y escribir los `BACKLOG.md` de los proyectos de Cal — ver sección "Backlogs de proyectos" abajo).
 
 ### Resumidor (`tools/resumir.ts`) — checkpoint con tarjeta + colas
 Resumidor universal con checkpoint antes de guardar a Readwise. Reusa los scripts del skill `resumir` vía spawn (sin Bash); cookies Safari con `~/.claude/bin/node-fda` (requiere FDA bajo launchd).
@@ -148,6 +148,45 @@ captura cruda de pensamientos con fecha y hora, con puente a **Resonate Calendar
   Queue → un batch que exceda los 30s de `visibility_timeout_ms` podría duplicar filas; el picker de
   Topics no permite crear uno nuevo (`createTopic` existe pero no tiene call site); `Origen: "Sesión
   terapia"` no tiene UI (el modo siempre abre como `Texto`).
+
+## Backlogs de proyectos — agregado 2026-07-28
+
+Tres tools para que Jano lea y escriba los `BACKLOG.md` repartidos por `~/Claude Projects`:
+`mapaBacklogs` (mapa completo con conteos), `leerBacklog` (pendientes de uno) y
+`proponerItemBacklog` (propone agregar/tildar, **no escribe** — manda tarjeta y Cal confirma).
+Spec: `docs/superpowers/specs/2026-07-28-backlog-tool-y-self-learning-design.md`.
+
+- **Descubrimiento en vivo, no allowlist.** `find` cacheado 10 min, profundidad 6, podando
+  `node_modules`, `_archive`, `commands` (contiene slash commands, no backlogs) y `.git`.
+  Hoy da 17 backlogs. Un proyecto nuevo aparece solo.
+- **La seguridad son cuatro invariantes**, no la lista: el modelo pasa una **clave** (nunca ruta) ·
+  `realpathSync` dentro del root · basename exactamente `backlog.md` · destino que sea archivo
+  regular. El `realpath` va ANTES de validar — misma lección que `consultar-json.ts`.
+- **Clave y label salen del PROYECTO, no de la carpeta contenedora.** Pecunia es `pecunia` aunque
+  su backlog viva en `pfm-dashboard/`. Sin esto el mapa mostraba `📋 docs` y `📋 agente`. Dos
+  backlogs del mismo proyecto se desambiguan con la subcarpeta (`inversiones-agente`).
+- **Solo dos escrituras:** append bajo `### Surgió en sesión YYYY-MM-DD` y tildado `[ ]`→`[x]`
+  (falla explícito con 0 o ≥2 coincidencias, nunca adivina). Nunca edición libre. Escritura
+  atómica (temporal + `rename`).
+- **`execFileSync` a propósito**, contra el estándar de `consultar-json.ts`: el `find` real mide
+  **10-70 ms** y pasarlo a async obligaría a volver asíncrona toda la cadena. Timeout **2 s** como
+  techo del peor caso (bajado de 10 s — ese sí congelaría el daemon entero).
+- **`leerBacklog` devuelve vista COMPACTA** (solo `- [ ]`, truncados a 200 chars): el `BACKLOG.md`
+  de Jano son ~30 KB, por encima del umbral de ~25 KB del persisted-output loop del SDK.
+- **Callbacks `bklg:*` son HEAVY** (escriben a disco) con el lock anti-doble-tap de `cf-kv.ts`.
+  Van **arriba del catch-all de "Heavy callbacks legacy"** de `index.ts` — ese bloque agarra
+  cualquier `callback_data` sin prefijo `j:`/`build:` y lo manda al LLM; puesto debajo, el botón
+  sería código muerto. (Ojo: `bklg:` NO empieza con `j:`, así que el bloque que lo tapaba era el
+  legacy, no el `startsWith("j:")`.)
+- **Sin auto-commit** (decisión de Cal): el archivo queda modificado en el working tree.
+- **Emojis de dominio del backlog** (extensión del lexicon de `telegram-bot-ux`): `📝` ítem nuevo ·
+  `📁` proyecto destino · `☑️` marcar hecho · `📋` mapa/listado. Ninguno decorativo.
+- **Gotcha del picker de destino:** con 17 backlogs, una fila por proyecto daría 17 filas contra el
+  máximo de 4 de Telegram (arriba de eso hay stutter en iOS). Se muestran los 6 de más pendientes
+  en 3 filas de 2, más `✍️ Otro proyecto` — el escape SIEMPRE presente (bloque B3 del skill).
+- **`✏️ Editar texto` y `✍️ Otro proyecto` no guardan estado propio:** quitan el teclado y le piden
+  a Cal que escriba; su mensaje va al LLM, que vuelve a llamar `proponerItemBacklog` y nace una
+  tarjeta nueva debajo. Un `pendingEdit` propio sería estado extra que se puede desincronizar.
 
 ## Runtime del SDK — modelo, effort, turnos y sesión (2026-07-27)
 

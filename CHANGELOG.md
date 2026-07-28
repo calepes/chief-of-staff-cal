@@ -1,5 +1,79 @@
 # CHANGELOG — Jano
 
+## 2026-07-28
+
+### Feature — Tools de backlog: Jano lee y escribe los `BACKLOG.md` de los proyectos de Cal
+- **Motivo:** a Cal se le ocurren ideas charlando con Jano por Telegram y no tenía forma de
+  anotarlas — tenía que acordarse y escribirlas después a mano. El pedido ya estaba registrado en
+  el propio `BACKLOG.md` (sesión 2026-07-25) con la duda abierta "¿append-only o edición libre?".
+  Durante el diseño Cal sumó el pedido de ver **el mapa completo, del root al último proyecto**.
+- **Tres tools** (`agent-tools.ts`): `mapaBacklogs` (vista panorámica agrupada por Raíz/Agentes/Apps
+  con conteo de pendientes), `leerBacklog` (pendientes de un proyecto, compactados) y
+  `proponerItemBacklog` (propone agregar o tildar — **no escribe**, manda una tarjeta y Cal
+  confirma con ✅).
+- **Descubrimiento en vivo, no allowlist hardcodeada.** Un `find` cacheado 10 min sobre
+  `~/Claude Projects` (profundidad 6, podando `node_modules`, `_archive`, `commands` y `.git`).
+  Un proyecto nuevo aparece solo. La seguridad no la da una lista sino cuatro invariantes
+  verificados en cada escritura: el modelo pasa una **clave** (nunca una ruta), el `realpathSync`
+  debe caer dentro del root, el basename debe ser exactamente `backlog.md`, y el destino debe ser
+  un archivo regular.
+- **Solo dos escrituras posibles:** append bajo `### Surgió en sesión YYYY-MM-DD` y tildado
+  `[ ]`→`[x]`. Nunca edición libre de líneas — el riesgo de que el modelo reformatee o pierda
+  contenido de un archivo de 287 líneas no vale la flexibilidad (decisión de Cal). Escritura
+  atómica (temporal + `rename`) porque el daemon corre semanas y muere por launchd sin aviso.
+- **Tildado que falla explícito:** con 0 coincidencias avisa que no encontró el ítem; con ≥2 lista
+  los candidatos y pide precisión. Nunca adivina cuál tildar.
+- **Sin auto-commit** (decisión de Cal): el archivo queda modificado en el working tree del
+  proyecto correspondiente.
+
+#### Lo que encontraron los reviews (y no los tests)
+Seis defectos reales que el plan no había capturado, todos verificados con pruebas antes de
+arreglarlos:
+- **Colisiones de clave perdían proyectos en silencio.** Con tres `Agents/Jano` en disco,
+  `discoverBacklogs` devolvía **dos** entradas — la clave ya prefijada no se re-verificaba contra
+  `seen`. Además, quién se quedaba con la clave pelada lo decidía el orden de `readdir` (verificado
+  que NO es alfabético), así que una clave podía pasar a apuntar a otro proyecto tras un cambio en
+  disco, con el mismo label en la tarjeta y sin forma de que Cal lo notara antes de aprobar.
+  **Fix:** orden determinista por profundidad y nombre antes de asignar claves, más bucle hasta
+  clave libre.
+- **`asText(JSON.stringify(x))` cuando `asText` ya serializa** — exactamente el bug de doble-encode
+  de `notionApi` documentado el 2026-07-27, a punto de reintroducirse en `leerBacklog`.
+- **El botón `✏️ Editar texto` estaba muerto:** se emitía, tomaba el lock, se ackeaba, y moría en
+  `if (action !== "save") return;` sin editar la tarjeta ni dejar log. Cal lo tocaba y no pasaba
+  nada. Resuelto con el mismo patrón que el escape del picker de destino (quitar teclado + pedir el
+  texto, que el LLM vuelve a proponer), sin inventar estado tipo `pendingEdit`.
+- **Un directorio llamado `BACKLOG.md`** se descubría como proyecto válido y se devolvía como
+  destino de escritura.
+- **El `find` parseado por `\n` sin `-print0`** podía producir un path relativo, que `realpathSync`
+  resuelve contra el cwd del daemon — y ese cwd vive DENTRO de `~/Claude Projects`.
+- **Nombres de tool cortos en el system prompt.** Con `ToolSearch` activo, `mapaBacklogs` pelado no
+  matchea; hay que usar `mcp__cos-tools__mapaBacklogs`. Es el modo de falla que quemó los 12 turnos
+  del incidente del 2026-07-27.
+
+#### Decisiones de diseño que quedaron escritas
+- **`execFileSync` a propósito.** El módulo cita `consultar-json.ts` como estándar, y ese archivo
+  documenta por qué NO usa llamadas síncronas. Acá se midió el `find` real: **10-70 ms**. Pasarlo a
+  async obligaría a volver asíncrona la cadena entera (resolve, labels, tools, callbacks) por esos
+  70 ms. Se queda síncrono, pero el **timeout bajó de 10 s a 2 s** — lo inaceptable no era el caso
+  normal sino que el peor caso congelara el daemon diez segundos.
+- **Clave y label salen del PROYECTO, no de la carpeta contenedora.** Al bajar a profundidad 6,
+  derivarlos de la carpeta inmediata producía `📋 docs — 3` y `📋 agente — 2` en el mapa, y obligaba
+  al modelo a pedir el backlog de Combustible con la clave `docs`. Ahora Pecunia es `pecunia`
+  (aunque su backlog viva en `pfm-dashboard/`), y dos backlogs del mismo proyecto se desambiguan
+  con la subcarpeta (`inversiones` / `inversiones-agente`).
+- **UX según el skill `telegram-bot-ux`, corrida como checklist y no como referencia.** De ahí
+  salieron: el tope de 6 opciones + escape `✍️` en el picker de destino (una fila por proyecto daba
+  14 filas contra el máximo de 4 de Telegram), cinco emojis nuevos documentados en el lexicon
+  (`📝 📁 ☑️ 🔧 🧹`), y la corrección de cinco textos que estaban en voseo.
+
+- **Archivos nuevos:** `backlog-{types,card,store,callbacks}.ts`,
+  `tools/backlog-{discovery,read,write}.ts`, todos con test.
+- **Modificados:** `agent-tools.ts` (3 tools), `index.ts` (routing `bklg:*` con lock),
+  `system-prompt.ts` (sección "Backlogs de proyectos").
+- **Spec y plan:** `docs/superpowers/specs/2026-07-28-backlog-tool-y-self-learning-design.md` y
+  `docs/superpowers/plans/2026-07-28-backlog-tools.md`.
+- **528 tests en verde**, typecheck limpio.
+
 ## 2026-07-27
 
 ### Feature — Journal de reflexión (terapia): DB Notion + captura por Telegram
