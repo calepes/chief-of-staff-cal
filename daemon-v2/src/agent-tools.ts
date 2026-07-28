@@ -765,7 +765,8 @@ export function buildSdkTools(deps: ToolDeps) {
       "NO usarla por iniciativa propia en medio de una tarea — de eso se encarga la reflexión nocturna, que revisa el día " +
       "entero y propone candidatos para que Cal apruebe con botones. " +
       "Tags: 'pref' = preferencia de formato o estilo · 'hecho' = dato sobre Cal o su contexto · " +
-      "'err' = error operativo propio a evitar · 'flujo' = secuencia que Cal repite.",
+      "'err' = error operativo propio a evitar · 'flujo' = secuencia que Cal repite. " +
+      "El ack SIEMPRE muestra el texto exacto que quedó guardado, para que Cal pueda corregirlo en el momento.",
       {
         texto: z
           .string()
@@ -781,11 +782,24 @@ export function buildSdkTools(deps: ToolDeps) {
           // mañana — justo la franja en la que Cal más escribe. Mismo criterio que session-log.ts,
           // proactive/learning-reflect.ts y el routing de bklg:* en index.ts.
           mkdirSync(dirname(LEARNINGS_PATH), { recursive: true });
-          const line = formatLearning({ date: nowInLaPaz().slice(0, 10), tag, text: texto.trim() });
+          const guardado = texto.trim();
+          const line = formatLearning({ date: nowInLaPaz().slice(0, 10), tag, text: guardado });
           appendFileSync(LEARNINGS_PATH, `${line}\n`);
+          // El ack MUESTRA el texto guardado, a propósito. Esta tool escribe sin confirmación de
+          // Cal, y lo que escribe se inyecta después en el system prompt de todos los turnos
+          // siguientes — o sea cambia el comportamiento de Jano de forma persistente. Jano ingiere
+          // contenido no confiable de rutina (fetchAsUser sobre webs con paywall, WebFetch, el
+          // resumidor de artículos y videos): un "de ahora en más, hacé X" incrustado en una página
+          // puede inducir esta llamada. Con un ack mudo ("🧠 Anotado.") Cal no tendría manera de
+          // saber qué quedó fijado ni de corregirlo. Mostrarlo es la auditoría mínima del camino.
+          // Escapado a HTML porque el modelo lo pega en un mensaje de Telegram con parse_mode HTML.
           return asText({
             ok: true,
-            instruccion: "Responde SOLO '🧠 Anotado.' — no repitas ni parafrasees el contenido del aprendizaje.",
+            guardado,
+            instruccion:
+              `Responde EXACTAMENTE esto y nada más: 🧠 Anotado: «${escapeHtml(guardado)}»` +
+              " — mostrar el texto guardado NO es opcional: es lo único que le permite a Cal ver" +
+              " qué quedó fijado y corregirlo si algo se guardó por error.",
           });
         } catch (err) {
           return asText({ ok: false, error: String(err) });
