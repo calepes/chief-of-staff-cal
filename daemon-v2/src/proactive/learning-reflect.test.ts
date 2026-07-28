@@ -1,6 +1,27 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { reflectDedupKey, runReflection, type ReflectionDeps } from "./learning-reflect.js";
+import { reflectDedupKey, runReflection, SDK_SESSIONS_DIR, type ReflectionDeps } from "./learning-reflect.js";
 import type { LearningCandidate } from "../learning-types.js";
+
+describe("SDK_SESSIONS_DIR", () => {
+  // Guard contra volver a hardcodear el path: el SDK deriva el directorio de sesiones del CWD del
+  // proceso, y el daemon corre con WorkingDirectory = .../Jano/daemon-v2. Hardcodear el root del
+  // repo apuntaba a las sesiones de Claude Code interactivo (transcript vacío, falla silenciosa).
+  it("se deriva del cwd del proceso, no de un path fijo", () => {
+    expect(SDK_SESSIONS_DIR).toBe(
+      join(homedir(), ".claude", "projects", process.cwd().replace(/[^a-zA-Z0-9]/g, "-")),
+    );
+  });
+
+  it("NO apunta al directorio de sesiones interactivas del root del repo", () => {
+    // Ese era el valor hardcodeado que rompía el pase en silencio. Solo puede volver a serlo si
+    // alguien re-hardcodea el path (el daemon nunca corre con el root del repo como cwd).
+    expect(SDK_SESSIONS_DIR).not.toBe(
+      join(homedir(), ".claude", "projects", "-Users-calepes-Claude-Projects-Personal-Agents-Jano"),
+    );
+  });
+});
 
 describe("reflectDedupKey", () => {
   it("usa el día calendario en hora de La Paz, no en UTC", () => {

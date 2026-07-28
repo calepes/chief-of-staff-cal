@@ -8,6 +8,7 @@
 // Mismo patrón que journal-sweep.ts (dedup en KV, misma estructura) — leerlo antes de tocar este.
 
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import cron from "node-cron";
 import { sendMessage } from "@cos/shared";
@@ -22,15 +23,24 @@ import type { Learning, LearningCandidate } from "../learning-types.js";
 import { pruneSessionLog, sessionIdsForDay, SESSION_LOG_PATH } from "../session-log.js";
 
 /**
- * Directorio donde el Agent SDK persiste las sesiones .jsonl DE ESTE repo (uno por proyecto,
- * derivado del path absoluto con "/" -> "-"). Verificado con `ls -d` que existe de verdad —
- * si el path del repo cambia de nombre/ubicación, este directorio también cambia.
+ * Directorio donde el Agent SDK persiste las sesiones .jsonl. El SDK lo deriva del **cwd del
+ * proceso** (cada carácter no alfanumérico -> "-"), NO del root del repo — y el daemon corre con
+ * `WorkingDirectory` = `.../Jano/daemon-v2` (ver el plist), así que sus sesiones viven en
+ * `-Users-...-Agents-Jano-daemon-v2`, no en `-Users-...-Agents-Jano`.
+ *
+ * ⚠️ NO volver a hardcodear este path. Los dos directorios EXISTEN y son cosas distintas:
+ * `-...-Agents-Jano` son las sesiones de Claude Code interactivo sobre el repo (desarrollo) —
+ * justamente las que session-log.ts fue construido para excluir. Apuntar ahí daba un transcript
+ * VACÍO (verificado: 0 chars contra ese dir, 16.461 chars contra el correcto, con un sessionId
+ * real del daemon), y el modo de falla era SILENCIOSO: extractLearnings corta temprano, se loguea
+ * `learning_reflect_empty` y no llega ninguna tarjeta — idéntico a un día en que genuinamente no
+ * hay nada que aprender. Podría pasar semanas sin que nadie lo note.
  */
 export const SDK_SESSIONS_DIR = join(
-  process.env.HOME!,
+  homedir(),
   ".claude",
   "projects",
-  "-Users-calepes-Claude-Projects-Personal-Agents-Jano",
+  process.cwd().replace(/[^a-zA-Z0-9]/g, "-"),
 );
 
 export const LEARNINGS_PATH = join(process.env.HOME!, ".cos-agent", "learnings.md");
