@@ -119,13 +119,40 @@ describe("resolveBacklogPath", () => {
 });
 
 describe("colisión de claves", () => {
-  it("desambigua 3 backlogs con la misma carpeta de proyecto, sin perder ninguno y en forma estable", () => {
-    // A/Agents/Jano, B/Agents/Jano, C/Agents/Jano: mismo nombre de proyecto (Jano) Y mismo
-    // nombre de carpeta padre (Agents) — solo la carpeta ABUELA (A/B/C) los distingue.
+  it("dos backlogs del mismo proyecto: el de la raíz se queda con la clave pelada, el anidado se desambigua con la carpeta contenedora, ninguno se pierde, y es estable entre corridas", () => {
+    // Caso real: Personal/Agents/Inversiones/BACKLOG.md (raíz del proyecto) +
+    // Personal/Agents/Inversiones/docs/agente/backlog.md (anidado) — mismo proyecto
+    // (Inversiones), la carpeta contenedora del anidado ("agente") lo desambigua.
     rmSync(ROOT, { recursive: true, force: true });
-    write("A/Agents/Jano/BACKLOG.md");
-    write("B/Agents/Jano/BACKLOG.md");
-    write("C/Agents/Jano/BACKLOG.md");
+    write("Personal/Agents/Inversiones/BACKLOG.md");
+    write("Personal/Agents/Inversiones/docs/agente/backlog.md");
+    clearBacklogCache();
+
+    const run1 = discoverBacklogs(ROOT);
+    const keys1 = run1.map((e) => e.key).sort();
+    clearBacklogCache();
+    const run2 = discoverBacklogs(ROOT);
+    const keys2 = run2.map((e) => e.key).sort();
+
+    expect(keys1).toHaveLength(2);
+    expect(new Set(keys1).size).toBe(2);
+    expect(keys1).toEqual(keys2);
+
+    const byKey = new Map(run1.map((e) => [e.key, e]));
+    expect(byKey.get("inversiones")?.path.endsWith("Inversiones/BACKLOG.md")).toBe(true);
+    expect(byKey.get("inversiones")?.label).toBe("Inversiones");
+    const nested = byKey.get("inversiones-agente");
+    expect(nested?.path.endsWith("Inversiones/docs/agente/backlog.md")).toBe(true);
+    expect(nested?.label).toBe("Inversiones · agente");
+  });
+
+  it("si la carpeta contenedora TAMBIÉN colisiona, cae al sufijo numérico — sin perder ninguna entrada", () => {
+    // Zeta tiene 3 backlogs: uno en la raíz del proyecto (clave pelada) y dos anidados bajo
+    // carpetas distintas que ambas se llaman "docs" — ambos colisionarían en "zeta-docs".
+    rmSync(ROOT, { recursive: true, force: true });
+    write("Personal/Agents/Zeta/BACKLOG.md");
+    write("Personal/Agents/Zeta/modulo1/docs/BACKLOG.md");
+    write("Personal/Agents/Zeta/modulo2/docs/BACKLOG.md");
     clearBacklogCache();
 
     const run1 = discoverBacklogs(ROOT).map((e) => e.key).sort();
@@ -135,6 +162,7 @@ describe("colisión de claves", () => {
     expect(run1).toHaveLength(3);
     expect(new Set(run1).size).toBe(3);
     expect(run1).toEqual(run2);
+    expect(run1).toEqual(["zeta", "zeta-docs", "zeta-docs-2"]);
   });
 
   it("descarta líneas de find rotas por saltos de línea en nombres de carpeta (path relativo)", () => {
@@ -154,14 +182,20 @@ describe("colisión de claves", () => {
 });
 
 describe("discoverBacklogs — profundidad y poda (maxdepth 6)", () => {
-  it("descubre un backlog anidado a profundidad 5-6 (ej. Pecunia/pfm-dashboard, Combustible/repo/docs)", () => {
+  it("un backlog anidado profundo deriva la clave y el label del PROYECTO, no de la carpeta contenedora", () => {
     write("Personal/Agents/Pecunia/pfm-dashboard/BACKLOG.md"); // profundidad 5
     write("Personal/Apps/Combustible/repo/docs/BACKLOG.md"); // profundidad 6
     clearBacklogCache();
 
-    const keys = discoverBacklogs(ROOT).map((e) => e.key);
-    expect(keys).toContain("pfm-dashboard");
-    expect(keys).toContain("docs");
+    const byKey = new Map(discoverBacklogs(ROOT).map((e) => [e.key, e]));
+    expect(byKey.has("pfm-dashboard")).toBe(false);
+    expect(byKey.has("docs")).toBe(false);
+
+    expect(byKey.get("pecunia")?.label).toBe("Pecunia");
+    expect(byKey.get("pecunia")?.path.endsWith("Pecunia/pfm-dashboard/BACKLOG.md")).toBe(true);
+
+    expect(byKey.get("combustible")?.label).toBe("Combustible");
+    expect(byKey.get("combustible")?.path.endsWith("Combustible/repo/docs/BACKLOG.md")).toBe(true);
   });
 
   it("NO descubre un backlog bajo commands/ (slash commands de Claude Code, no backlogs de proyecto)", () => {

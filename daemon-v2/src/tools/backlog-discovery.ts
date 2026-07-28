@@ -72,35 +72,62 @@ function groupFor(relDir: string): string {
   return "Otros";
 }
 
+/**
+ * El PROYECTO es el primer segmento significativo del path relativo al root — no la carpeta
+ * inmediata que contiene el BACKLOG.md (esa puede ser cualquier cosa, "docs", "repo", el nombre
+ * de un dashboard interno, etc., una vez que el find bajó a maxdepth 6). Reglas:
+ *   - `Personal/Agents/X/...` → proyecto X
+ *   - `Personal/Apps/X/...`   → proyecto X
+ *   - `X/...` (cualquier otra carpeta de primer nivel, ej. "Claude Code Setup") → proyecto X
+ */
+function projectNameFor(relDir: string): string {
+  const parts = relDir.split(sep);
+  if (parts[0] === "Personal" && (parts[1] === "Agents" || parts[1] === "Apps") && parts.length >= 3) {
+    return parts[2];
+  }
+  return parts[0];
+}
+
 function entryFor(path: string, root: string): BacklogEntry {
   const relDir = relative(root, dirname(path));
-  const folder = relDir === "" || relDir === "." ? "General" : basename(dirname(path));
+  if (relDir === "" || relDir === ".") {
+    return { key: "claude-projects", path, label: "General", group: "Raíz" };
+  }
+  const project = projectNameFor(relDir);
   return {
-    key: relDir === "" || relDir === "." ? "claude-projects" : deriveKey(folder),
+    key: deriveKey(project),
     path,
-    label: folder,
+    label: project,
     group: groupFor(relDir),
   };
 }
 
 /**
- * Encuentra una clave libre para `entry.key`, sin descartar nunca una entrada por colisión.
- * Orden de intento: (1) la clave pelada, (2) prefijada con la carpeta ABUELA del archivo — dos
- * niveles arriba del BACKLOG.md, porque la carpeta PADRE (ej. "Agents") suele repetirse entre
- * proyectos distintos y no alcanza para desambiguar (verificado: A/Agents/Jano, B/Agents/Jano y
- * C/Agents/Jano comparten el mismo padre "Agents" pero no la misma abuela "A"/"B"/"C") —,
- * (3) sufijos numéricos si hasta el prefijo de abuela colisiona.
+ * Encuentra clave y label libres para una entrada cuya clave de proyecto ya está tomada, sin
+ * descartar nunca una entrada por colisión. Como los paths se procesan ordenados por profundidad
+ * (ver `discoverBacklogs`), el backlog menos profundo de un proyecto ya se quedó con la clave
+ * pelada antes de llegar acá — esta función solo corre para los que llegan después.
+ * Orden de intento: (1) la clave pelada + " · carpeta contenedora" (la carpeta que contiene
+ * directamente el BACKLOG.md, ej. "agente" en Inversiones/docs/agente/backlog.md — es la que
+ * distingue de verdad entre dos backlogs del MISMO proyecto), (2) sufijos numéricos si hasta esa
+ * carpeta contenedora colisiona (ej. dos módulos que ambos anidan un "docs/BACKLOG.md").
  */
-function pickFreeKey(path: string, baseKey: string, seen: Map<string, BacklogEntry>): string {
-  if (!seen.has(baseKey)) return baseKey;
+function pickFreeKey(
+  path: string,
+  baseKey: string,
+  baseLabel: string,
+  seen: Map<string, BacklogEntry>,
+): { key: string; label: string } {
+  if (!seen.has(baseKey)) return { key: baseKey, label: baseLabel };
 
-  const grandparent = basename(dirname(dirname(dirname(path))));
-  const prefixed = `${deriveKey(grandparent)}-${baseKey}`;
-  if (!seen.has(prefixed)) return prefixed;
+  const containingFolder = basename(dirname(path));
+  const prefixedKey = `${baseKey}-${deriveKey(containingFolder)}`;
+  const prefixedLabel = `${baseLabel} · ${containingFolder}`;
+  if (!seen.has(prefixedKey)) return { key: prefixedKey, label: prefixedLabel };
 
   let n = 2;
-  while (seen.has(`${prefixed}-${n}`)) n++;
-  return `${prefixed}-${n}`;
+  while (seen.has(`${prefixedKey}-${n}`)) n++;
+  return { key: `${prefixedKey}-${n}`, label: `${prefixedLabel} (${n})` };
 }
 
 /**
@@ -161,18 +188,28 @@ export function discoverBacklogs(root: string = BACKLOG_ROOT, now: number = Date
     paths.push(path);
   }
 
-  // Orden determinista por nombre ANTES de asignar claves. El orden en que `find` (y por debajo,
-  // `readdir`) devuelve las entradas NO es alfabético (verificado: devolvió "zeta, mike, yankee,
-  // alpha, bravo" en una corrida real) — el `.sort()` de más abajo se aplicaba DESPUÉS de asignar
-  // claves, así que no estabilizaba nada: si el orden de `find` flipeaba entre corridas, una
-  // clave podía pasar a apuntar a otro proyecto sin que nada lo avisara.
-  paths.sort();
+  // Orden determinista ANTES de asignar claves: primero por PROFUNDIDAD y recién como desempate
+  // por nombre. El orden en que `find` (y por debajo, `readdir`) devuelve las entradas NO es
+  // alfabético (verificado: devolvió "zeta, mike, yankee, alpha, bravo" en una corrida real), así
+  // que sin ordenar antes de asignar, una clave podía pasar a apuntar a otro proyecto entre
+  // corridas sin que nada lo avisara. El criterio de profundidad importa además por diseño: dos
+  // backlogs del mismo proyecto (ej. Inversiones en la raíz + Inversiones/docs/agente) deben
+  // asignarse en orden "menos profundo primero" para que el backlog PRINCIPAL del proyecto —
+  // el que está más arriba en el árbol — se quede con la clave pelada, y el anidado sea el que
+  // se desambigua en `pickFreeKey`.
+  paths.sort((a, b) => {
+    const depthA = a.split(sep).length;
+    const depthB = b.split(sep).length;
+    return depthA !== depthB ? depthA - depthB : a.localeCompare(b);
+  });
 
   const seen = new Map<string, BacklogEntry>();
   for (const path of paths) {
     const entry = entryFor(path, root);
     if (!entry.key) continue;
-    entry.key = pickFreeKey(path, entry.key, seen);
+    const { key, label } = pickFreeKey(path, entry.key, entry.label, seen);
+    entry.key = key;
+    entry.label = label;
     seen.set(entry.key, entry);
   }
 
