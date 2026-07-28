@@ -152,3 +152,40 @@ describe("colisión de claves", () => {
     }
   });
 });
+
+describe("discoverBacklogs — profundidad y poda (maxdepth 6)", () => {
+  it("descubre un backlog anidado a profundidad 5-6 (ej. Pecunia/pfm-dashboard, Combustible/repo/docs)", () => {
+    write("Personal/Agents/Pecunia/pfm-dashboard/BACKLOG.md"); // profundidad 5
+    write("Personal/Apps/Combustible/repo/docs/BACKLOG.md"); // profundidad 6
+    clearBacklogCache();
+
+    const keys = discoverBacklogs(ROOT).map((e) => e.key);
+    expect(keys).toContain("pfm-dashboard");
+    expect(keys).toContain("docs");
+  });
+
+  it("NO descubre un backlog bajo commands/ (slash commands de Claude Code, no backlogs de proyecto)", () => {
+    write("Personal/Agents/Jano/commands/backlog.md");
+    clearBacklogCache();
+
+    const paths = discoverBacklogs(ROOT).map((e) => e.path);
+    expect(paths.some((p) => p.includes(`${sep}commands${sep}`))).toBe(false);
+  });
+
+  it("NO descubre un backlog bajo _archive/ (proyectos dados de baja)", () => {
+    write("Personal/Apps/_archive/Pulse/BACKLOG.md");
+    clearBacklogCache();
+
+    const paths = discoverBacklogs(ROOT).map((e) => e.path);
+    expect(paths.some((p) => p.includes(`${sep}_archive${sep}`))).toBe(false);
+  });
+
+  it("sigue sin descubrir nada bajo node_modules/ con el maxdepth ampliado", () => {
+    mkdirSync(join(ROOT, "node_modules", "algo", "mas", "profundo"), { recursive: true });
+    write("node_modules/algo/mas/profundo/BACKLOG.md");
+    clearBacklogCache();
+
+    const paths = discoverBacklogs(ROOT).map((e) => e.path);
+    expect(paths.some((p) => p.includes(`${sep}node_modules${sep}`))).toBe(false);
+  });
+});

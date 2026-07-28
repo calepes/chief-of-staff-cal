@@ -21,6 +21,23 @@
 // tarda segundos, no milisegundos. Lo inaceptable es el PEOR caso (disco lento, `find` que no
 // vuelve) congelando el daemon entero 10s — por eso el timeout bajó de 10_000 a 2_000ms: es el
 // techo del peor caso, no una estimación del tiempo esperado.
+//
+// maxdepth 6, no 4 (2026-07-28): con 4 quedaban afuera backlogs reales anidados un par de
+// carpetas más abajo del proyecto (ej. Personal/Agents/Pecunia/pfm-dashboard/BACKLOG.md o
+// Personal/Apps/Combustible/repo/docs/BACKLOG.md). Subir el maxdepth a secas trae basura a esa
+// profundidad, así que además de `node_modules` (ya podado) se podan tres carpetas más:
+//   - `commands/` — son slash commands de Claude Code (`.claude`-style, ej.
+//     Personal/Agents/Jano/commands/backlog.md), no backlogs de ningún proyecto.
+//   - `_archive/` — proyectos dados de baja (ej. Personal/Apps/_archive/Pulse/BACKLOG.md); su
+//     backlog ya no es accionable.
+//   - `.git/` — puede contener blobs/refs con nombres que calcen el patrón por casualidad; nunca
+//     es contenido de proyecto.
+// El prune de varios nombres en un solo `find` va con la expresión `( -name a -o -name b -o
+// -name c ) -prune -o ...`: los paréntesis agrupan el OR de nombres ANTES de aplicarle `-prune`,
+// para que se pode cualquiera de los cuatro y no solo el último. Los paréntesis se pasan como
+// argumentos SUELTOS del array (sin backslash): no hay shell de por medio (execFileSync llama al
+// binario directo), así que no hace falta escaparlos como en un `find` tipeado a mano en una
+// terminal.
 
 import { execFileSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
@@ -97,7 +114,29 @@ export function discoverBacklogs(root: string = BACKLOG_ROOT, now: number = Date
   try {
     out = execFileSync(
       "/usr/bin/find",
-      [root, "-maxdepth", "4", "-name", "node_modules", "-prune", "-o", "-iname", "backlog.md", "-print"],
+      [
+        root,
+        "-maxdepth",
+        "6",
+        "(",
+        "-name",
+        "node_modules",
+        "-o",
+        "-name",
+        "_archive",
+        "-o",
+        "-name",
+        "commands",
+        "-o",
+        "-name",
+        ".git",
+        ")",
+        "-prune",
+        "-o",
+        "-iname",
+        "backlog.md",
+        "-print",
+      ],
       { encoding: "utf8", timeout: 2_000, maxBuffer: 4 * 1024 * 1024 },
     );
   } catch {
