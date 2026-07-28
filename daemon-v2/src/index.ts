@@ -636,8 +636,12 @@ async function processMessage(
       }
       await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
 
-      // Fire-and-forget: el poll loop del daemon es estrictamente secuencial y awaitear acá
-      // congelaría todos los chats mientras se escribe el archivo.
+      // Fire-and-forget, mismo patrón que jnl:* y resu-pick:. OJO con el alcance real: lo único
+      // que este `void` desacopla son los edits de Telegram. El trabajo de disco de
+      // handleBacklogCallback es SÍNCRONO (execFileSync del find, readFileSync por backlog,
+      // writeFileSync+renameSync al guardar) y bloquea el event loop igual — hoy es inofensivo
+      // (cache hit ~0 ms, 10-70 ms en miss, timeout duro de 2s en el find), pero si el árbol
+      // crece no hay que apoyarse en este `void` como si protegiera de eso.
       void handleBacklogCallback(
         {
           store: backlogStore,

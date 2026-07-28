@@ -760,7 +760,13 @@ export function buildSdkTools(deps: ToolDeps) {
       "'qué hay en los backlogs', o quiera una vista general antes de bajar a uno concreto. " +
       "Devuelve texto ya formateado para Telegram: mándalo TAL CUAL, no lo reescribas.",
       {},
-      async () => asText(renderBacklogMap(buildBacklogMap(discoverBacklogs())).text),
+      // Texto CRUDO, no asText: el card ya viene renderizado en HTML de Telegram y asText lo
+      // pasaría por JSON.stringify, dejando los saltos de línea escapados como "\\n" — el modelo
+      // tendría que desescaparlo a mano para cumplir el "mándalo TAL CUAL". Mismo patrón que
+      // executeClings/executeRemctl, que también devuelven texto ya formateado.
+      async () => ({
+        content: [{ type: "text" as const, text: renderBacklogMap(buildBacklogMap(discoverBacklogs())).text }],
+      }),
       READ_ONLY,
     ),
     tool(
