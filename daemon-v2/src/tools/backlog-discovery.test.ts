@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { discoverBacklogs, deriveKey, resolveBacklogPath, clearBacklogCache } from "./backlog-discovery.js";
 
 const ROOT = join(tmpdir(), "jano-test-backlog-discovery");
@@ -94,5 +94,61 @@ describe("resolveBacklogPath", () => {
     symlinkSync(join(outside, "BACKLOG.md"), join(ROOT, "Personal/Agents/Fuga/BACKLOG.md"));
     expect(() => resolveBacklogPath("fuga", ROOT)).toThrow(/fuera del árbol/i);
     rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("rechaza un symlink DENTRO del root cuyo destino real no es backlog.md (invariante 3)", () => {
+    mkdirSync(join(ROOT, "Personal/Agents/Trampa"), { recursive: true });
+    writeFileSync(join(ROOT, "Personal/Agents/Trampa/nota.md"), "# no es un backlog\n");
+    symlinkSync(join(ROOT, "Personal/Agents/Trampa/nota.md"), join(ROOT, "Personal/Agents/Trampa/BACKLOG.md"));
+    clearBacklogCache();
+    expect(() => resolveBacklogPath("trampa", ROOT)).toThrow(/no apunta a un backlog\.md/i);
+  });
+
+  it("rechaza un directorio llamado BACKLOG.md (no es un archivo regular)", () => {
+    mkdirSync(join(ROOT, "Personal/Agents/CarpetaTrampa/BACKLOG.md"), { recursive: true });
+    clearBacklogCache();
+    expect(() => resolveBacklogPath("carpetatrampa", ROOT)).toThrow(/no es un archivo/i);
+  });
+
+  it("da un mensaje entendible si el backlog desapareció del disco (symlink roto)", () => {
+    mkdirSync(join(ROOT, "Personal/Agents/Roto"), { recursive: true });
+    symlinkSync(join(ROOT, "Personal/Agents/Roto/no-existe.md"), join(ROOT, "Personal/Agents/Roto/BACKLOG.md"));
+    clearBacklogCache();
+    expect(() => resolveBacklogPath("roto", ROOT)).toThrow(/no pude leer/i);
+  });
+});
+
+describe("colisión de claves", () => {
+  it("desambigua 3 backlogs con la misma carpeta de proyecto, sin perder ninguno y en forma estable", () => {
+    // A/Agents/Jano, B/Agents/Jano, C/Agents/Jano: mismo nombre de proyecto (Jano) Y mismo
+    // nombre de carpeta padre (Agents) — solo la carpeta ABUELA (A/B/C) los distingue.
+    rmSync(ROOT, { recursive: true, force: true });
+    write("A/Agents/Jano/BACKLOG.md");
+    write("B/Agents/Jano/BACKLOG.md");
+    write("C/Agents/Jano/BACKLOG.md");
+    clearBacklogCache();
+
+    const run1 = discoverBacklogs(ROOT).map((e) => e.key).sort();
+    clearBacklogCache();
+    const run2 = discoverBacklogs(ROOT).map((e) => e.key).sort();
+
+    expect(run1).toHaveLength(3);
+    expect(new Set(run1).size).toBe(3);
+    expect(run1).toEqual(run2);
+  });
+
+  it("descarta líneas de find rotas por saltos de línea en nombres de carpeta (path relativo)", () => {
+    const weird = "Raro\nturbado";
+    try {
+      mkdirSync(join(ROOT, weird), { recursive: true });
+    } catch {
+      return; // el filesystem del entorno de test no soporta el nombre; no aplica.
+    }
+    writeFileSync(join(ROOT, weird, "BACKLOG.md"), "# x\n");
+    clearBacklogCache();
+    const entries = discoverBacklogs(ROOT);
+    for (const e of entries) {
+      expect(e.path === ROOT || e.path.startsWith(ROOT + sep)).toBe(true);
+    }
   });
 });
