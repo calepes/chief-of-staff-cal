@@ -760,8 +760,7 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "recordarAprendizaje",
-      "Guarda YA un aprendizaje que Cal pidió explícitamente recordar (se escribe en ~/.cos-agent/learnings.md " +
-      "y entra en el system prompt de todos los turnos siguientes). " +
+      "Guarda YA un aprendizaje que Cal pidió explícitamente recordar (se apenda a ~/.cos-agent/learnings.md). " +
       "Usar SOLO cuando Cal lo pida explícito: 'recuerda que...', 'acuérdate de...', 'de ahora en más...', 'no vuelvas a...'. " +
       "NO usarla por iniciativa propia en medio de una tarea — de eso se encarga la reflexión nocturna, que revisa el día " +
       "entero y propone candidatos para que Cal apruebe con botones. " +

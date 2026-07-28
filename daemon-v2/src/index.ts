@@ -31,6 +31,9 @@ import { renderModeClosed, renderModeOpen } from "./journal-card.js";
 import { checkJournalSweep } from "./proactive/journal-sweep.js";
 import { isBacklogCallback, handleBacklogCallback } from "./backlog-callbacks.js";
 import { BacklogStore } from "./backlog-store.js";
+import { isLearningCallback, handleLearningCallback } from "./learning-callbacks.js";
+import { LearningStore } from "./learning-store.js";
+import { scheduleLearningReflect, LEARNINGS_PATH } from "./proactive/learning-reflect.js";
 import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
@@ -87,7 +90,8 @@ const env = {
 delete process.env.ANTHROPIC_API_KEY;
 
 const HEARTBEAT_PATH = `${process.env.HOME}/.cos-agent/heartbeat`;
-const LEARNINGS_PATH = `${process.env.HOME}/.cos-agent/learnings.md`;
+// LEARNINGS_PATH ya no se declara acá: viene de proactive/learning-reflect.js (mismo path), para
+// que el pase nocturno, los callbacks lrn:* y la inyección en el system prompt no puedan divergir.
 const ALERT_CHAT_ID = 94137698;
 const ALERT_THRESHOLD = 3;
 const BACKOFF_MAX_MS = 120_000;
@@ -181,6 +185,7 @@ const cookieJarKv = new CfKv({
 const state = new ConversationState(kv, compactHistory);
 const journalStore = new JournalStore(kv);
 const backlogStore = new BacklogStore(kv);
+const learningStore = new LearningStore(kv);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
 // (ej. checkPlaylistsResumir/checkStarredResumir, que disparan un flujo fire-and-forget
@@ -673,6 +678,59 @@ async function processMessage(
       )
         .catch((err) => log({ msg: "backlog_callback_error", err: String(err) }))
         .finally(() => releaseLock(kv, bchat, lockUserId).catch(() => {}));
+      return;
+    }
+
+    // Callbacks del self-learning (lrn:*) → mecánicos, sin LLM: son los botones de la tarjeta que
+    // manda el pase nocturno de reflexión. Escriben a disco (~/.cos-agent/learnings.md) y mutan el
+    // batch en KV, así que llevan el mismo lock anti-doble-tap que jnl:*/bklg:*.
+    // Va ARRIBA del catch-all de "Heavy callbacks legacy" más abajo, que se traga cualquier
+    // callback_data sin prefijo `j:`/`build:` y se lo manda al LLM como mensaje sintético. Puesto
+    // debajo de ese, `lrn:*` sería código muerto SIN dejar rastro en logs (mismo motivo por el que
+    // `bklg:*` y `j:journal` están donde están).
+    if (isLearningCallback(cb.data)) {
+      const lchat = cb.message.chat.id;
+      const lanchor = cb.message.message_id;
+      const lockUserId = cb.from.id;
+
+      const acquired = await tryAcquireLock(kv, lchat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+
+      // Fire-and-forget, mismo patrón que jnl:*/bklg:*: el poll loop del daemon es estrictamente
+      // secuencial, y awaitear acá congelaría todos los chats mientras se editan las tarjetas.
+      void handleLearningCallback(
+        {
+          store: learningStore,
+          learningsPath: LEARNINGS_PATH,
+          // Hora de La Paz (UTC-4, sin horario de verano), no UTC: entre las 20:00 y las 23:59 hora
+          // de Cal, `new Date().toISOString()` ya cae en el día siguiente y el learning quedaría
+          // fechado "mañana". Misma solución que el bloque bklg:* de arriba.
+          today: () => nowInLaPaz().slice(0, 10),
+          log,
+          editCard: async (messageId, card) => {
+            // El teclado va SIEMPRE explícito: editMessageText no limpia reply_markup si se omite
+            // (gotcha de Telegram documentado en CLAUDE.md), y las tarjetas terminales quedarían
+            // con sus botones vivos sobre un mensaje que ya dice otra cosa.
+            await editMessage(
+              env.COS_TELEGRAM_BOT_TOKEN,
+              lchat,
+              messageId,
+              card.text,
+              "HTML",
+              card.keyboard ?? { inline_keyboard: [] },
+            ).catch((err) => log({ msg: "learning_edit_failed", err: String(err) }));
+          },
+        },
+        lchat,
+        lanchor,
+        cb.data!,
+      )
+        .catch((err) => log({ msg: "learning_callback_error", err: String(err) }))
+        .finally(() => releaseLock(kv, lchat, lockUserId).catch(() => {}));
       return;
     }
 
@@ -1387,6 +1445,25 @@ function scheduleJournalSweep(): void {
   log({ msg: "journal_sweep_scheduled", interval: "sundays 19:00" });
 }
 
+function scheduleLearningReflectLocal(): void {
+  // Todos los días 22:00 hora La Paz. QUINTA excepción a la arquitectura reactiva de Jano
+  // (junto a health-sync-check, kpi-ingest-check, journal-sweep y daily-note-check —
+  // ver CLAUDE.md, "Automatización — dos capas"). Una sola llamada a Haiku por día: lee las
+  // sesiones del día, propone candidatos de aprendizaje y Cal aprueba con botones (lrn:*).
+  // Reemplaza el mecanismo viejo, que le pedía al modelo llamar addLearning en medio del turno
+  // (4 entries en 3 meses — la reflexión in-turn compite con la tarea y pierde).
+  //
+  // El cron (expresión, timezone y log) vive en proactive/learning-reflect.ts, NO duplicado acá:
+  // dos definiciones del mismo schedule divergen. Mismo patrón que scheduleFocoCheckinsLocal,
+  // que envuelve el scheduleFocoCheckins exportado por su módulo.
+  scheduleLearningReflect({
+    kv,
+    botToken: env.COS_TELEGRAM_BOT_TOKEN,
+    chatId: ALERT_CHAT_ID,
+    log,
+  });
+}
+
 function scheduleHealthSyncCheck(): void {
   cron.schedule("0,30 7-22 * * *", () => {
     void checkHealthSync({
@@ -1494,6 +1571,7 @@ async function loop(): Promise<void> {
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
   scheduleJournalSweep();
+  scheduleLearningReflectLocal();
   // Tarjeta diaria de KPIs Yape (TRX + Activos DAU) — YA NO tiene cron propio (era 10:00 fijo,
   // sacado 2026-07-24 a pedido de Cal). Se dispara desde dentro de scheduleKpiIngestCheck()
   // (pipeline PDF, kpi-ingest-check.ts) apenas ese mail se procesa con éxito — la tarjeta solo
