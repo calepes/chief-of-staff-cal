@@ -53,6 +53,18 @@ const BACKLOG_BASENAME_RE = /^backlog\.md$/i;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 let cache: { at: number; root: string; entries: BacklogEntry[] } | null = null;
 
+/**
+ * TTL corto y DISTINTO del de arriba para el fallo del find (disco lento, timeout, ENOENT del
+ * root). Sin esto, mientras el find falle cada tool call y cada callback vuelve a pagar los
+ * hasta 2s del timeout — y un callback `save` llama `discoverBacklogs` dos veces
+ * (`resolveBacklogPath` + `labelFor`), o sea hasta 4s de congelamiento del daemon entero (poll
+ * loop de todos los chats, watchdog del webhook, los 4 crons proactivos) por CADA llamada. 45s
+ * (banda 30-60s pedida) es corto para que se recupere rápido cuando el disco vuelva, pero
+ * suficiente para no repetir el find en ráfagas de llamadas del mismo turno/callback.
+ */
+const FAIL_CACHE_TTL_MS = 45 * 1000;
+let failCache: { at: number; root: string } | null = null;
+
 /** "Aeropuertos Bolivia" → "aeropuertos-bolivia" */
 export function deriveKey(folderName: string): string {
   return folderName
@@ -137,6 +149,13 @@ function pickFreeKey(
 export function discoverBacklogs(root: string = BACKLOG_ROOT, now: number = Date.now()): BacklogEntry[] {
   if (cache && cache.root === root && now - cache.at < CACHE_TTL_MS) return cache.entries;
 
+  // Fallo reciente cacheado: no reintentar el find todavía (ver comentario de FAIL_CACHE_TTL_MS
+  // arriba). Se chequea DESPUÉS del cache de éxito (un éxito siempre gana) y ANTES de tocar el
+  // disco — es exactamente el costo que este fix quiere evitar.
+  if (failCache && failCache.root === root && now - failCache.at < FAIL_CACHE_TTL_MS) {
+    return cache?.root === root ? cache.entries : [];
+  }
+
   let out = "";
   try {
     out = execFileSync(
@@ -167,6 +186,7 @@ export function discoverBacklogs(root: string = BACKLOG_ROOT, now: number = Date
       { encoding: "utf8", timeout: 2_000, maxBuffer: 4 * 1024 * 1024 },
     );
   } catch {
+    failCache = { at: now, root };
     // El cache de OTRO root no sirve de fallback acá: son árboles distintos, y devolver paths
     // de rootA cuando se pidió rootB sería peor que devolver una lista vacía.
     return cache?.root === root ? cache.entries : [];
@@ -215,12 +235,16 @@ export function discoverBacklogs(root: string = BACKLOG_ROOT, now: number = Date
 
   const entries = [...seen.values()].sort((a, b) => a.key.localeCompare(b.key));
   cache = { at: now, root, entries };
+  // Un find exitoso deja atrás cualquier fallo anterior — no tiene sentido seguir "protegiendo"
+  // al disco de un find que se acaba de demostrar que anda bien.
+  failCache = null;
   return entries;
 }
 
-/** Solo para tests: invalida el cache entre casos. */
+/** Solo para tests: invalida el cache (éxito y fallo) entre casos. */
 export function clearBacklogCache(): void {
   cache = null;
+  failCache = null;
 }
 
 /**

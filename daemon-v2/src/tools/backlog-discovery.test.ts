@@ -1,8 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { discoverBacklogs, deriveKey, resolveBacklogPath, clearBacklogCache } from "./backlog-discovery.js";
+
+// Se mockea con la implementación REAL de default (via importOriginal) para que el resto de los
+// tests de este archivo sigan usando el `find` real sobre el filesystem de prueba — solo los
+// tests de "cache de fallos" (W5, abajo) pisan el mock puntualmente con mockImplementationOnce
+// para simular que el find falla, sin depender de condiciones de disco reales.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
 
 const ROOT = join(tmpdir(), "jano-test-backlog-discovery");
 
@@ -221,5 +231,43 @@ describe("discoverBacklogs — profundidad y poda (maxdepth 6)", () => {
 
     const paths = discoverBacklogs(ROOT).map((e) => e.path);
     expect(paths.some((p) => p.includes(`${sep}node_modules${sep}`))).toBe(false);
+  });
+});
+
+describe("discoverBacklogs — cache de fallos del find (W5)", () => {
+  it("dos llamadas seguidas con el find fallando no ejecutan el find dos veces", () => {
+    clearBacklogCache();
+    const mockExec = vi.mocked(execFileSync);
+    mockExec.mockClear();
+    mockExec.mockImplementationOnce(() => {
+      throw new Error("find: boom");
+    });
+
+    const now = 1_000_000;
+    const first = discoverBacklogs(ROOT, now);
+    // 1s después, bien dentro del TTL corto del fallo (45s) — no debería tocar el find de nuevo.
+    const second = discoverBacklogs(ROOT, now + 1_000);
+
+    expect(first).toEqual([]);
+    expect(second).toEqual([]);
+    expect(mockExec).toHaveBeenCalledTimes(1);
+  });
+
+  it("pasado el TTL corto del fallo, reintenta el find", () => {
+    clearBacklogCache();
+    const mockExec = vi.mocked(execFileSync);
+    mockExec.mockClear();
+    mockExec.mockImplementationOnce(() => {
+      throw new Error("find: boom");
+    });
+
+    const now = 2_000_000;
+    discoverBacklogs(ROOT, now);
+    // 60s después, pasado el TTL corto de 45s — sí debería reintentar (y esta vez el find real
+    // sobre el ROOT de prueba, ya armado en beforeEach, funciona).
+    const recovered = discoverBacklogs(ROOT, now + 60_000);
+
+    expect(mockExec).toHaveBeenCalledTimes(2);
+    expect(recovered.length).toBeGreaterThan(0);
   });
 });
