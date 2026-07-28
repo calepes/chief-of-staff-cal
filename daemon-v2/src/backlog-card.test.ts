@@ -44,8 +44,20 @@ describe("renderAddProposal", () => {
     expect(datas).toEqual([
       "bklg:save:abc123",
       "bklg:edit:abc123",
-      "bklg:dest:abc123",
       "bklg:drop:abc123",
+      "bklg:dest:abc123",
+    ]);
+  });
+
+  it("respeta el layout del skill telegram-bot-ux: primaria sola, cambiar-proyecto sola, editar+descartar juntas", () => {
+    const kb = renderAddProposal("Jano", "Tool nueva", "abc123").keyboard.inline_keyboard;
+    expect(kb).toEqual([
+      [{ text: "✅ Guardar", callback_data: "bklg:save:abc123" }],
+      [
+        { text: "✏️ Editar texto", callback_data: "bklg:edit:abc123" },
+        { text: "❌ Descartar", callback_data: "bklg:drop:abc123" },
+      ],
+      [{ text: "📁 Cambiar proyecto", callback_data: "bklg:dest:abc123" }],
     ]);
   });
 
@@ -69,6 +81,44 @@ describe("renderDoneProposal", () => {
     expect(card.text).toContain("Ítem viejo");
     const datas = card.keyboard.inline_keyboard.flat().map((b) => b.callback_data);
     expect(datas).toEqual(["bklg:save:abc123", "bklg:drop:abc123"]);
+  });
+
+  it("Confirmar y Descartar van cada una en su propia fila (no son un binario ≤8 chars)", () => {
+    const kb = renderDoneProposal("Jano", "Ítem viejo", "abc123").keyboard.inline_keyboard;
+    expect(kb).toEqual([
+      [{ text: "✅ Confirmar", callback_data: "bklg:save:abc123" }],
+      [{ text: "❌ Descartar", callback_data: "bklg:drop:abc123" }],
+    ]);
+  });
+});
+
+describe("layout del skill telegram-bot-ux: ningún botón de más de 15 chars comparte fila", () => {
+  it("en renderAddProposal", () => {
+    const kb = renderAddProposal("Jano", "Tool nueva", "abc123").keyboard.inline_keyboard;
+    for (const fila of kb) {
+      if (fila.some((b) => b.text.length > 15)) expect(fila.length).toBe(1);
+    }
+  });
+
+  it("en renderDoneProposal", () => {
+    const kb = renderDoneProposal("Jano", "Ítem viejo", "abc123").keyboard.inline_keyboard;
+    for (const fila of kb) {
+      if (fila.some((b) => b.text.length > 15)) expect(fila.length).toBe(1);
+    }
+  });
+
+  it("en renderDestPicker (labels truncados a <= 15)", () => {
+    const MUCHOS: BacklogMapRow[] = Array.from({ length: 14 }, (_, i) => ({
+      key: `p${i}`,
+      path: `/x/${i}/BACKLOG.md`,
+      label: `Proyecto ${i}`,
+      group: "Apps",
+      pending: i,
+    }));
+    const kb = renderDestPicker(MUCHOS, "abc12345").keyboard.inline_keyboard;
+    for (const fila of kb) {
+      if (fila.some((b) => b.text.length > 15)) expect(fila.length).toBe(1);
+    }
   });
 });
 
@@ -113,7 +163,7 @@ describe("renderDestPicker", () => {
       { key: "x", path: "/x/BACKLOG.md", label: "Aeropuertos Bolivia Internacional", group: "Apps", pending: 1 },
     ];
     const label = renderDestPicker(largo, "abc12345").keyboard.inline_keyboard[0][0].text;
-    expect(label.length).toBeLessThanOrEqual(16);
+    expect(label.length).toBeLessThanOrEqual(15);
     expect(label.endsWith("…")).toBe(true);
   });
 

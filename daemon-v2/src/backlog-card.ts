@@ -49,15 +49,17 @@ export function renderAddProposal(destino: string, texto: string, shortId: strin
       `«${esc(texto)}»`,
     ].join("\n"),
     keyboard: {
+      // Layout del skill telegram-bot-ux (sección "Inline keyboards → Layout recomendado"):
+      // la primaria (✅ Guardar, 10 chars) va sola en su fila; "✏️ Editar texto" (15 chars) y
+      // "❌ Descartar" (12 chars) entran juntas en la banda 9-15; "📁 Cambiar proyecto" (19
+      // chars) supera los 15 y va sola.
       inline_keyboard: [
+        [{ text: "✅ Guardar", callback_data: `bklg:save:${shortId}` }],
         [
-          { text: "✅ Guardar", callback_data: `bklg:save:${shortId}` },
           { text: "✏️ Editar texto", callback_data: `bklg:edit:${shortId}` },
-        ],
-        [
-          { text: "📁 Cambiar proyecto", callback_data: `bklg:dest:${shortId}` },
           { text: "❌ Descartar", callback_data: `bklg:drop:${shortId}` },
         ],
+        [{ text: "📁 Cambiar proyecto", callback_data: `bklg:dest:${shortId}` }],
       ],
     },
   };
@@ -72,11 +74,12 @@ export function renderDoneProposal(destino: string, linea: string, shortId: stri
       `«${esc(linea)}»`,
     ].join("\n"),
     keyboard: {
+      // "✅ Confirmar" (12 chars) y "❌ Descartar" (12 chars) NO son el binario corto ≤8 chars
+      // que el skill permite en una sola fila (ej. "✅ Sí"/"❌ No") — acá la acción escribe el
+      // archivo y no tiene ↩️ Deshacer, así que cada una va en su propia fila.
       inline_keyboard: [
-        [
-          { text: "✅ Confirmar", callback_data: `bklg:save:${shortId}` },
-          { text: "❌ Descartar", callback_data: `bklg:drop:${shortId}` },
-        ],
+        [{ text: "✅ Confirmar", callback_data: `bklg:save:${shortId}` }],
+        [{ text: "❌ Descartar", callback_data: `bklg:drop:${shortId}` }],
       ],
     },
   };
@@ -105,8 +108,11 @@ export function renderDiscarded(): Card {
  * probables. El resto se alcanza por el escape de texto libre, que SIEMPRE está presente.
  */
 const DEST_MAX_BOTONES = 6;
-/** Los botones van de a 2 por fila, así que el label debe entrar en ~16 chars. */
-const DEST_LABEL_MAX = 16;
+/**
+ * Los botones van de a 2 por fila — la banda del skill telegram-bot-ux para 2-por-fila es
+ * 9-15 chars, no hasta 16 (bajado de 16 a 15 el 2026-07-28, W3+W4 del review de salud).
+ */
+const DEST_LABEL_MAX = 15;
 
 export function renderDestPicker(rows: BacklogMapRow[], shortId: string): Card {
   const sorted = [...rows].sort((a, b) => b.pending - a.pending || a.label.localeCompare(b.label));
