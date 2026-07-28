@@ -24,7 +24,7 @@ import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick, handleCookieJarConfirm } from "./tools/resumir.js";
 import { COOKIE_JAR_NAMESPACE_ID } from "./tools/cookie-jar.js";
 import { JournalStore } from "./journal-store.js";
-import { captureThought } from "./journal-capture.js";
+import { captureThought, nowInLaPaz } from "./journal-capture.js";
 import { applyPendingEdit, handleJournalCallback, isJournalCallback } from "./journal-callbacks.js";
 import { parseJournalPrefix } from "./journal-text.js";
 import { renderModeClosed, renderModeOpen } from "./journal-card.js";
@@ -646,7 +646,12 @@ async function processMessage(
         {
           store: backlogStore,
           root: BACKLOG_ROOT,
-          today: new Date().toISOString().slice(0, 10),
+          // Hora de La Paz (UTC-4, sin horario de verano), no UTC: entre las 20:00 y las 23:59
+          // hora de Cal, `new Date().toISOString()` ya cae en el día siguiente y la sección del
+          // heading quedaba fechada "mañana" — justo la ventana en la que Cal más dicta ideas.
+          // Reusa `nowInLaPaz` (ya validado en journal-capture.ts/journal-sweep.ts) en vez de
+          // reimplementar el offset acá.
+          today: nowInLaPaz().slice(0, 10),
           log,
           editCard: async (chatId, messageId, text, keyboard) => {
             // El teclado va SIEMPRE explícito: editMessageText no limpia reply_markup si se
