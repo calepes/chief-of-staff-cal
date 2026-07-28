@@ -14,7 +14,7 @@ import cron from "node-cron";
 import { sendMessage } from "@cos/shared";
 import type { CfKv } from "../cf-kv.js";
 import { nowInLaPaz } from "../journal-capture.js";
-import { renderBatch, type Card } from "../learning-card.js";
+import { BATCH_MAX_VISIBLES, renderBatch, type Card } from "../learning-card.js";
 import { dedupeCandidates, parseLearnings, totalTokens } from "../learning-file.js";
 import { extractLearnings } from "../learning-extract.js";
 import { LearningStore } from "../learning-store.js";
@@ -98,11 +98,22 @@ export async function runReflection(deps: ReflectionDeps, fecha: string): Promis
     return;
   }
 
-  const frescos = dedupeCandidates(candidates, existentes);
-  if (frescos.length === 0) {
+  const todos = dedupeCandidates(candidates, existentes);
+  if (todos.length === 0) {
     // Camino esperado la mayoría de los días.
     log({ msg: "learning_reflect_empty", fecha, raw: candidates.length });
     return;
+  }
+
+  // El recorte va ACÁ, al armar el batch — no al renderizar. La tarjeta muestra como máximo
+  // BATCH_MAX_VISIBLES, y `✅ Guardar todos` persiste el batch entero: si el batch tuviera más
+  // candidatos que los visibles, Cal aprobaría de un toque texto que nunca leyó, y ese texto
+  // queda fijado en el system prompt. Con el recorte acá, lo propuesto == lo aprobable.
+  const frescos = todos.slice(0, BATCH_MAX_VISIBLES);
+  if (todos.length > frescos.length) {
+    // Con ~2 aprendizajes por día esperados esto no debería pasar casi nunca; si aparece
+    // seguido, es señal de que el extractor se está volviendo ruidoso.
+    log({ msg: "learning_reflect_truncated", fecha, total: todos.length, mostrados: frescos.length });
   }
 
   const tokensActuales = totalTokens(existentes);

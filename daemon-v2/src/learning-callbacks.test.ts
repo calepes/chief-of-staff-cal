@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { handleLearningCallback, isLearningCallback, type LearningCallbackDeps } from "./learning-callbacks.js";
 import { LearningStore } from "./learning-store.js";
-import type { Card } from "./learning-card.js";
+import { BATCH_MAX_VISIBLES, type Card } from "./learning-card.js";
 import type { LearningBatch, LearningCandidate } from "./learning-types.js";
 
 /** CfKv falso en memoria, igual patrón que journal-store.test.ts. */
@@ -92,6 +92,26 @@ describe("handleLearningCallback", () => {
     expect(content).toContain("notionApi: el body va como objeto");
     expect(content).toContain("El colegio cierra la última semana de julio");
     expect(edits.at(-1)!.card.keyboard.inline_keyboard).toEqual([]);
+  });
+
+  it("lrn:all sobre un batch ya recortado por el cron persiste exactamente los 5 mostrados", async () => {
+    // Integración con el recorte del cron (runReflection corta a BATCH_MAX_VISIBLES antes de
+    // createBatch). Con 8 candidatos extraídos, el batch que llega a KV tiene 5, así que
+    // `✅ Guardar todos` no puede persistir nada que la tarjeta no haya mostrado.
+    const ocho: LearningCandidate[] = Array.from({ length: 8 }, (_, i) => ({
+      tag: "pref" as const,
+      text: `Preferencia distinta número ${i}`,
+      evidencia: `«evidencia ${i}»`,
+    }));
+    const recortados = ocho.slice(0, BATCH_MAX_VISIBLES);
+    const batchId = await store.createBatch(1, makeBatch({ candidates: recortados }));
+
+    await handleLearningCallback(deps, 1, 99, `lrn:all:${batchId}`);
+
+    const lineas = readFileSync(learningsPath, "utf8").trim().split("\n");
+    expect(lineas).toHaveLength(BATCH_MAX_VISIBLES);
+    expect(lineas.join("\n")).toContain("Preferencia distinta número 4");
+    expect(lineas.join("\n")).not.toContain("Preferencia distinta número 5");
   });
 
   it("lrn:none no persiste nada y limpia el batch", async () => {

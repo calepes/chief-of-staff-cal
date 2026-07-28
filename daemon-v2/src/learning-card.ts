@@ -24,9 +24,17 @@ export const TAG_EMOJI: Record<LearningTag, string> = {
 
 /**
  * Mismo criterio que SWEEP_MAX_BOTONES del Journal: más de 5 vuelve la tarjeta una
- * pared de texto en mobile. El resto no se pierde — el modo uno a uno los recorre todos.
+ * pared de texto en mobile.
+ *
+ * ⚠️ Exportada a propósito: el cron (proactive/learning-reflect.ts) recorta la lista de
+ * candidatos a este mismo tope ANTES de guardar el batch, para que lo que se propone sea
+ * exactamente lo que se puede aprobar. Antes el recorte era solo de render y `✅ Guardar todos`
+ * persistía `batch.candidates` COMPLETO — con 6+ candidatos entraba al system prompt, de forma
+ * permanente, texto que Cal nunca vio. Importa especialmente porque el transcript acarrea
+ * material no confiable (resúmenes de páginas web vía fetchAsUser / el resumidor entran como
+ * bloques `JANO:`). Usar SIEMPRE esta constante en ambos lados; no duplicar el número.
  */
-const BATCH_MAX_VISIBLES = 5;
+export const BATCH_MAX_VISIBLES = 5;
 
 /**
  * Presupuesto BLANDO por el que avisamos en la tarjeta. Importado de learning-file.ts
