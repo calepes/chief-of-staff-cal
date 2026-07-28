@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
 import cron from "node-cron";
-import { createSdkMcpServer, startup, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, startup, type EffortLevel, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { runAgent } from "./agent.js";
 import { buildSdkTools } from "./agent-tools.js";
 import { CLAUDE_AI_COS_TOOLS, DISALLOWED_BUILTINS } from "./agent-options.js";
@@ -15,6 +15,8 @@ import { sanitizeForTelegram } from "./format.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv, tryAcquireLock, releaseLock } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
+import { clearSessionId, loadSessionId, saveSessionId } from "./session-store.js";
+import { defaultEffort, effortForMessage } from "./effort.js";
 import { sendMessage, editMessage, editMessageReplyMarkup, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
@@ -344,8 +346,16 @@ const BASE_OPTIONS: Options = {
   },
   allowedTools: [...sdkTools.map((t) => `mcp__cos-tools__${t.name}`), ...CLAUDE_AI_COS_TOOLS],
   disallowedTools: DISALLOWED_BUILTINS,
-  maxTurns: 12,
+  // Subido de 12 a 25 el 2026-07-27. Con 12, un pedido analítico real ("toma los valores de
+  // los sábados, ¿cuándo llegamos a 5MM?") agotaba los turnos peleando con la API de Notion y
+  // moría con "Reached maximum number of turns", que a Cal le llegaba como "error interno".
+  // El techo existe para cortar loops, no para acotar trabajo legítimo.
+  maxTurns: 25,
   model: "claude-sonnet-5",
+  // Effort — cuánto piensa y cuánto explora antes de responder. Estaba sin setear (default
+  // del modelo). Es el dial que evita tener que elegir entre "Sonnet barato" y "Opus caro"
+  // para todo: ver `effortForMessage()` abajo.
+  effort: defaultEffort(),
 };
 
 // NOT using a warm pool. Pecunia v2 / Vesta v2 documented "Warm pool stale rompe
@@ -370,20 +380,43 @@ function discardWarm(warmPromise: Promise<WarmQuery>): void {
   warmPromise.then((w) => w.close()).catch(() => {});
 }
 
-async function takeWarm(): Promise<WarmQuery> {
+async function takeWarm(opts?: {
+  resume?: string;
+  effort?: EffortLevel;
+  /** Se llama si el resume falló y hubo que arrancar limpio, para que el caller olvide ese sessionId. */
+  onResumeFailed?: () => void;
+}): Promise<WarmQuery> {
   const t0 = Date.now();
-  const options: Options = {
+  const buildOptions = (resume?: string): Options => ({
     ...BASE_OPTIONS,
+    ...(opts?.effort ? { effort: opts.effort } : {}),
+    ...(resume ? { resume } : {}),
     mcpServers: {
       ...BASE_OPTIONS.mcpServers,
       "cos-tools": createFreshMcpServer(),
     },
-  };
+  });
+
   try {
-    const warm = await startup({ options });
-    log({ msg: "warm_startup", ms: Date.now() - t0 });
+    const warm = await startup({ options: buildOptions(opts?.resume) });
+    log({ msg: "warm_startup", ms: Date.now() - t0, resumed: Boolean(opts?.resume), effort: opts?.effort ?? defaultEffort() });
     return warm;
   } catch (err) {
+    // Un sessionId puede quedar inservible sin que nosotros nos enteremos: el .jsonl fue
+    // borrado, quedó corrupto, o lo escribió un SDK de otra versión. Sin este fallback, un
+    // resume roto dejaría a Cal sin bot en ese chat hasta que se le ocurriera mandar /reset.
+    if (opts?.resume) {
+      log({ msg: "warm_startup_resume_failed", err: String(err) });
+      opts.onResumeFailed?.();
+      try {
+        const warm = await startup({ options: buildOptions(undefined) });
+        log({ msg: "warm_startup", ms: Date.now() - t0, resumed: false, resumeFallback: true });
+        return warm;
+      } catch (retryErr) {
+        log({ msg: "warm_startup_error", err: String(retryErr) });
+        throw retryErr;
+      }
+    }
     log({ msg: "warm_startup_error", err: String(err) });
     throw err;
   }
@@ -801,6 +834,10 @@ async function processMessage(
   // /reset command
   if (text && text.trim().toLowerCase() === "/reset") {
     await state.clear(chatId);
+    // Desde que existe `resume`, el contexto vive en DOS lugares: el historial de texto en KV
+    // y la sesión del SDK en disco. Limpiar solo el primero dejaría a /reset sin efecto real —
+    // el turno siguiente retomaría la sesión y traería de vuelta todo lo que Cal quiso borrar.
+    clearSessionId(chatId);
     await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
       chatId,
       text: "🧹 Contexto limpiado.",
@@ -924,7 +961,40 @@ async function processMessage(
 
   // Fire startup() immediately — runs in parallel with vision/transcription preprocessing.
   // We don't await here; we'll await it only when the agent is ready to run.
-  const warmPromise = takeWarm();
+  //
+  // El sessionId se lee de disco (sync, sub-ms) en vez de KV a propósito: está en el camino
+  // crítico justo antes del startup(), y un round-trip de red acá comería el solapamiento que
+  // este `takeWarm()` temprano existe para ganar.
+  const resumeSessionId = loadSessionId(chatId);
+  let resumed = Boolean(resumeSessionId);
+  const onResumeFailed = () => {
+    resumed = false;
+    clearSessionId(chatId);
+  };
+
+  // En un mensaje de TEXTO el prefijo (`/deep`) ya se puede leer acá. En un mensaje de VOZ, `text`
+  // todavía es undefined — la transcripción ocurre más abajo, dentro del try — así que el effort
+  // se recalcula después de transcribir y, si cambió, se rehace el warm (ver `ensureWarmEffort`).
+  // Sin eso `/deep` dictado por voz se ignoraba en silencio, que es la mitad de los mensajes de Cal.
+  let { effort: turnEffort, text: effortStrippedText } = effortForMessage(text ?? "");
+  if (text) text = effortStrippedText;
+  let warmPromise = takeWarm({ resume: resumeSessionId, effort: turnEffort, onResumeFailed });
+
+  /**
+   * Re-alinea el warm con el effort real del turno cuando el texto recién se conoce después del
+   * preprocessing (voz). Solo rehace el subprocess si el effort cambió — el caso normal (sin
+   * prefijo) no paga nada.
+   */
+  const ensureWarmEffort = (finalText: string): string => {
+    const decided = effortForMessage(finalText);
+    if (decided.effort !== turnEffort) {
+      log({ msg: "effort_upgraded_after_transcript", from: turnEffort, to: decided.effort });
+      discardWarm(warmPromise);
+      turnEffort = decided.effort;
+      warmPromise = takeWarm({ resume: resumeSessionId, effort: turnEffort, onResumeFailed });
+    }
+    return decided.text;
+  };
 
   try {
     // Fecha/hora en runtime con tz America/La_Paz — se calcula aquí para que sea
@@ -947,7 +1017,9 @@ async function processMessage(
         discardWarm(warmPromise);
         return;
       }
-      text = transcript;
+      // El effort recién se puede decidir acá: el prefijo `/deep` venía dentro del audio.
+      // `ensureWarmEffort` rehace el warm solo si el prefijo cambió el effort.
+      text = ensureWarmEffort(transcript);
       voiceTranscript = transcript;
       contextHeader = `${dateCtx}\n(Audio transcrito) chat_type=${chatType}`;
       // Transcripción como mensaje propio, en reply al audio — queda en el historial
@@ -1077,6 +1149,10 @@ async function processMessage(
         warm,
         history,
         contextHeader,
+        resumed,
+        // Se persiste apenas el SDK lo emite, no al terminar: un turno que falla a mitad igual
+        // dejó una sesión válida en disco y vale la pena poder retomarla.
+        onSessionId: (id) => saveSessionId(chatId, id),
         onProgress: async (progressText) => {
           await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, progressText, "HTML", clearMarkup).catch(() => {});
         },
