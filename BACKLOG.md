@@ -6,6 +6,9 @@
 
 ## Pendientes
 
+### Surgió en sesión 2026-07-28
+- [ ] **Agregar una acción "cancelado"/"descartado" a proponerItemBacklog, distinta de "hecho" — hoy solo existe agregar/hecho y no se puede marcar un ítem como descartado sin que quede registrado como completado**
+
 ### Surgió en sesión 2026-07-25 — dar de baja tools del Mundial 2026
 - [ ] **Archivar (NO borrar) el MCP `worldcup` + tools FIFA avanzadas** — pedido de Cal: ya pasó el Mundial 2026, no va a seguir usando ni el API de fútbol (`getFixtures`, etc.) ni las tools FIFA (`getMatchReport`/`getMatchPreview`/`getFifaMatchStats`/`getFifaPlayerStats`/`getFifaPowerRanking`) ni el skill `mundial-analisis-diario`. Objetivo: que dejen de estar disponibles como tools activas para Jano (no aparecer en `allowedTools`/`ToolSearch`, no consumir contexto ni presupuesto de tool-calls), pero conservar el código y la config por si se quiere reactivar en el futuro (próximo Mundial u otro torneo). Alcance a definir al implementar: sacar `worldcup` de `BASE_OPTIONS.mcpServers` en `daemon-v2/src/index.ts` + quitar las tools/sección "FIFA avanzadas" de `system-prompt.ts`, mover carpeta del MCP (`Personal/MCP Servers/mcp-servers/servers/worldcup/`) a algo tipo `servers/_archived/worldcup/` o dejarla in-place pero desregistrada, y marcar el skill `mundial-analisis-diario` como archivado (no borrarlo). Verificar también si Vesta/otro agente tiene el mismo MCP registrado. Antes de tocar código/config: seguir el flujo de planning normal (Cal aprueba approach) — no ejecutar directo.
 
