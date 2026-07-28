@@ -32,6 +32,11 @@ export function isBacklogCallback(data: string | undefined): boolean {
   return typeof data === "string" && data.startsWith("bklg:");
 }
 
+/** Parse mode HTML (skill telegram-bot-ux): escapar solo < > &. */
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function labelFor(key: string, root: string): string {
   return discoverBacklogs(root).find((e) => e.key === key)?.label ?? key;
 }
@@ -80,6 +85,25 @@ export async function handleBacklogCallback(
       chatId,
       messageId,
       `📁 <b>¿A qué proyecto?</b>\nEscríbeme el nombre y lo anoto ahí.\n\n${claves}`,
+      { inline_keyboard: [] },
+    );
+    return;
+  }
+
+  // Botón "✏️ Editar texto" (bloque B5 del skill telegram-bot-ux, mismo patrón que `destother`
+  // arriba): se le quita el teclado a esta tarjeta y se le pide a Cal que reescriba el texto,
+  // mostrándole el ítem actual para que tenga contexto de qué está corrigiendo. Su mensaje va al
+  // LLM, que vuelve a llamar proponerItemBacklog con el texto corregido y nace una tarjeta NUEVA
+  // debajo — nunca se reescribe esta.
+  //
+  // No se guarda un `pendingEdit`: el LLM ya tiene la conversación entera y el texto actual del
+  // ítem queda visible acá mismo en el mensaje. Un estado propio de "editando" sería estado extra
+  // que se puede desincronizar — la misma decisión que ya se tomó para `destother`.
+  if (action === "edit") {
+    await deps.editCard(
+      chatId,
+      messageId,
+      `✏️ <b>¿Cómo lo dejo?</b>\nTexto actual: «${esc(prop.text)}»\n\nEscríbeme el texto nuevo y armo la tarjeta de nuevo.`,
       { inline_keyboard: [] },
     );
     return;

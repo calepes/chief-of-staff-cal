@@ -149,4 +149,18 @@ describe("handleBacklogCallback", () => {
     expect(readFileSync(JANO, "utf8")).not.toContain("[x]");
     expect(edits.at(-1)?.text).toContain("más de un");
   });
+
+  it("bklg:edit no escribe nada, muestra el ítem actual y pide el texto nuevo con teclado vacío", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits } = fakeDeps(store);
+    const before = readFileSync(JANO, "utf8");
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea con errata" });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:edit:${id}`);
+
+    expect(readFileSync(JANO, "utf8")).toBe(before);
+    expect(edits.at(-1)?.text).toContain("Idea con errata");
+    // Teclado vacío EXPLÍCITO, no omitido — si no, Telegram deja vivos los botones anteriores.
+    expect(edits.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
+  });
 });
