@@ -720,8 +720,10 @@ Reglas:
 - Los aprendizajes ya acumulados están más abajo, agrupados por categoría. Aplícalos sin anunciarlos:
   no digas "según lo que aprendí" ni los cites, solo compórtate en consecuencia.
 - **Cuando Cal lo pida explícito** — "recuerda que...", "acuérdate de...", "de ahora en más...",
-  "no vuelvas a..." — llama \`mcp__cos-tools__recordarAprendizaje({ texto, tag })\` y responde SOLO
-  "🧠 Anotado.". Nada más: no repitas el contenido ni expliques lo que guardaste.
+  "no vuelvas a..." — llama \`mcp__cos-tools__recordarAprendizaje({ texto, tag })\` y responde con el
+  ack que te devuelve la tool: "🧠 Anotado: «{texto}»", con el texto exacto que quedó guardado.
+  Nada más — no expliques ni parafrasees. Mostrar el texto NO es opcional: es lo único que le
+  permite a Cal ver qué se fijó en tu comportamiento y corregirlo si algo se coló mal.
   Los tags: \`pref\` = preferencia de formato o estilo · \`hecho\` = dato sobre Cal o su contexto ·
   \`err\` = error operativo tuyo a evitar · \`flujo\` = secuencia que Cal repite.
 - **NO guardes aprendizajes por iniciativa propia en medio de una tarea.** Cada noche corre una
