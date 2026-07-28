@@ -89,7 +89,7 @@ export async function handleBacklogCallback(
     await deps.editCard(
       chatId,
       messageId,
-      `📁 <b>¿A qué proyecto?</b>\nEscríbeme el nombre y lo anoto ahí.\n\n${claves}`,
+      `📁 <b>¿A qué proyecto?</b>\nEscríbeme el nombre y lo anoto ahí.\n\n«${esc(prop.text)}»\n\n${claves}`,
       { inline_keyboard: [] },
     );
     return;
@@ -125,7 +125,10 @@ export async function handleBacklogCallback(
     return;
   }
 
-  if (action !== "save") return;
+  if (action !== "save") {
+    deps.log({ msg: "backlog_unknown_action", action });
+    return;
+  }
 
   let path: string;
   try {

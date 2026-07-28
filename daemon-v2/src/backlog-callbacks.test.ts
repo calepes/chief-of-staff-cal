@@ -183,6 +183,27 @@ describe("handleBacklogCallback", () => {
     expect(edits.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
   });
 
+  it("bklg:destother muestra el texto del ítem, no solo la lista de proyectos (W5)", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea del destother" });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:destother:${id}`);
+
+    expect(edits.at(-1)?.text).toContain("Idea del destother");
+  });
+
+  it("una acción desconocida no rompe y deja rastro en el log (W5)", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits, logs } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea" });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:algoRaro:${id}`);
+
+    expect(edits).toHaveLength(0);
+    expect(logs).toContainEqual({ msg: "backlog_unknown_action", action: "algoRaro" });
+  });
+
   it("W2 — un fallo al agregar el ítem (appendBacklogItem) edita la tarjeta con ⚠️ en vez de quedar en silencio", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits, logs } = fakeDeps(store);

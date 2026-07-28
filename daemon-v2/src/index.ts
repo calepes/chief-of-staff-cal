@@ -664,7 +664,7 @@ async function processMessage(
               text,
               "HTML",
               keyboard ?? { inline_keyboard: [] },
-            ).catch(() => {});
+            ).catch((err) => log({ msg: "backlog_edit_failed", err: String(err) }));
           },
         },
         bchat,
