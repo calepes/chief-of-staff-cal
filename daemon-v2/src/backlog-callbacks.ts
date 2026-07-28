@@ -17,6 +17,7 @@ import { discoverBacklogs, resolveBacklogPath } from "./tools/backlog-discovery.
 import { buildBacklogMap } from "./tools/backlog-read.js";
 import { appendBacklogItem, markBacklogDone } from "./tools/backlog-write.js";
 import type { BacklogStore } from "./backlog-store.js";
+import type { MarkResult } from "./backlog-types.js";
 
 export interface BacklogCallbackDeps {
   store: BacklogStore;
@@ -40,6 +41,10 @@ function esc(s: string): string {
 function labelFor(key: string, root: string): string {
   return discoverBacklogs(root).find((e) => e.key === key)?.label ?? key;
 }
+
+/** Mensaje ante un fallo de escritura: sin stack ni path absoluto, entendible para Cal. */
+const WRITE_FAIL_MSG =
+  "⚠️ <b>No pude guardar el cambio en el backlog.</b> Puede ser un problema pasajero de disco — intenta de nuevo en un momento.";
 
 export async function handleBacklogCallback(
   deps: BacklogCallbackDeps,
@@ -135,8 +140,20 @@ export async function handleBacklogCallback(
 
   const label = labelFor(prop.key, deps.root);
 
+  // Mismo patrón que el resolve de arriba: la escritura es el paso que más importa (es la
+  // única razón de ser de toda la tarjeta) y puede fallar por causas ajenas a la propuesta
+  // (ENOSPC, EACCES, volumen de solo lectura, el archivo se borró entre el realpath y acá).
+  // Sin este try/catch la excepción sube hasta el `.catch` genérico de index.ts y la tarjeta
+  // queda con los botones vivos — Cal ve exactamente lo mismo que antes de tocar ✅, sin ningún
+  // indicio de que su escritura no se guardó.
   if (prop.kind === "add") {
-    appendBacklogItem(path, prop.text, deps.today);
+    try {
+      appendBacklogItem(path, prop.text, deps.today);
+    } catch (e) {
+      deps.log({ msg: "backlog_write_failed", key: prop.key, kind: "add", err: String(e) });
+      await deps.editCard(chatId, messageId, WRITE_FAIL_MSG, { inline_keyboard: [] });
+      return;
+    }
     await deps.store.clearProposal(chatId, shortId);
     const card = renderSaved(label, prop.text, "add");
     await deps.editCard(chatId, messageId, card.text, card.keyboard);
@@ -144,7 +161,14 @@ export async function handleBacklogCallback(
     return;
   }
 
-  const res = markBacklogDone(path, prop.text);
+  let res: MarkResult;
+  try {
+    res = markBacklogDone(path, prop.text);
+  } catch (e) {
+    deps.log({ msg: "backlog_write_failed", key: prop.key, kind: "done", err: String(e) });
+    await deps.editCard(chatId, messageId, WRITE_FAIL_MSG, { inline_keyboard: [] });
+    return;
+  }
   if (res.ok) {
     await deps.store.clearProposal(chatId, shortId);
     const card = renderSaved(label, res.line, "done");

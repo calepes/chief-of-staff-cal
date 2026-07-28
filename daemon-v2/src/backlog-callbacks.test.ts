@@ -1,11 +1,26 @@
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isBacklogCallback, handleBacklogCallback } from "./backlog-callbacks.js";
 import { BacklogStore } from "./backlog-store.js";
 import { clearBacklogCache } from "./tools/backlog-discovery.js";
+import * as backlogWrite from "./tools/backlog-write.js";
 import type { CfKv } from "./cf-kv.js";
+
+// Se mockea con la implementación REAL de default (via importOriginal) para que todos los
+// tests existentes sigan escribiendo al filesystem real — solo los dos tests de W2 (abajo)
+// pisan la implementación puntualmente con mockImplementationOnce para simular un fallo de
+// escritura (ENOSPC/EACCES/etc.), que es mucho más limpio que intentar reproducirlo de verdad
+// con permisos de archivo.
+vi.mock("./tools/backlog-write.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./tools/backlog-write.js")>();
+  return {
+    ...actual,
+    appendBacklogItem: vi.fn(actual.appendBacklogItem),
+    markBacklogDone: vi.fn(actual.markBacklogDone),
+  };
+});
 
 const ROOT = join(tmpdir(), "jano-test-backlog-cb");
 const JANO = join(ROOT, "Personal/Agents/Jano/BACKLOG.md");
@@ -33,13 +48,17 @@ function fakeKv(): CfKv {
  */
 function fakeDeps(store: BacklogStore) {
   const edits: Array<{ text: string; keyboard?: unknown }> = [];
+  const logs: Array<Record<string, unknown>> = [];
   return {
     edits,
+    logs,
     deps: {
       store,
       root: ROOT,
       today: "2026-07-28",
-      log: () => {},
+      log: (obj: Record<string, unknown>) => {
+        logs.push(obj);
+      },
       editCard: async (_chatId: number, _messageId: number, text: string, keyboard?: unknown) => {
         edits.push({ text, keyboard });
       },
@@ -162,5 +181,40 @@ describe("handleBacklogCallback", () => {
     expect(edits.at(-1)?.text).toContain("Idea con errata");
     // Teclado vacío EXPLÍCITO, no omitido — si no, Telegram deja vivos los botones anteriores.
     expect(edits.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
+  });
+
+  it("W2 — un fallo al agregar el ítem (appendBacklogItem) edita la tarjeta con ⚠️ en vez de quedar en silencio", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits, logs } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea nueva" });
+    vi.mocked(backlogWrite.appendBacklogItem).mockImplementationOnce(() => {
+      throw new Error("EACCES: permission denied, open '/some/absolute/path/BACKLOG.md.tmp-1'");
+    });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
+
+    expect(edits.at(-1)?.text).toContain("⚠️");
+    // No filtra el path absoluto ni el stack del error al chat.
+    expect(edits.at(-1)?.text).not.toContain("/some/absolute/path");
+    expect(edits.at(-1)?.text).not.toContain("EACCES");
+    // La propuesta NO se limpia — reintentar (tocar ✅ de nuevo) tiene que seguir siendo posible.
+    expect(await store.getProposal(1, id)).not.toBeNull();
+    expect(logs.some((l) => l.msg === "backlog_write_failed")).toBe(true);
+  });
+
+  it("W2 — un fallo al tildar (markBacklogDone) edita la tarjeta con ⚠️ en vez de quedar en silencio", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits, logs } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "done", key: "jano", text: "ítem viejo" });
+    vi.mocked(backlogWrite.markBacklogDone).mockImplementationOnce(() => {
+      throw new Error("ENOSPC: no space left on device, write");
+    });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
+
+    expect(edits.at(-1)?.text).toContain("⚠️");
+    expect(edits.at(-1)?.text).not.toContain("ENOSPC");
+    expect(await store.getProposal(1, id)).not.toBeNull();
+    expect(logs.some((l) => l.msg === "backlog_write_failed")).toBe(true);
   });
 });
