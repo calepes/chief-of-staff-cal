@@ -619,8 +619,11 @@ async function processMessage(
 
     // Callbacks del backlog (bklg:*) → mecánicos, sin LLM. Escriben a disco, así que llevan el
     // mismo lock anti-doble-tap que jnl:* y mlog:/mskip:/msel:.
-    // Va ARRIBA del `startsWith("j:")` genérico: ese bloque retorna incondicionalmente y dejaría
-    // esto como código muerto sin rastro en logs (mismo motivo que j:journal).
+    // Va ARRIBA de TODOS los bloques que retornan incondicionalmente — el `startsWith("j:")`
+    // genérico y, sobre todo, el catch-all de "Heavy callbacks legacy" más abajo, que se traga
+    // cualquier callback_data sin prefijo `j:`/`build:` y se lo manda al LLM como mensaje
+    // sintético. Puesto debajo de ese, `bklg:*` nunca llegaría acá y no dejaría rastro en logs
+    // (mismo motivo por el que `j:journal` está donde está).
     if (isBacklogCallback(cb.data)) {
       const bchat = cb.message.chat.id;
       const banchor = cb.message.message_id;
