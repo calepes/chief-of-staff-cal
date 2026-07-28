@@ -25,6 +25,10 @@ import { fetchAsUser } from "./tools/fetch-as-user.js";
 import { addDomainAndSync } from "./tools/cookie-jar.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { consultarJson } from "./tools/consultar-json.js";
+import { discoverBacklogs, resolveBacklogPath } from "./tools/backlog-discovery.js";
+import { buildBacklogMap, readBacklogCompact } from "./tools/backlog-read.js";
+import { renderBacklogMap, renderAddProposal, renderDoneProposal } from "./backlog-card.js";
+import { BacklogStore } from "./backlog-store.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { resumirContenido, guardarResumenReadwise, editarPropuestaResumen, revisarPlaylistResumir, revisarStarredResumir, saltarResumen, detenerResumidor, estadoResumidor } from "./tools/resumir.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
@@ -747,6 +751,74 @@ export function buildSdkTools(deps: ToolDeps) {
       },
       async ({ path, jqExpr }) => asText(await consultarJson(path, jqExpr)),
       READ_ONLY,
+    ),
+    tool(
+      "mapaBacklogs",
+      "Muestra el MAPA COMPLETO de backlogs de Cal: todos los proyectos del árbol ~/Claude Projects " +
+      "con su cantidad de pendientes, agrupados por Raíz / Agentes / Apps. " +
+      "Usar cuando Cal pregunte qué tiene pendiente SIN nombrar un proyecto, pida 'el mapa de backlogs', " +
+      "'qué hay en los backlogs', o quiera una vista general antes de bajar a uno concreto. " +
+      "Devuelve texto ya formateado para Telegram: mándalo TAL CUAL, no lo reescribas.",
+      {},
+      async () => asText(renderBacklogMap(buildBacklogMap(discoverBacklogs())).text),
+      READ_ONLY,
+    ),
+    tool(
+      "leerBacklog",
+      "Devuelve los pendientes de UN backlog concreto, en vista compacta (solo ítems sin tildar, truncados). " +
+      "Usar cuando Cal pregunte por los pendientes de un proyecto puntual, o después de mapaBacklogs para bajar al detalle. " +
+      "La clave sale de mapaBacklogs (ej. 'jano', 'vesta', 'aeropuertos-bolivia'). " +
+      "NO devuelve el archivo entero — si Cal necesita el texto completo de un ítem, pídeselo por nombre.",
+      {
+        proyecto: z.string().describe("Clave del backlog, ej. 'jano'. Si no sabes cuál, llama mapaBacklogs primero."),
+      },
+      async ({ proyecto }) => {
+        try {
+          // resolveBacklogPath valida los 4 invariantes (existe, dentro del root, basename,
+          // archivo regular) y lanza con un mensaje ya redactado si alguno falla.
+          const path = resolveBacklogPath(proyecto);
+          const entry = discoverBacklogs().find((e) => e.key === proyecto)!;
+          return asText(readBacklogCompact(path, entry.key, entry.label));
+        } catch (e) {
+          return asText(e instanceof Error ? e.message : String(e));
+        }
+      },
+      READ_ONLY,
+    ),
+    tool(
+      "proponerItemBacklog",
+      "Propone AGREGAR un ítem al backlog de un proyecto, o MARCARLO como hecho. NO escribe: manda una tarjeta " +
+      "a Telegram con botones para que Cal confirme, y la escritura ocurre cuando él toca ✅. " +
+      "Usar cuando Cal dicte una idea, un pendiente o un 'anota esto' durante la charla, y cuando diga que ya terminó algo. " +
+      "Redacta el texto en una línea clara y accionable, en las palabras de Cal — no lo adornes ni lo alargues. " +
+      "Después de llamar esta tool NO generes texto: la tarjeta es el único canal.",
+      {
+        proyecto: z.string().describe("Clave del backlog destino, ej. 'jano'. Ante la duda usa 'jano'; Cal puede cambiarlo con un botón."),
+        texto: z.string().min(3).describe("Para accion='agregar': el ítem a anotar. Para accion='hecho': texto que identifique el ítem existente."),
+        accion: z.enum(["agregar", "hecho"]).describe("'agregar' para un ítem nuevo, 'hecho' para tildar uno existente"),
+      },
+      async ({ proyecto, texto, accion }) => {
+        try {
+          const entry = discoverBacklogs().find((e) => e.key === proyecto);
+          if (!entry) {
+            return asText(
+              `No reconozco el backlog "${proyecto}". Disponibles: ${discoverBacklogs().map((e) => e.key).join(", ")}`,
+            );
+          }
+          const chatId = deps.getCurrentChatId();
+          const store = new BacklogStore(deps.kv);
+          const kind = accion === "agregar" ? "add" : "done";
+          const shortId = await store.createProposal(chatId, { kind, key: proyecto, text: texto });
+          const card =
+            kind === "add"
+              ? renderAddProposal(entry.label, texto, shortId)
+              : renderDoneProposal(entry.label, texto, shortId);
+          await tgSend(deps.botToken, chatId, card.text, card.keyboard);
+          return asText("Tarjeta enviada. No generes texto adicional.");
+        } catch (e) {
+          return asText(e instanceof Error ? e.message : String(e));
+        }
+      },
     ),
     tool(
       "fetchAsUser",
