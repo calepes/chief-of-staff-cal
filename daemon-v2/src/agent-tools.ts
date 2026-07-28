@@ -24,6 +24,7 @@ import {
 import { fetchAsUser } from "./tools/fetch-as-user.js";
 import { addDomainAndSync } from "./tools/cookie-jar.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
+import { consultarJson } from "./tools/consultar-json.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { resumirContenido, guardarResumenReadwise, editarPropuestaResumen, revisarPlaylistResumir, revisarStarredResumir, saltarResumen, detenerResumidor, estadoResumidor } from "./tools/resumir.js";
 import { addDigestSource, type DigestSection } from "./tools/digest.js";
@@ -729,6 +730,22 @@ export function buildSdkTools(deps: ToolDeps) {
       "Extrae el path del mensaje y pásalo aquí para obtener el contenido completo.",
       { path: z.string().describe("Ruta absoluta al archivo .json del persisted-output") },
       async ({ path }) => asText(readPersistedOutput(path)),
+      READ_ONLY,
+    ),
+    tool(
+      "consultarJson",
+      "Filtra un archivo persisted-output con una expresión jq, SIN traer el archivo entero al contexto. " +
+      "PREFIERE ESTO sobre readPersistedOutput cuando el archivo sea grande (>50 KB) o cuando solo necesites " +
+      "parte de los datos: un subconjunto de filas, ciertos campos, un conteo, o un filtro por fecha. " +
+      "Ejemplos: '.results | length' (contar), " +
+      "'[.results[].properties | {fecha: .Fecha.date.start, trx: .TRX.number}]' (extraer solo 2 campos de cada fila), " +
+      "'[.results[] | select(.properties.Fecha.date.start | startswith(\"2026-07\"))]' (filtrar por mes). " +
+      "Devuelve la salida de jq (máx 20K chars). Si necesitas menos datos, refina la expresión y vuelve a llamar.",
+      {
+        path: z.string().describe("Ruta absoluta al archivo .json del persisted-output"),
+        jqExpr: z.string().describe("Expresión jq a aplicar, ej. '.results | length'"),
+      },
+      async ({ path, jqExpr }) => asText(await consultarJson(path, jqExpr)),
       READ_ONLY,
     ),
     tool(

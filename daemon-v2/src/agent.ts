@@ -6,12 +6,34 @@ export interface AgentDeps {
   history: ConversationMessage[];
   contextHeader?: string;
   onProgress?: (text: string) => Promise<void>;
+  /**
+   * true cuando el WarmQuery se creó con `resume`. En ese caso el SDK ya tiene la
+   * conversación completa cargada, así que reinyectar el historial de texto de KV la
+   * duplicaría: el mismo intercambio aparecería dos veces (una como turnos reales de la
+   * sesión y otra como bloque "Historial reciente"), gastando contexto y dándole al modelo
+   * dos versiones del pasado — la real y una resumida por Haiku que puede contradecirla.
+   */
+  resumed?: boolean;
+  /**
+   * Se llama apenas el SDK emite el sessionId (evento `init`), no al final del turno. Importa
+   * porque un turno que falla a mitad IGUAL dejó una sesión válida en disco: si solo se
+   * persistiera con el return, una racha de errores dejaría el sessionId sin refrescar hasta
+   * que venciera el TTL, tirando contexto que sí existía. Señalado por daemon-health-reviewer.
+   */
+  onSessionId?: (sessionId: string) => void;
 }
 
 export interface AgentResult {
   reply: string;
   sdkMs: number;
   firstEventMs: number;
+  /**
+   * sessionId que el SDK asignó a este turno. El caller lo persiste (`session-store.ts`)
+   * para pasarlo como `resume` en el turno siguiente y así conservar el contexto REAL
+   * — tool calls y sus resultados incluidos — en vez de reconstruirlo desde el historial
+   * de texto en KV. Puede venir undefined si el turno murió antes del evento `init`.
+   */
+  sessionId?: string;
 }
 
 // El SDK a veces aborta un turno internamente (contexto creciendo sin control dentro
@@ -35,6 +57,7 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__getWhatsappContacts": "📱 Leyendo contactos de WhatsApp...",
   "mcp__cos-tools__saveWhatsappContact": "💾 Guardando contacto de WhatsApp...",
   "mcp__cos-tools__readPersistedOutput":  "📂 Leyendo resultado completo...",
+  "mcp__cos-tools__consultarJson":       "🔬 Filtrando los datos...",
   "mcp__cos-tools__fetchAsUser":         "🔐 Accediendo con sesión de Safari...",
   "mcp__cos-tools__fetchAndSummarize":   "🔄 Descargando y resumiendo en background...",
   "mcp__cos-tools__getFocoCalStatus":   "🎯 Revisando Foco CAL...",
@@ -155,10 +178,12 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
     ? recentMsgs.map((m) => `${m.role === "user" ? "Cal" : "CoS"}: ${m.content}`).join("\n")
     : "";
 
+  // Con la sesión retomada, el SDK ya trae el historial real (incluidos los resultados de
+  // tools); el bloque de texto de KV solo se usa como fallback cuando NO hubo resume.
   const prompt = [
     deps.contextHeader && deps.contextHeader,
-    summaryMsg && `Contexto anterior:\n${summaryMsg.content}`,
-    recentBlock && `Historial reciente:\n${recentBlock}`,
+    !deps.resumed && summaryMsg && `Contexto anterior:\n${summaryMsg.content}`,
+    !deps.resumed && recentBlock && `Historial reciente:\n${recentBlock}`,
     `Mensaje: ${userMessage}`,
   ]
     .filter(Boolean)
@@ -170,10 +195,26 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
   let finalText = "";
   let terminalReason: string | undefined;
   let deferredToolUse: { id: string; name: string; input: unknown } | undefined;
+  let sessionId: string | undefined;
   const toolCalls: Array<{ name: string; ok?: boolean; err?: string }> = [];
 
   for await (const message of q) {
     if (firstEventMs === 0) firstEventMs = Date.now() - sdkStart;
+
+    // El SDK emite el sessionId en su mensaje `init`, al principio del turno. Se captura acá
+    // (y no al final) porque un turno que falla a mitad igual dejó una sesión válida en disco:
+    // conservarla permite que el turno siguiente retome el contexto en vez de empezar de cero.
+    if (message.type === "system" && (message as { subtype?: string }).subtype === "init") {
+      sessionId = (message as { session_id?: string }).session_id;
+      if (sessionId) {
+        try {
+          deps.onSessionId?.(sessionId);
+        } catch {
+          // Persistir el sessionId nunca debe tumbar el turno: si falla, el peor caso es que el
+          // turno siguiente arranque sin resume y use el historial de KV.
+        }
+      }
+    }
 
     if (message.type === "assistant") {
       const content =
@@ -245,14 +286,48 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
 
   console.log(JSON.stringify({ ts: Date.now(), msg: "turn_summary", toolCalls }));
 
-  // Desde que "ToolSearch" dejó de estar bloqueada (2026-07-14), el SDK puede cortar el turno
-  // con subtype "success" pero terminal_reason "tool_deferred" — el modelo intentó usar una tool
-  // que todavía no había buscado/cargado. `result` en ese caso no es una respuesta real; sin este
-  // chequeo se le reenviaría a Cal tal cual (vacía o a medio armar) sin rastro en logs.
-  if (terminalReason === "tool_deferred") {
-    console.log(JSON.stringify({ ts: Date.now(), msg: "tool_deferred_unresolved", deferredToolUse, finalText }));
-    finalText =
-      "Necesitaba cargar una herramienta que no tenía lista y el turno se cortó ahí. ¿Puedes repetirme el pedido?";
+  // El SDK puede cortar un turno con subtype "success" pero un `terminal_reason` que indica que
+  // `result` NO es una respuesta real — viene vacío o a medio armar. Sin este mapeo, ese texto se
+  // le reenvía a Cal tal cual y sin rastro en logs (fue el bug de 2026-07-14 con "tool_deferred").
+  //
+  // El union `TerminalReason` se AMPLIÓ en el SDK 0.3.x (sdk.d.ts:6909). Chequear solo el string
+  // viejo dejaba pasar a los hermanos nuevos — en particular `tool_deferred_unavailable`, señalado
+  // por daemon-health-reviewer. Se mapean por nombre y hay un `default` para los que se agreguen
+  // en el futuro: un mensaje genérico entendible es mejor que reenviar un `result` vacío.
+  const TERMINAL_REASON_MESSAGES: Record<string, string> = {
+    tool_deferred:
+      "Necesitaba cargar una herramienta que no tenía lista y el turno se cortó ahí. ¿Puedes repetirme el pedido?",
+    tool_deferred_unavailable:
+      "Quise usar una herramienta que no está disponible ahora y el turno se cortó. ¿Puedes repetirme el pedido?",
+    prompt_too_long:
+      "Se me hizo demasiado largo el contexto de esta conversación. Manda <code>/reset</code> y volvemos a empezar.",
+    max_turns:
+      "Este pedido me llevó más pasos de los que tengo permitidos y tuve que cortar. ¿Lo probamos por partes?",
+    budget_exhausted:
+      "Me quedé sin presupuesto de tokens a mitad del pedido. ¿Lo intentamos otra vez, más acotado?",
+    structured_output_retry_exhausted:
+      "No logré armar la respuesta en el formato correcto después de varios intentos. ¿Puedes reformular?",
+    turn_setup_failed:
+      "No pude arrancar bien el turno. Intenta de nuevo en un momento.",
+    model_error: "Hubo un error del modelo procesando eso. Intenta de nuevo, por favor.",
+    api_error: "Hubo un error de la API procesando eso. Intenta de nuevo, por favor.",
+  };
+
+  // Solo se interviene si NO hay respuesta utilizable: algunos cortes (ej. `max_turns`) igual
+  // dejan texto parcial que a Cal le sirve más que un mensaje de error genérico.
+  const terminalIsFatal = terminalReason !== undefined
+    && terminalReason !== "completed"
+    && finalText.trim().length === 0;
+
+  if (terminalIsFatal) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "turn_terminal_reason", terminalReason, deferredToolUse, finalText }));
+    finalText = TERMINAL_REASON_MESSAGES[terminalReason!]
+      ?? "El turno se cortó antes de que pudiera responderte. ¿Puedes repetirme el pedido?";
+  } else if (terminalReason === "tool_deferred" || terminalReason === "tool_deferred_unavailable") {
+    // Estos dos sí se pisan aunque haya texto: lo que queda es el preámbulo previo al tool call
+    // que nunca corrió, así que como respuesta es engañoso — parece completo y no lo está.
+    console.log(JSON.stringify({ ts: Date.now(), msg: "tool_deferred_unresolved", terminalReason, deferredToolUse, finalText }));
+    finalText = TERMINAL_REASON_MESSAGES[terminalReason];
   } else if (SDK_DIAGNOSTIC_PATTERNS.some((p) => p.test(finalText))) {
     console.log(JSON.stringify({ ts: Date.now(), msg: "sdk_diagnostic_leak", finalText }));
     finalText =
@@ -263,6 +338,7 @@ export async function runAgent(userMessage: string, deps: AgentDeps): Promise<Ag
     reply: finalText.trim(),
     sdkMs: Date.now() - sdkStart,
     firstEventMs,
+    sessionId,
   };
 }
 

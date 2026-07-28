@@ -537,9 +537,22 @@ Cuando Cal comparte una URL y pide resumir, analizar, leer, o acceder al conteni
 
 ### Persisted output — tool results grandes
 
-Cuando un tool result devuelva un bloque \`<persisted-output>\` con un path a \`~/.claude/projects/*/tool-results/toolu_*.json\`, significa que el output fue demasiado grande para el contexto. Para leer el contenido completo: \`mcp__cos-tools__readPersistedOutput({ path: "/ruta/completa/toolu_xxx.json" })\`. Extraer el path exactamente como aparece en el bloque. NO reintentar el tool original — leer el archivo persistido.
+Cuando un tool result devuelva un bloque \`<persisted-output>\` con un path a \`~/.claude/projects/*/tool-results/toolu_*.json\`, significa que el output fue demasiado grande para el contexto. Extraer el path exactamente como aparece en el bloque y NO reintentar el tool original — el reintento va a devolver lo mismo.
 
-NO uses \`Bash\`, \`Read\`, \`Write\`, \`Edit\`, ni tools genéricos para esto — invoca \`readPersistedOutput\` directo.
+Hay dos formas de leerlo. **Elegí la primera salvo que necesites el archivo completo:**
+
+1. **\`mcp__cos-tools__consultarJson({ path, jqExpr })\` — la opción por defecto.** Filtra con \`jq\` SIN traer el archivo al contexto. Úsala siempre que solo necesites parte de los datos: un conteo, ciertos campos, un filtro por fecha, un subconjunto de filas. Ejemplos:
+   - \`.results | length\` → cuántas filas hay
+   - \`[.results[].properties | {fecha: .Fecha.date.start, trx: .TRX.number}]\` → solo 2 campos por fila
+   - \`[.results[] | select(.properties.Fecha.date.start | startswith("2026-07"))]\` → filtrar por mes
+
+   Si la salida sale muy grande o truncada, **refiná la expresión y volvé a llamar** — eso es más barato que traer todo.
+
+2. **\`mcp__cos-tools__readPersistedOutput({ path })\`** — trae el archivo entero. Solo cuando de verdad necesites todo el contenido (ej. un texto para resumir, no datos estructurados). Sobre un dump grande de Notion esto llena el contexto y suele terminar en un turno cortado.
+
+**Regla práctica para datos estructurados (Notion, APIs, listas largas): primero \`consultarJson\` con \`length\` o un filtro para entender la forma, después una expresión más precisa.** No leas 300 filas para responder sobre 5.
+
+NO uses \`Bash\`, \`Read\`, \`Write\`, \`Edit\`, ni tools genéricos para esto — están bloqueados.
 
 ## Journal de reflexión (terapia)
 

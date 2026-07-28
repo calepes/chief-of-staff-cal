@@ -149,6 +149,96 @@ captura cruda de pensamientos con fecha y hora, con puente a **Resonate Calendar
   Topics no permite crear uno nuevo (`createTopic` existe pero no tiene call site); `Origen: "Sesión
   terapia"` no tiene UI (el modo siempre abre como `Texto`).
 
+## Runtime del SDK — modelo, effort, turnos y sesión (2026-07-27)
+
+Origen: Cal pidió *"toma los valores de los sábados, ¿a este ritmo cuándo llegamos a 5MM?"* y recibió
+"⚠️ No pude procesar tu mensaje". El log mostró `agent_error: Reached maximum number of turns (12)` —
+el turno quemó los 12 turnos en `ToolSearch` con nombre corto (falla; hay que usar el nombre COMPLETO
+`mcp__cos-tools__X`), 6 llamadas a `notionCli` con `body` como **string** (el tool hace
+`JSON.stringify(body)` → doble encode → `400 invalid_json`; pasar `body` como OBJETO) y una query sin
+filtro que devolvió 352 KB. Auditando eso salió el resto.
+
+- **SDK actualizado 0.2.122 → 0.3.220.** Estaba 98 versiones atrasado; los comentarios del 0.2.x
+  todavía decían `'xhigh' — Opus 4.7 only`, o sea era pre-Opus 5. El upgrade exige
+  `@anthropic-ai/sdk >= 0.93` como peer. Esa dependencia **no se importa en ningún `.ts` del repo**
+  (verificado con grep), pero **no es huérfana**: en 0.3.x el agent SDK la movió a `peerDependencies`
+  junto con `@modelcontextprotocol/sdk`, y sus tipos hacen `import type` desde ahí — sacarla rompería
+  el typecheck. Las dos quedan declaradas explícitas en `daemon-v2/package.json`; antes
+  `@modelcontextprotocol/sdk` solo existía porque npm la auto-instaló como peer, y un
+  `--legacy-peer-deps` o una regeneración del lock habría roto el build.
+  Los breaking changes documentados del SDK (`systemPrompt` ya no es default, `settingSources`) son
+  de **v0.1.0** — Jano ya los tenía pasados y pasa `systemPrompt` explícito.
+- **`maxTurns` 12 → 25** (`index.ts`). El techo existe para cortar loops, no para acotar trabajo
+  legítimo; con 12, un pedido analítico real moría aunque fuera correcto.
+- **`effort` (nuevo, `effort.ts`).** Antes sin setear. Default `high` (override con env `JANO_EFFORT`),
+  y Cal sube a `xhigh` en un turno puntual con prefijo `/deep`, `/fondo` o `++`. **Prefijos explícitos
+  a propósito** — una heurística que adivine "esto parece analítico" gastaría cuota de Claude Max
+  (la MISMA de Cal) sin que él sepa por qué, y al fallar al revés dejaría los pedidos difíciles en
+  effort bajo justo cuando importa.
+- **Techo de 20 turnos por sesión** (`JANO_MAX_SESSION_TURNS`). `resume` reintroduce a propósito el
+  crecimiento monotónico de contexto que "startup() fresco por mensaje" había eliminado — el modo de
+  falla que tumbó a Jano **4 veces** ("Autocompact is thrashing"). El TTL de 12 h no es un techo: en un
+  día activo entran decenas de turnos. Al tope, el chat arranca sesión nueva y vuelve al historial de
+  KV: se pierde el detalle de tool calls viejas, no la conversación — o sea el peor caso es "como
+  antes de este cambio", no peor. Monitorear `grep sdk_diagnostic_leak ~/Library/Logs/cos-agent-v2.out.log`
+  los primeros días y ajustar el número si aparece.
+- **`resume` por chat (`session-store.ts`) — cierra el gap de contexto de raíz.** El SDK ya venía
+  persistiendo cada sesión COMPLETA (tool calls + resultados crudos) en
+  `~/.claude/projects/<proj>/<sessionId>.jsonl` — 245 archivos había cuando se encontró — y Jano las
+  tiraba: cada mensaje arrancaba de cero y reconstruía desde 40 mensajes de TEXTO en KV. Ese era
+  exactamente el bug del PNR de BoA (2026-07-14, ver más arriba). Ahora el `sessionId` se guarda por
+  chat en `~/.cos-agent/sessions.json` (IO **sync** a propósito: se lee en el camino crítico justo
+  antes de `takeWarm()`, y un round-trip a KV comería el solapamiento que ese `takeWarm()` temprano
+  existe para ganar) y se pasa como `resume`. Detalles que importan:
+  - **TTL 12 h, igual que el historial en KV** — desincronizarlos daría el peor caso: sesión viva con
+    historial vencido, o al revés.
+  - **Si hubo resume, `runAgent` NO reinyecta el historial de texto de KV** (`deps.resumed`): el SDK ya
+    lo tiene, y duplicarlo le daría al modelo dos versiones del pasado — la real y una resumida por
+    Haiku que puede contradecirla. KV pasó de fuente primaria a **fallback**.
+  - **Fallback si el resume falla** (`.jsonl` borrado, vacío o corrupto): `takeWarm` reintenta limpio
+    y `onResumeFailed` borra el sessionId roto. **Verificado empíricamente** contra el SDK real: los
+    tres casos tiran `Error: No conversation found with session ID: …`, así que el `catch` los cubre
+    de verdad — no es una suposición. Sin eso, un resume roto dejaba el chat muerto hasta que a Cal
+    se le ocurriera mandar `/reset`.
+  - **`/deep` por voz funciona** (`ensureWarmEffort`): el prefijo viene dentro del audio, así que el
+    effort se recalcula después de transcribir y el warm se rehace solo si cambió. Sin esto el dial
+    se ignoraba en silencio en la mitad de los mensajes de Cal, que usa voz seguido.
+  - **`/reset` ahora limpia KV *y* sessionId.** Limpiar solo KV lo dejaba sin efecto real: el turno
+    siguiente retomaba la sesión y traía de vuelta todo lo que Cal quiso borrar.
+- **Tool `consultarJson({path, jqExpr})`** (`tools/consultar-json.ts`) — corre `jq` sobre un
+  persisted-output **sin traerlo al contexto**. Es la capacidad que faltaba: `readPersistedOutput`
+  trae el archivo entero, que sobre un dump de Notion de 350 KB es el problema mismo que el
+  persisted-output quería evitar. `system-prompt.ts` ahora instruye preferir `consultarJson` para
+  datos estructurados y dejar `readPersistedOutput` para cuando de verdad se necesita todo el texto.
+  - **Corre `execFile` ASÍNCRONO, nunca `spawnSync`.** `spawnSync` congela el proceso entero — y este
+    daemon es uno solo: se frenarían el poll loop (todos los chats), los updates de progreso, el
+    watchdog del webhook y los 4 crons proactivos. Hasta 10 s de parálisis global por una consulta.
+  - **`realpathSync` ANTES de validar el path.** El regex de la allowlist acepta `..` en sus
+    segmentos `[^/]+`, así que `~/.claude/projects/../../tool-results/toolu_x.json` pasaba el chequeo
+    y apuntaba fuera del árbol. Resolver primero colapsa el `..` y además sigue symlinks. **La misma
+    debilidad sigue en `read-persisted.ts`**, que tiene el regex idéntico — no se tocó en este
+    cambio, pero está ahí.
+  - **⚠️ Gotcha de seguridad, verificado en vivo: `jq` expone el entorno del proceso** vía `env` y
+    `$ENV` (`FOO=secreto jq -n 'env.FOO'` devuelve `"secreto"`). El daemon corre con `NOTION_TOKEN`,
+    `COS_TELEGRAM_BOT_TOKEN` y todo `apps.env` cargado, así que el spawn va con
+    `env: { PATH: "/usr/bin:/bin" }`. Sin eso, una expresión con `env` — escrita por error por el
+    modelo o inducida por prompt injection en contenido web que Jano haya leído — volcaría todos los
+    secretos de Cal al contexto y de ahí a Telegram. Hay tests de regresión para `env` y `$ENV`.
+  - **`maxBuffer` 64 MB:** `spawnSync` corta en 1 MB por default y devuelve `ENOBUFS`. Lo encontró un
+    test, no la revisión — sin esto, cualquier consulta amplia fallaba con error críptico en vez de
+    truncar. El truncado real lo hace `MAX_OUTPUT_CHARS` (20 K), que sí es explícito.
+  - NO es un `Bash` general: `Bash` sigue en `DISALLOWED_BUILTINS`. Es un binario fijo, sin shell,
+    con allowlist de paths (la misma de `read-persisted.ts`).
+
+**El upgrade del SDK desbloqueó 5× de contexto (confirmado con prueba de humo real).** Con 0.2.122 el
+log reportaba `contextWindow: 200000` en cada turno; con 0.3.220, una query mínima contra el mismo
+`claude-sonnet-5` reporta **`contextWindow: 1000000`** y `maxOutputTokens: 64000`. O sea el techo de
+200K no era un límite del modelo ni del harness: eran las tablas de modelos desactualizadas del SDK
+0.2.x (esa rama es anterior a Opus 5 / Sonnet 5 — sus propios comentarios todavía decían
+`'xhigh' — Opus 4.7 only`). No hizo falta ningún flag beta: `context-1m-2025-08-07` sigue existiendo
+en los tipos pero está documentado como "Sonnet 4/4.5 only" y NO se usa.
+La misma prueba confirmó que 0.3.220 arranca bien con OAuth Max y acepta `effort`.
+
 ## Notion
 - Integración "Claude CoS" (DB Tareas + People). Prefijo MCP: `mcp__claude_ai_Notion__*`.
 - **Ese MCP es SOLO del daemon.** En sesión interactiva de Claude Code no existe — usar el CLI `ntn` (skill `notion-ntn`) para cualquier query/escritura a Notion sobre este repo (ej. sync de docs a la DB "Agentes AI").
