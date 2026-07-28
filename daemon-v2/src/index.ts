@@ -9,7 +9,7 @@ import { runAgent } from "./agent.js";
 import { buildSdkTools } from "./agent-tools.js";
 import { CLAUDE_AI_COS_TOOLS, DISALLOWED_BUILTINS } from "./agent-options.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
-import { buildLearningsSection } from "./learnings.js";
+import { buildSystemPrompt } from "./learnings.js";
 import { compactHistory } from "./compact.js";
 import { sanitizeForTelegram } from "./format.js";
 import { QueuePoller } from "./queue-poller.js";
@@ -200,7 +200,11 @@ const sdkTools = buildSdkTools({
   homePin: env.HOME_PIN || undefined,
   kv,
   cookieJarKv,
-  getOptions: () => BASE_OPTIONS,
+  // BASE_OPTIONS ya no trae systemPrompt (se recalcula por turno, ver currentSystemPrompt()):
+  // lo agregamos acá para que ningún consumidor reciba un Options sin prompt. El único consumidor
+  // hoy (analyzeMeeting, en agent-tools.ts) lo pisa con el suyo propio de subagente; si mañana
+  // aparece otro que no lo pise, recibe el prompt AL DÍA en vez de ninguno.
+  getOptions: () => ({ ...BASE_OPTIONS, systemPrompt: currentSystemPrompt() }),
 });
 
 // sdkTools is shared (pure function handlers pointing to stable shared state).
@@ -247,8 +251,16 @@ const BOA_CHECKIN_DIST =
 // no levanta y sus tools simplemente no aparecen, sin error visible en los logs.
 const NODE_BIN = "/usr/local/bin/node";
 
+// El system prompt NO vive en BASE_OPTIONS a propósito: se recalcula en CADA turno vía
+// currentSystemPrompt(). BASE_OPTIONS es un const de módulo, así que cualquier cosa que se evalúe
+// acá adentro queda congelada al cargar el módulo — y `learnings.md` lo escriben
+// `recordarAprendizaje` y los callbacks `lrn:keep`/`lrn:all` con el daemon ya corriendo. Congelado,
+// nada de lo que Cal aprueba influye en ningún turno hasta el próximo restart de launchd (semanas).
+// Ver el comentario largo de buildSystemPrompt() en learnings.ts, incluida la limitación conocida
+// con `resume` (una sesión ya abierta conserva el prompt con el que arrancó).
+const currentSystemPrompt = (): string => buildSystemPrompt(SYSTEM_PROMPT, LEARNINGS_PATH);
+
 const BASE_OPTIONS: Options = {
-  systemPrompt: SYSTEM_PROMPT + buildLearningsSection(LEARNINGS_PATH),
   mcpServers: {
     // "cos-tools" is NOT here — injected fresh per startup() call in takeWarm()
     // to avoid shared MCP server deregistration issues with concurrent agents.
@@ -398,6 +410,8 @@ async function takeWarm(opts?: {
   const t0 = Date.now();
   const buildOptions = (resume?: string): Options => ({
     ...BASE_OPTIONS,
+    // Recalculado por turno (lee learnings.md de disco) — ver currentSystemPrompt().
+    systemPrompt: currentSystemPrompt(),
     ...(opts?.effort ? { effort: opts.effort } : {}),
     ...(resume ? { resume } : {}),
     mcpServers: {

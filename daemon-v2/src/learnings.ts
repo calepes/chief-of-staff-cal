@@ -74,3 +74,23 @@ export function buildLearningsSection(path: string): string {
     "Estas son cosas que aprendiste de Cal en conversaciones anteriores. Aplícalas sin anunciarlas.",
   ].join("\n");
 }
+
+/**
+ * System prompt completo = prompt base + la sección de aprendizajes LEÍDA DE DISCO en el momento.
+ *
+ * ⚠️ NO cachear el resultado en un `const` de módulo (así estaba hasta 2026-07-28 y volvía
+ * decorativo todo el sistema de aprendizaje): `learnings.md` lo escriben `recordarAprendizaje` y
+ * los callbacks `lrn:keep`/`lrn:all` mientras el daemon ya está corriendo. Si el prompt se calcula
+ * una sola vez al cargar el módulo, nada de lo aprobado influye en ningún turno hasta el próximo
+ * restart de launchd — y este daemon corre semanas sin reiniciarse. El costo real de recalcularlo
+ * es un `readFileSync` de pocos KB, despreciable frente al `startup()` que ya spawnea un subprocess
+ * en cada turno.
+ *
+ * Limitación conocida y aceptada (no es un bug nuevo): con `resume`, una sesión YA EN CURSO
+ * conserva el system prompt con el que arrancó. Un learning aprobado impacta recién en la sesión
+ * siguiente de ese chat — o sea al vencer el TTL de 12 h o al llegar al tope de turnos por sesión
+ * (JANO_MAX_SESSION_TURNS). A más tardar al día siguiente aplica.
+ */
+export function buildSystemPrompt(basePrompt: string, learningsPath: string): string {
+  return basePrompt + buildLearningsSection(learningsPath);
+}

@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildLearningsSection } from "./learnings.js";
+import { buildLearningsSection, buildSystemPrompt } from "./learnings.js";
 
 describe("buildLearningsSection", () => {
   let dir: string;
@@ -86,5 +86,58 @@ describe("buildLearningsSection", () => {
 
     const empty = buildLearningsSection(join(dir, "no-existe.md"));
     expect(empty).not.toContain("addLearning");
+  });
+});
+
+describe("buildSystemPrompt", () => {
+  let dir: string;
+  let path: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "learnings-prompt-"));
+    path = join(dir, "learnings.md");
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // El bug que este test cubre: el system prompt se calculaba UNA vez, al cargar el módulo
+  // (BASE_OPTIONS en index.ts), así que todo lo que escribiera recordarAprendizaje o los
+  // callbacks lrn:* quedaba en el archivo sin influir en ningún turno hasta el próximo restart
+  // de launchd — semanas, en la práctica. El test simula exactamente eso: dos construcciones
+  // consecutivas del prompt con el archivo modificado en el medio, sin recargar el módulo.
+  it("recalcula el prompt: dos llamadas con el archivo modificado en el medio dan prompts distintos", () => {
+    writeFileSync(path, "- [2026-07-01] [pref] Cal prefiere respuestas cortas\n");
+    const primero = buildSystemPrompt("BASE", path);
+    expect(primero).toContain("Cal prefiere respuestas cortas");
+    expect(primero).not.toContain("Cal odia los emojis en reportes de KPIs");
+
+    // Un learning nuevo aprobado mientras el daemon YA está corriendo.
+    appendFileSync(path, "- [2026-07-28] [pref] Cal odia los emojis en reportes de KPIs\n");
+
+    const segundo = buildSystemPrompt("BASE", path);
+    expect(segundo).not.toBe(primero);
+    expect(segundo).toContain("Cal odia los emojis en reportes de KPIs");
+    expect(segundo).toContain("Cal prefiere respuestas cortas");
+  });
+
+  it("ve un learning nuevo aunque el archivo no existiera en la primera llamada", () => {
+    const inexistente = join(dir, "todavia-no.md");
+    const primero = buildSystemPrompt("BASE", inexistente);
+    expect(primero).toContain("(Sin learnings todavía)");
+
+    writeFileSync(inexistente, "- [2026-07-28] [err] No mandes tablas <pre> con banderas\n");
+
+    const segundo = buildSystemPrompt("BASE", inexistente);
+    expect(segundo).not.toContain("(Sin learnings todavía)");
+    expect(segundo).toContain("No mandes tablas <pre> con banderas");
+  });
+
+  it("antepone el prompt base y le pega la sección de aprendizajes", () => {
+    writeFileSync(path, "- [2026-07-01] [pref] Cal prefiere respuestas cortas\n");
+    const prompt = buildSystemPrompt("PROMPT BASE DE JANO", path);
+    expect(prompt.startsWith("PROMPT BASE DE JANO")).toBe(true);
+    expect(prompt).toContain("## Aprendizajes acumulados");
   });
 });
