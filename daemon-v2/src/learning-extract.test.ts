@@ -9,6 +9,22 @@ describe("buildExtractPrompt", () => {
     expect(prompt).toContain("CAL: hola");
   });
 
+  it("está escrito en español neutro, sin voseo", () => {
+    // El propio prompt exige neutro (regla 6) porque estos textos terminan en el system prompt de
+    // Jano y el registro se contagia. Estaba redactado en voseo, o sea modelaba lo contrario de lo
+    // que pedía. Este test lo ancla.
+    expect(prompt).toContain("Eres el módulo de reflexión nocturna");
+    expect(prompt).toContain("Devuelve SOLO un array JSON");
+    expect(prompt).toContain("Si no encuentras nada que valga la pena");
+    expect(prompt).toContain("Escribe SIEMPRE en español NEUTRO");
+
+    // Formas de voseo que no deben aparecer. "podés" se excluye a propósito: aparece UNA vez, como
+    // el contraejemplo dentro de la regla 6 ("di 'puedes', nunca 'podés'").
+    for (const voseo of ["Sos el", "Devolvé", "Escribí ", "encontrás", "tenés", "querés", "decí "]) {
+      expect(prompt).not.toContain(voseo);
+    }
+  });
+
   it("le pasa los learnings existentes para que deduplique", () => {
     expect(prompt).toContain("Ya sé esto");
   });

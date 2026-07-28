@@ -31,11 +31,11 @@ export function buildExtractPrompt(transcript: string, existentes: Learning[]): 
       : "(todavía no hay ningún aprendizaje guardado)";
 
   return [
-    "Sos el módulo de reflexión nocturna de Jano, el asistente personal de Cal en Telegram.",
+    "Eres el módulo de reflexión nocturna de Jano, el asistente personal de Cal en Telegram.",
     "Tu única tarea es leer el transcript de las conversaciones de hoy y proponer aprendizajes",
     "candidatos que Jano debería recordar de ahora en adelante.",
     "",
-    "Devolvé SOLO un array JSON, sin explicación ni fences de markdown, con elementos:",
+    "Devuelve SOLO un array JSON, sin explicación ni fences de markdown, con elementos:",
     '{"tag": "...", "text": "...", "evidencia": "..."}',
     "",
     "Los cuatro tags posibles:",
@@ -58,10 +58,10 @@ export function buildExtractPrompt(transcript: string, existentes: Learning[]): 
     "   un patrón, no un incidente aislado.",
     "3. Nada genérico ni obvio ('Cal usa Telegram', 'Jano debe ser útil').",
     "4. Los bloques 'TOOL ERROR' del transcript son la mejor fuente de candidatos 'err'.",
-    "5. Si no encontrás nada que valga la pena, devolvé un array vacío: []. Devolver vacío es el",
+    "5. Si no encuentras nada que valga la pena, devuelve un array vacío: []. Devolver vacío es el",
     "   resultado ESPERADO la mayoría de los días — no inventes un candidato débil solo para",
     "   justificar la llamada.",
-    "6. Escribí SIEMPRE en español NEUTRO, sin voseo (decí 'puedes', nunca 'podés'). Esto no es",
+    "6. Escribe SIEMPRE en español NEUTRO, sin voseo (di 'puedes', nunca 'podés'). Esto no es",
     "   un detalle de estilo: estos textos se inyectan después en el system prompt de Jano, y el",
     "   estilo de este módulo se contagia a cómo Jano le responde a Cal.",
     "",
