@@ -29,6 +29,9 @@ import { applyPendingEdit, handleJournalCallback, isJournalCallback } from "./jo
 import { parseJournalPrefix } from "./journal-text.js";
 import { renderModeClosed, renderModeOpen } from "./journal-card.js";
 import { checkJournalSweep } from "./proactive/journal-sweep.js";
+import { isBacklogCallback, handleBacklogCallback } from "./backlog-callbacks.js";
+import { BacklogStore } from "./backlog-store.js";
+import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
 import { checkKpiIngest } from "./proactive/kpi-ingest-check.js";
@@ -177,6 +180,7 @@ const cookieJarKv = new CfKv({
 });
 const state = new ConversationState(kv, compactHistory);
 const journalStore = new JournalStore(kv);
+const backlogStore = new BacklogStore(kv);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
 // (ej. checkPlaylistsResumir/checkStarredResumir, que disparan un flujo fire-and-forget
@@ -610,6 +614,53 @@ async function processMessage(
       )
         .catch((err) => log({ msg: "journal_callback_error", err: String(err) }))
         .finally(() => releaseLock(kv, jchat, lockUserId).catch(() => {}));
+      return;
+    }
+
+    // Callbacks del backlog (bklg:*) → mecánicos, sin LLM. Escriben a disco, así que llevan el
+    // mismo lock anti-doble-tap que jnl:* y mlog:/mskip:/msel:.
+    // Va ARRIBA del `startsWith("j:")` genérico: ese bloque retorna incondicionalmente y dejaría
+    // esto como código muerto sin rastro en logs (mismo motivo que j:journal).
+    if (isBacklogCallback(cb.data)) {
+      const bchat = cb.message.chat.id;
+      const banchor = cb.message.message_id;
+      const lockUserId = cb.from.id;
+
+      const acquired = await tryAcquireLock(kv, bchat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+
+      // Fire-and-forget: el poll loop del daemon es estrictamente secuencial y awaitear acá
+      // congelaría todos los chats mientras se escribe el archivo.
+      void handleBacklogCallback(
+        {
+          store: backlogStore,
+          root: BACKLOG_ROOT,
+          today: new Date().toISOString().slice(0, 10),
+          log,
+          editCard: async (chatId, messageId, text, keyboard) => {
+            // El teclado va SIEMPRE explícito: editMessageText no limpia reply_markup si se
+            // omite (gotcha de Telegram documentado en CLAUDE.md), y las tarjetas terminales
+            // del flujo quedarían con sus botones vivos y tocables.
+            await editMessage(
+              env.COS_TELEGRAM_BOT_TOKEN,
+              chatId,
+              messageId,
+              text,
+              "HTML",
+              keyboard ?? { inline_keyboard: [] },
+            ).catch(() => {});
+          },
+        },
+        bchat,
+        banchor,
+        cb.data!,
+      )
+        .catch((err) => log({ msg: "backlog_callback_error", err: String(err) }))
+        .finally(() => releaseLock(kv, bchat, lockUserId).catch(() => {}));
       return;
     }
 
