@@ -1660,7 +1660,11 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "notionCli",
-      "Llamada a la API de Notion vía ntn CLI (acceso principal a Notion). Args: { method: 'GET'|'POST'|'PATCH', path: '/v1/...', body? (objeto JSON) }. Ejemplos: query DB → POST '/v1/databases/{id}/query' body {page_size:5}; búsqueda → POST '/v1/search' body {query,page_size:5}; leer página → GET '/v1/pages/{id}'; actualizar props → PATCH '/v1/pages/{id}' body {properties:{...}}; crear página → POST '/v1/pages' body {parent:{database_id},properties:{...}}. notion-version 2022-06-28 automática. (DELETE no permitido — archivar páginas con PATCH {in_trash:true}.) Devuelve el JSON de Notion. Si da 403/vacío, la integración no tiene esa página compartida.",
+      "Llamada a la API de Notion vía ntn CLI (acceso principal a Notion). Args: { method: 'GET'|'POST'|'PATCH', path: '/v1/...', body? }. " +
+      "**`body` va como OBJETO JSON, no como string.** Correcto: body: {page_size: 5}. Incorrecto: body: \"{\\\"page_size\\\": 5}\". " +
+      "Ejemplos: query DB → POST '/v1/databases/{id}/query' body {page_size:5}; búsqueda → POST '/v1/search' body {query,page_size:5}; leer página → GET '/v1/pages/{id}'; actualizar props → PATCH '/v1/pages/{id}' body {properties:{...}}; crear página → POST '/v1/pages' body {parent:{database_id},properties:{...}}. notion-version 2022-06-28 automática. (DELETE no permitido — archivar páginas con PATCH {in_trash:true}.) " +
+      "Para queries que pueden devolver MUCHAS filas (ej. la DB de KPIs), acotá desde el vuelo: usá `filter` por fecha y `filter_properties` en el query string, o si igual sale un persisted-output, filtralo con `consultarJson` en vez de leerlo entero. " +
+      "Devuelve el JSON de Notion. Si da 403/vacío, la integración no tiene esa página compartida.",
       { method: z.enum(["GET", "POST", "PATCH"]), path: z.string(), body: z.any().optional() },
       async ({ method, path, body }) => asText(notionApi(method, path, body)),
     ),

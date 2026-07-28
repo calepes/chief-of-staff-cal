@@ -40,12 +40,39 @@ function runNtn(args: string[]): Record<string, unknown> {
   }
 }
 
+/**
+ * Serializa el body para `ntn api -d`.
+ *
+ * El schema del tool declara `body` como objeto, pero el modelo manda un STRING con JSON adentro
+ * bastante seguido. Con un `JSON.stringify()` a secas eso se doble-encodea — `{"a":1}` sale como
+ * `"{\"a\":1}"`, o sea un string JSON, no un objeto — y Notion responde `400 invalid_json`.
+ *
+ * No es teórico: pasó en dos turnos reales de Cal (2026-07-27), 14 llamadas fallidas entre los dos,
+ * uno de ellos muerto por agotar los turnos y el otro respondiendo sin datos tras 233 s y $1.55.
+ * Desde afuera se ve como "Jano no puede leer Notion", sin ninguna pista del motivo.
+ *
+ * Un string que ya es JSON válido se pasa tal cual. Uno que NO es JSON se stringifica, porque ahí
+ * la intención sí era mandar un string literal.
+ */
+function serializeBody(body: unknown): string {
+  if (typeof body !== "string") return JSON.stringify(body);
+  try {
+    JSON.parse(body);
+    return body;
+  } catch {
+    return JSON.stringify(body);
+  }
+}
+
 /** Llamada genérica a la API de Notion. path tipo "/v1/databases/ID/query". */
 export function notionApi(method: string, path: string, body?: unknown): Record<string, unknown> {
   const args = ["api", "-X", method, path, "--notion-version", VERSION];
-  if (body !== undefined && body !== null) args.push("-d", JSON.stringify(body));
+  if (body !== undefined && body !== null) args.push("-d", serializeBody(body));
   return runNtn(args);
 }
+
+/** Exportado solo para tests. */
+export const __serializeBodyForTest = serializeBody;
 
 /** Lee el body de una página como Markdown. */
 export function notionPageMarkdown(pageId: string): Record<string, unknown> {
