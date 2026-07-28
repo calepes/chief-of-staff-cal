@@ -1,5 +1,65 @@
 # CHANGELOG — Jano
 
+## 2026-07-28 (2)
+
+### Feature — Self-learning: la reflexión sale del turno
+- **Diagnóstico primero:** el loop de aprendizaje ya existía y estaba cerrado (`addLearning` →
+  `~/.cos-agent/learnings.md` → system prompt), pero llevaba **4 entries en 3 meses**. No faltaba
+  infraestructura: fallaba QUIÉN dispara la escritura. Se lo pedíamos al modelo en medio del turno,
+  compitiendo con la tarea real, y perdía siempre.
+- **El rediseño:** cron a las 22:00 (La Paz) lee las sesiones del día que el SDK ya persiste en
+  `.jsonl`, las recorta, las pasa por una llamada acotada a Haiku (`maxTurns:1`, sin tools) cuyo
+  único trabajo es reflexionar, deduplica contra lo ya guardado, y propone una tarjeta con botones.
+  Solo lo aprobado se escribe. Más `recordarAprendizaje` para cuando Cal dice "recuerda que…".
+- **Cuatro tags:** `pref` · `hecho` · `err` · `flujo`. Las 4 entries viejas sin tag se siguen
+  parseando (caen a `hecho`) — romper con ellas habría significado perder lo único que existía.
+- **Referencia:** el patrón viene del "Dreaming" de Anthropic (2026) — un pase en background que
+  revisa sesiones, extrae patrones y reescribe la memoria sin esperar que un humano diga qué
+  arreglar. Documentado en el spec.
+
+#### Dos bugs que habrían hecho el feature inútil, ambos invisibles en verde
+- **El system prompt se calculaba una sola vez al arrancar.** `BASE_OPTIONS` era un `const` de
+  módulo, así que `buildLearningsSection()` corría al cargar el proceso y nunca más. Todo lo
+  aprobado quedaba en el archivo sin influir en ningún turno hasta reiniciar el daemon — en un
+  proceso que corre semanas, indefinido. Es un defecto **preexistente** (aplicaba igual a las 4
+  entries viejas y probablemente explica en parte por qué el mecanismo se sentía muerto), pero este
+  feature lo volvía inaceptable. Ahora se recalcula por turno.
+- **`SDK_SESSIONS_DIR` apuntaba al directorio equivocado.** El SDK deriva la carpeta de sesiones del
+  **cwd del proceso**, y el `WorkingDirectory` del plist es `.../Jano/daemon-v2` — o sea las
+  sesiones del daemon están en `-...-Agents-Jano-daemon-v2`, no en `-...-Agents-Jano`, que es el de
+  las sesiones interactivas de Claude Code. Los dos existen. Verificado con el `sessionId` real:
+  **0 caracteres** contra el directorio hardcodeado, **16.461** contra el correcto. El modo de falla
+  era silencioso — transcript vacío → `learning_reflect_empty` → ninguna tarjeta, idéntico a un día
+  sin nada que aprender. El paso de verificación del plan comprobaba que el directorio *existiera*,
+  no que fuera *el correcto*, y existe por el uso interactivo.
+
+#### Otros hallazgos de los reviews
+- **Punto ciego de 22:00 a medianoche:** el cron filtraba por día calendario, así que una sesión
+  iniciada a las 22:30 no la leía ni el pase de ese día ni el del siguiente. Justo la franja en que
+  Cal más usa el bot (hay sesiones reales arrancando 23:08). Corregido con ventana móvil de 24 h.
+- **`✅ Guardar todos` guardaba lo que Cal nunca vio:** la tarjeta mostraba 5 y el botón persistía
+  todos. Con el transcript acarreando material no confiable (Jano resume webs con `fetchAsUser`),
+  ese era el camino por el que texto de una página podía fijarse sin haber sido leído. El batch
+  ahora se recorta **al crearlo**.
+- **`message.content` no siempre es un array:** en 144 casos sobre 40 sesiones reales viene como
+  string plano, y todos son mensajes de usuario — la fuente principal de learnings de preferencia.
+  El parser original los descartaba en silencio, con los tests en verde porque los fixtures solo
+  cubrían la forma de array. Encontrado verificando el formato real antes de escribir el parser.
+- **El ack no era auditable:** `recordarAprendizaje` escribe sin confirmación y el prompt le pedía
+  al modelo responder solo "🧠 Anotado.". Ahora el ack muestra el texto guardado — es lo único que
+  le permite a Cal ver qué se fijó en el comportamiento del bot.
+- **`addLearning` seguía allowlisteada** pese a que el prompt la declaraba obsoleta. Con ToolSearch
+  activo la prosa no alcanza: sacada de `agent-options.ts`.
+- **La fecha en UTC apareció cuatro veces** en este trabajo (heading de sección, registro de
+  sesiones, clave del cron, tool manual). Cal está en UTC-4 y usa el bot de noche, así que entre las
+  20:00 y medianoche todo se fechaba al día siguiente. Todas corregidas con `nowInLaPaz`.
+
+- **Archivos nuevos:** `learning-{types,file,transcript,extract,card,store,callbacks}.ts`,
+  `session-log.ts`, `proactive/learning-reflect.ts`, todos con test.
+- **Modificados:** `index.ts` (cron + routing `lrn:*` + recálculo del prompt), `agent-tools.ts`,
+  `system-prompt.ts`, `agent-options.ts`, `learnings.ts`, `session-store.ts`.
+- **632 tests en verde**, typecheck limpio.
+
 ## 2026-07-28
 
 ### Feature — Tools de backlog: Jano lee y escribe los `BACKLOG.md` de los proyectos de Cal

@@ -149,6 +149,56 @@ captura cruda de pensamientos con fecha y hora, con puente a **Resonate Calendar
   Topics no permite crear uno nuevo (`createTopic` existe pero no tiene call site); `Origen: "Sesión
   terapia"` no tiene UI (el modo siempre abre como `Texto`).
 
+## Self-learning — agregado 2026-07-28
+
+Jano aprende de sus conversaciones. Un cron nocturno (22:00 La Paz) lee las sesiones del día que el
+SDK ya persiste, las pasa por Haiku, y propone aprendizajes en una tarjeta con botones. Solo lo que
+Cal aprueba se escribe a `~/.cos-agent/learnings.md`, que se inyecta en el system prompt.
+Spec: `docs/superpowers/specs/2026-07-28-backlog-tool-y-self-learning-design.md` (Parte 2).
+
+- **El diagnóstico que originó el rediseño:** el loop de aprendizaje YA existía y estaba cerrado
+  (`addLearning` → archivo → system prompt), pero llevaba **4 entries en 3 meses**. La causa no era
+  falta de infraestructura sino QUIÉN dispara la escritura: el modelo, en medio del turno, mientras
+  resuelve otra cosa. La reflexión compite con la ejecución y pierde siempre. El fix es moverla
+  fuera del turno.
+- **Cuatro tags** en un solo archivo: `pref` (preferencia de estilo) · `hecho` (dato sobre Cal) ·
+  `err` (error operativo propio) · `flujo` (secuencia repetida). Las líneas viejas sin tag se
+  parsean igual y caen a `hecho`.
+- **⚠️ `SDK_SESSIONS_DIR` se deriva del `process.cwd()`, NUNCA se hardcodea.** El SDK arma el nombre
+  del directorio de sesiones desde el cwd, y el `WorkingDirectory` del plist es `.../Jano/daemon-v2`
+  — o sea las sesiones del daemon están en `-...-Agents-Jano-daemon-v2`, no en `-...-Agents-Jano`
+  (que es el de las sesiones interactivas de Claude Code sobre el repo). **Los dos directorios
+  existen**, y apuntar al equivocado da transcript vacío → `learning_reflect_empty` → ninguna
+  tarjeta: un modo de falla indistinguible de "hoy no hubo nada que aprender", que puede durar
+  semanas sin notarse. Encontrado por `daemon-health-reviewer` antes de producción; el paso de
+  verificación original comprobaba que el directorio *existiera*, no que fuera *el correcto*.
+- **Aislamiento de sesiones:** `session-log.ts` mantiene un registro append-only de los sessionIds
+  que usó el daemon (`~/.cos-agent/sessions-log.jsonl`). Sin él, el pase leería sesiones de
+  desarrollo. `sessions.json` no sirve: guarda solo la vigente y la pierde al rotar.
+- **Ventana móvil de 24 h**, no día calendario: un cron a las 22:00 que filtrara por fecha dejaría
+  ciega la franja 22:00-00:00, que es justo cuando Cal más escribe.
+- **El system prompt se recalcula POR TURNO.** `BASE_OPTIONS` ya no lleva `systemPrompt`: lo
+  inyectan `buildOptions()` y `getOptions()` vía `buildSystemPrompt()`. Antes era un `const` de
+  módulo evaluado una sola vez al arrancar, así que ningún learning nuevo influía hasta reiniciar el
+  daemon — en un proceso que corre semanas, indefinido. **No lo "optimices" de vuelta a constante.**
+  Limitación conocida: con `resume`, una sesión en curso conserva el prompt con el que arrancó, así
+  que un learning aprobado impacta en la sesión siguiente de ese chat (TTL 12 h o tope de turnos).
+- **El batch se recorta a 5 candidatos AL CREARLO**, no al renderizar: si la tarjeta mostrara 5 y
+  `✅ Guardar todos` guardara 8, entraría al system prompt texto que Cal nunca vio — y el transcript
+  acarrea material no confiable (Jano resume artículos con `fetchAsUser`/resumidor y eso entra como
+  bloque `JANO:`).
+- **`recordarAprendizaje` muestra SIEMPRE el texto guardado en el ack** (`🧠 Anotado: «...»`).
+  Escribe sin confirmación, y Jano ingiere contenido no confiable de rutina; sin el eco, un
+  "de ahora en más..." incrustado en una web podría fijarse sin que Cal pueda auditarlo.
+- **`mcp__agent-learnings__addLearning` fuera de la allowlist** (`agent-options.ts`): con ToolSearch
+  activo, decirlo solo en prosa no alcanzaba — el modelo podía llamarla igual, y escribe a un store
+  que no se inyecta en ningún prompt.
+- **Emojis de dominio** (extensión del lexicon de `telegram-bot-ux`): `🌙` reflexión nocturna ·
+  `🎯` pref · `🧠` hecho · `🔧` err · `🔁` flujo (mismo emoji que TRX en KPIs Yape — nunca coexisten
+  en un mensaje) · `🧹` poda. Ninguno decorativo.
+- **Pendiente conocido:** no hay forma de podar learnings desde el chat. El presupuesto blando
+  (~4 K tokens) avisa, pero borrar exige editar el archivo a mano.
+
 ## Backlogs de proyectos — agregado 2026-07-28
 
 Tres tools para que Jano lea y escriba los `BACKLOG.md` repartidos por `~/Claude Projects`:
@@ -382,16 +432,17 @@ las proactivas hoy desactivadas en Jano, copiar ese mismo patrón desde el día 
 (único proactivo activo en ese momento) y un futuro `fuel_alert` reactivado — nunca se confirmó en la
 práctica ni se implementó nada, y quedó sin objeto al apagarse `scheduleResumirPlaylist` el 2026-07-14.
 
-**Estado real (actualizado 2026-07-27):** **4 proactivos internos activos** — `scheduleHealthSyncCheck()`
+**Estado real (actualizado 2026-07-28):** **5 proactivos internos activos** — `scheduleHealthSyncCheck()`
 (alerta de corte de sync de Apple Health), `scheduleKpiIngestCheck()` (ingesta del mail diario de BCP a
-"KPIs diarios" + tarjeta de KPIs disparada desde ahí mismo, ver arriba) y `scheduleJournalSweep()`
-(barrido dominical del Journal de terapia, ver abajo) y `scheduleDailyNoteCheck()` (ingesta de
+"KPIs diarios" + tarjeta de KPIs disparada desde ahí mismo, ver arriba), `scheduleJournalSweep()`
+(barrido dominical del Journal de terapia, ver abajo), `scheduleDailyNoteCheck()` (ingesta de
 "Daily Notes Yape" por mail, cada 15 min 6-23h — implementado en otra sesión el 2026-07-27,
-**pendiente de documentar en detalle por quien lo hizo**), además del webhook watchdog
-(infra, no le manda nada a Cal). `scheduleKpiCardDaily()` dejó de ser un cron propio el 2026-07-24 —
-ver arriba, quedó absorbido dentro del pipeline PDF de `scheduleKpiIngestCheck()`. Los otros 3 crons de
-dominio (resumidor, flight check-in, Foco check-in) siguen desactivados. Jano ya no es 100% reactivo —
-son las cuatro excepciones puntuales a esa decisión del 2026-07-14.
+**pendiente de documentar en detalle por quien lo hizo**) y `scheduleLearningReflect()` (reflexión
+nocturna del self-learning, 22:00 La Paz — ver sección "Self-learning" abajo), además del webhook
+watchdog (infra, no le manda nada a Cal). `scheduleKpiCardDaily()` dejó de ser un cron propio el
+2026-07-24 — ver arriba, quedó absorbido dentro del pipeline PDF de `scheduleKpiIngestCheck()`. Los
+otros 3 crons de dominio (resumidor, flight check-in, Foco check-in) siguen desactivados. Jano ya no es
+100% reactivo — son las cinco excepciones puntuales a esa decisión del 2026-07-14.
 **Sin proactividad por evento externo** — el monitor de combustible sigue apagado (`crons = []` en
 `combustible-proxy/wrangler.toml`, verificado 2026-07-03), ver abajo. Verificar qué crons internos
 arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
