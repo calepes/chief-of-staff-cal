@@ -2,7 +2,9 @@ import { tool, startup } from "@anthropic-ai/claude-agent-sdk";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { spawnSync } from "node:child_process";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname } from "node:path";
 import { getOutlookEvents } from "./tools/outlook.js";
 import { manageLearning } from "./tools/learnings.js";
 import { searchPlaces, travelTime as calcTravelTime } from "./tools/maps.js";
@@ -25,6 +27,10 @@ import { fetchAsUser } from "./tools/fetch-as-user.js";
 import { addDomainAndSync } from "./tools/cookie-jar.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { consultarJson } from "./tools/consultar-json.js";
+import { formatLearning } from "./learning-file.js";
+import { LEARNING_TAGS } from "./learning-types.js";
+import { LEARNINGS_PATH } from "./proactive/learning-reflect.js";
+import { nowInLaPaz } from "./journal-capture.js";
 import { discoverBacklogs, resolveBacklogPath } from "./tools/backlog-discovery.js";
 import { buildBacklogMap, readBacklogCompact } from "./tools/backlog-read.js";
 import { renderBacklogMap, renderAddProposal, renderDoneProposal } from "./backlog-card.js";
@@ -751,6 +757,41 @@ export function buildSdkTools(deps: ToolDeps) {
       },
       async ({ path, jqExpr }) => asText(await consultarJson(path, jqExpr)),
       READ_ONLY,
+    ),
+    tool(
+      "recordarAprendizaje",
+      "Guarda YA un aprendizaje que Cal pidió explícitamente recordar (se escribe en ~/.cos-agent/learnings.md " +
+      "y entra en el system prompt de todos los turnos siguientes). " +
+      "Usar SOLO cuando Cal lo pida explícito: 'recuerda que...', 'acuérdate de...', 'de ahora en más...', 'no vuelvas a...'. " +
+      "NO usarla por iniciativa propia en medio de una tarea — de eso se encarga la reflexión nocturna, que revisa el día " +
+      "entero y propone candidatos para que Cal apruebe con botones. " +
+      "Tags: 'pref' = preferencia de formato o estilo · 'hecho' = dato sobre Cal o su contexto · " +
+      "'err' = error operativo propio a evitar · 'flujo' = secuencia que Cal repite.",
+      {
+        texto: z
+          .string()
+          .min(5)
+          .max(300)
+          .describe("El aprendizaje en UNA línea, con las palabras de Cal, sin adornos (5-300 caracteres)"),
+        tag: z.enum(LEARNING_TAGS).describe("pref | hecho | err | flujo"),
+      },
+      async ({ texto, tag }) => {
+        try {
+          // Fecha en hora de La Paz (UTC-4), NUNCA toISOString() del proceso: entre las 20:00 y
+          // medianoche hora de Cal, UTC ya pasó al día siguiente y el learning quedaría fechado
+          // mañana — justo la franja en la que Cal más escribe. Mismo criterio que session-log.ts,
+          // proactive/learning-reflect.ts y el routing de bklg:* en index.ts.
+          mkdirSync(dirname(LEARNINGS_PATH), { recursive: true });
+          const line = formatLearning({ date: nowInLaPaz().slice(0, 10), tag, text: texto.trim() });
+          appendFileSync(LEARNINGS_PATH, `${line}\n`);
+          return asText({
+            ok: true,
+            instruccion: "Responde SOLO '🧠 Anotado.' — no repitas ni parafrasees el contenido del aprendizaje.",
+          });
+        } catch (err) {
+          return asText({ ok: false, error: String(err) });
+        }
+      },
     ),
     tool(
       "mapaBacklogs",
