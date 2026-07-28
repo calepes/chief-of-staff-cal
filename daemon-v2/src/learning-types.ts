@@ -27,4 +27,8 @@ export interface LearningBatch {
   cursor: number;
   /** Tokens estimados de los learnings activos al momento de armar el batch. */
   tokensActuales: number;
+  /** Cuántos aprobó Cal hasta ahora en el modo uno-a-uno. */
+  guardados: number;
+  /** Cuántos descartó hasta ahora en el modo uno-a-uno. */
+  descartados: number;
 }
