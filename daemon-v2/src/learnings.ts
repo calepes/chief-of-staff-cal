@@ -1,5 +1,4 @@
-import { readFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
 import { parseLearnings } from "./learning-file.js";
 import { LEARNING_TAGS, type Learning, type LearningTag } from "./learning-types.js";
 
@@ -12,12 +11,13 @@ export function loadLearnings(path: string): string {
   }
 }
 
-export function appendLearning(path: string, text: string): void {
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const date = new Date().toISOString().slice(0, 10);
-  appendFileSync(path, `- [${date}] ${text.trim()}\n`, "utf8");
-}
+// Acá vivía `appendLearning(path, text)`, sin ningún caller: derivaba la fecha con
+// new Date().toISOString().slice(0,10) (día UTC, se corre al día siguiente entre las 20:00 y
+// medianoche hora de Cal) y escribía sin tag — los dos defectos que esta rama corrigió en los
+// otros cuatro lugares donde se apendan learnings. Borrada a propósito: era una trampa para el
+// próximo que necesitara "apendar un learning" y agarrara la que ya existía. El único camino de
+// escritura es `persist()` en learning-callbacks.ts, que usa formatLearning con tag y con la
+// fecha en hora de La Paz.
 
 /** Título legible por categoría, en el orden en que se muestran en el system prompt. */
 const CATEGORY_TITLES: Record<LearningTag, string> = {
