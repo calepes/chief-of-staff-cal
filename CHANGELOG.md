@@ -1,5 +1,139 @@
 # CHANGELOG — Jano
 
+## 2026-07-28 (2)
+
+### Feature — Self-learning: la reflexión sale del turno
+- **Diagnóstico primero:** el loop de aprendizaje ya existía y estaba cerrado (`addLearning` →
+  `~/.cos-agent/learnings.md` → system prompt), pero llevaba **4 entries en 3 meses**. No faltaba
+  infraestructura: fallaba QUIÉN dispara la escritura. Se lo pedíamos al modelo en medio del turno,
+  compitiendo con la tarea real, y perdía siempre.
+- **El rediseño:** cron a las 22:00 (La Paz) lee las sesiones del día que el SDK ya persiste en
+  `.jsonl`, las recorta, las pasa por una llamada acotada a Haiku (`maxTurns:1`, sin tools) cuyo
+  único trabajo es reflexionar, deduplica contra lo ya guardado, y propone una tarjeta con botones.
+  Solo lo aprobado se escribe. Más `recordarAprendizaje` para cuando Cal dice "recuerda que…".
+- **Cuatro tags:** `pref` · `hecho` · `err` · `flujo`. Las 4 entries viejas sin tag se siguen
+  parseando (caen a `hecho`) — romper con ellas habría significado perder lo único que existía.
+- **Referencia:** el patrón viene del "Dreaming" de Anthropic (2026) — un pase en background que
+  revisa sesiones, extrae patrones y reescribe la memoria sin esperar que un humano diga qué
+  arreglar. Documentado en el spec.
+
+#### Dos bugs que habrían hecho el feature inútil, ambos invisibles en verde
+- **El system prompt se calculaba una sola vez al arrancar.** `BASE_OPTIONS` era un `const` de
+  módulo, así que `buildLearningsSection()` corría al cargar el proceso y nunca más. Todo lo
+  aprobado quedaba en el archivo sin influir en ningún turno hasta reiniciar el daemon — en un
+  proceso que corre semanas, indefinido. Es un defecto **preexistente** (aplicaba igual a las 4
+  entries viejas y probablemente explica en parte por qué el mecanismo se sentía muerto), pero este
+  feature lo volvía inaceptable. Ahora se recalcula por turno.
+- **`SDK_SESSIONS_DIR` apuntaba al directorio equivocado.** El SDK deriva la carpeta de sesiones del
+  **cwd del proceso**, y el `WorkingDirectory` del plist es `.../Jano/daemon-v2` — o sea las
+  sesiones del daemon están en `-...-Agents-Jano-daemon-v2`, no en `-...-Agents-Jano`, que es el de
+  las sesiones interactivas de Claude Code. Los dos existen. Verificado con el `sessionId` real:
+  **0 caracteres** contra el directorio hardcodeado, **16.461** contra el correcto. El modo de falla
+  era silencioso — transcript vacío → `learning_reflect_empty` → ninguna tarjeta, idéntico a un día
+  sin nada que aprender. El paso de verificación del plan comprobaba que el directorio *existiera*,
+  no que fuera *el correcto*, y existe por el uso interactivo.
+
+#### Otros hallazgos de los reviews
+- **Punto ciego de 22:00 a medianoche:** el cron filtraba por día calendario, así que una sesión
+  iniciada a las 22:30 no la leía ni el pase de ese día ni el del siguiente. Justo la franja en que
+  Cal más usa el bot (hay sesiones reales arrancando 23:08). Corregido con ventana móvil de 24 h.
+- **`✅ Guardar todos` guardaba lo que Cal nunca vio:** la tarjeta mostraba 5 y el botón persistía
+  todos. Con el transcript acarreando material no confiable (Jano resume webs con `fetchAsUser`),
+  ese era el camino por el que texto de una página podía fijarse sin haber sido leído. El batch
+  ahora se recorta **al crearlo**.
+- **`message.content` no siempre es un array:** en 144 casos sobre 40 sesiones reales viene como
+  string plano, y todos son mensajes de usuario — la fuente principal de learnings de preferencia.
+  El parser original los descartaba en silencio, con los tests en verde porque los fixtures solo
+  cubrían la forma de array. Encontrado verificando el formato real antes de escribir el parser.
+- **El ack no era auditable:** `recordarAprendizaje` escribe sin confirmación y el prompt le pedía
+  al modelo responder solo "🧠 Anotado.". Ahora el ack muestra el texto guardado — es lo único que
+  le permite a Cal ver qué se fijó en el comportamiento del bot.
+- **`addLearning` seguía allowlisteada** pese a que el prompt la declaraba obsoleta. Con ToolSearch
+  activo la prosa no alcanza: sacada de `agent-options.ts`.
+- **La fecha en UTC apareció cuatro veces** en este trabajo (heading de sección, registro de
+  sesiones, clave del cron, tool manual). Cal está en UTC-4 y usa el bot de noche, así que entre las
+  20:00 y medianoche todo se fechaba al día siguiente. Todas corregidas con `nowInLaPaz`.
+
+- **Archivos nuevos:** `learning-{types,file,transcript,extract,card,store,callbacks}.ts`,
+  `session-log.ts`, `proactive/learning-reflect.ts`, todos con test.
+- **Modificados:** `index.ts` (cron + routing `lrn:*` + recálculo del prompt), `agent-tools.ts`,
+  `system-prompt.ts`, `agent-options.ts`, `learnings.ts`, `session-store.ts`.
+- **632 tests en verde**, typecheck limpio.
+
+## 2026-07-28
+
+### Feature — Tools de backlog: Jano lee y escribe los `BACKLOG.md` de los proyectos de Cal
+- **Motivo:** a Cal se le ocurren ideas charlando con Jano por Telegram y no tenía forma de
+  anotarlas — tenía que acordarse y escribirlas después a mano. El pedido ya estaba registrado en
+  el propio `BACKLOG.md` (sesión 2026-07-25) con la duda abierta "¿append-only o edición libre?".
+  Durante el diseño Cal sumó el pedido de ver **el mapa completo, del root al último proyecto**.
+- **Tres tools** (`agent-tools.ts`): `mapaBacklogs` (vista panorámica agrupada por Raíz/Agentes/Apps
+  con conteo de pendientes), `leerBacklog` (pendientes de un proyecto, compactados) y
+  `proponerItemBacklog` (propone agregar o tildar — **no escribe**, manda una tarjeta y Cal
+  confirma con ✅).
+- **Descubrimiento en vivo, no allowlist hardcodeada.** Un `find` cacheado 10 min sobre
+  `~/Claude Projects` (profundidad 6, podando `node_modules`, `_archive`, `commands` y `.git`).
+  Un proyecto nuevo aparece solo. La seguridad no la da una lista sino cuatro invariantes
+  verificados en cada escritura: el modelo pasa una **clave** (nunca una ruta), el `realpathSync`
+  debe caer dentro del root, el basename debe ser exactamente `backlog.md`, y el destino debe ser
+  un archivo regular.
+- **Solo dos escrituras posibles:** append bajo `### Surgió en sesión YYYY-MM-DD` y tildado
+  `[ ]`→`[x]`. Nunca edición libre de líneas — el riesgo de que el modelo reformatee o pierda
+  contenido de un archivo de 287 líneas no vale la flexibilidad (decisión de Cal). Escritura
+  atómica (temporal + `rename`) porque el daemon corre semanas y muere por launchd sin aviso.
+- **Tildado que falla explícito:** con 0 coincidencias avisa que no encontró el ítem; con ≥2 lista
+  los candidatos y pide precisión. Nunca adivina cuál tildar.
+- **Sin auto-commit** (decisión de Cal): el archivo queda modificado en el working tree del
+  proyecto correspondiente.
+
+#### Lo que encontraron los reviews (y no los tests)
+Seis defectos reales que el plan no había capturado, todos verificados con pruebas antes de
+arreglarlos:
+- **Colisiones de clave perdían proyectos en silencio.** Con tres `Agents/Jano` en disco,
+  `discoverBacklogs` devolvía **dos** entradas — la clave ya prefijada no se re-verificaba contra
+  `seen`. Además, quién se quedaba con la clave pelada lo decidía el orden de `readdir` (verificado
+  que NO es alfabético), así que una clave podía pasar a apuntar a otro proyecto tras un cambio en
+  disco, con el mismo label en la tarjeta y sin forma de que Cal lo notara antes de aprobar.
+  **Fix:** orden determinista por profundidad y nombre antes de asignar claves, más bucle hasta
+  clave libre.
+- **`asText(JSON.stringify(x))` cuando `asText` ya serializa** — exactamente el bug de doble-encode
+  de `notionApi` documentado el 2026-07-27, a punto de reintroducirse en `leerBacklog`.
+- **El botón `✏️ Editar texto` estaba muerto:** se emitía, tomaba el lock, se ackeaba, y moría en
+  `if (action !== "save") return;` sin editar la tarjeta ni dejar log. Cal lo tocaba y no pasaba
+  nada. Resuelto con el mismo patrón que el escape del picker de destino (quitar teclado + pedir el
+  texto, que el LLM vuelve a proponer), sin inventar estado tipo `pendingEdit`.
+- **Un directorio llamado `BACKLOG.md`** se descubría como proyecto válido y se devolvía como
+  destino de escritura.
+- **El `find` parseado por `\n` sin `-print0`** podía producir un path relativo, que `realpathSync`
+  resuelve contra el cwd del daemon — y ese cwd vive DENTRO de `~/Claude Projects`.
+- **Nombres de tool cortos en el system prompt.** Con `ToolSearch` activo, `mapaBacklogs` pelado no
+  matchea; hay que usar `mcp__cos-tools__mapaBacklogs`. Es el modo de falla que quemó los 12 turnos
+  del incidente del 2026-07-27.
+
+#### Decisiones de diseño que quedaron escritas
+- **`execFileSync` a propósito.** El módulo cita `consultar-json.ts` como estándar, y ese archivo
+  documenta por qué NO usa llamadas síncronas. Acá se midió el `find` real: **10-70 ms**. Pasarlo a
+  async obligaría a volver asíncrona la cadena entera (resolve, labels, tools, callbacks) por esos
+  70 ms. Se queda síncrono, pero el **timeout bajó de 10 s a 2 s** — lo inaceptable no era el caso
+  normal sino que el peor caso congelara el daemon diez segundos.
+- **Clave y label salen del PROYECTO, no de la carpeta contenedora.** Al bajar a profundidad 6,
+  derivarlos de la carpeta inmediata producía `📋 docs — 3` y `📋 agente — 2` en el mapa, y obligaba
+  al modelo a pedir el backlog de Combustible con la clave `docs`. Ahora Pecunia es `pecunia`
+  (aunque su backlog viva en `pfm-dashboard/`), y dos backlogs del mismo proyecto se desambiguan
+  con la subcarpeta (`inversiones` / `inversiones-agente`).
+- **UX según el skill `telegram-bot-ux`, corrida como checklist y no como referencia.** De ahí
+  salieron: el tope de 6 opciones + escape `✍️` en el picker de destino (una fila por proyecto daba
+  14 filas contra el máximo de 4 de Telegram), cinco emojis nuevos documentados en el lexicon
+  (`📝 📁 ☑️ 🔧 🧹`), y la corrección de cinco textos que estaban en voseo.
+
+- **Archivos nuevos:** `backlog-{types,card,store,callbacks}.ts`,
+  `tools/backlog-{discovery,read,write}.ts`, todos con test.
+- **Modificados:** `agent-tools.ts` (3 tools), `index.ts` (routing `bklg:*` con lock),
+  `system-prompt.ts` (sección "Backlogs de proyectos").
+- **Spec y plan:** `docs/superpowers/specs/2026-07-28-backlog-tool-y-self-learning-design.md` y
+  `docs/superpowers/plans/2026-07-28-backlog-tools.md`.
+- **528 tests en verde**, typecheck limpio.
+
 ## 2026-07-27
 
 ### Feature — Journal de reflexión (terapia): DB Notion + captura por Telegram

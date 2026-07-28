@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { recordSession, SESSION_LOG_PATH } from "./session-log.js";
 
 /**
  * Mapa chatId → sessionId del Agent SDK, persistido en disco.
@@ -127,6 +128,10 @@ export function saveSessionId(chatId: number, id: string): void {
   const turns = prev && prev.id === id ? (prev.turns ?? 0) + 1 : 1;
   data[String(chatId)] = { id, ts: Date.now(), turns };
   writeAll(data);
+
+  // Anotar en el registro histórico: writeAll solo conserva la sesión vigente por chat, y el
+  // pase nocturno de learnings necesita saber TODAS las sesiones que fueron del daemon.
+  recordSession(SESSION_LOG_PATH, id, chatId);
 }
 
 /** Olvida la sesión del chat. Lo usa `/reset`, que debe limpiar KV *y* sesión del SDK. */
