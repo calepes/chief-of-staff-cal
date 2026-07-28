@@ -623,6 +623,23 @@ describe("readTranscript", () => {
     expect(readTranscript(join(DIR, "s4.jsonl"))).not.toContain("yyyy");
   });
 
+  it("lee los mensajes cuyo content viene como string, no como array", () => {
+    // Forma real verificada sobre 40 sesiones del SDK: 144 mensajes de usuario persistidos así.
+    // Descartarlos dejaba el extractor ciego a lo que escribe Cal.
+    writeSession("s6", [
+      { type: "user", message: { role: "user", content: "Jano, prefiero el total primero" } },
+      { type: "assistant", message: { role: "assistant", content: "Anotado" } },
+    ]);
+    const t = readTranscript(join(DIR, "s6.jsonl"));
+    expect(t).toContain("CAL: Jano, prefiero el total primero");
+    expect(t).toContain("JANO: Anotado");
+  });
+
+  it("ignora un content string vacío", () => {
+    writeSession("s7", [{ type: "user", message: { role: "user", content: "   " } }]);
+    expect(readTranscript(join(DIR, "s7.jsonl"))).toBe("");
+  });
+
   it("devuelve vacío si el archivo no existe", () => {
     expect(readTranscript(join(DIR, "no-existe.jsonl"))).toBe("");
   });
@@ -719,6 +736,19 @@ export function readTranscript(path: string): string {
       continue;
     }
     const content = ev.message?.content;
+
+    // `content` NO siempre es un array: cuando el mensaje es texto plano, el SDK lo persiste como
+    // string. Verificado sobre 40 sesiones reales: 144 casos, TODOS de rol `user` — o sea los
+    // mensajes de Cal, que son la fuente principal de learnings de preferencia. Descartarlos
+    // (el `if (!Array.isArray(content)) continue` original) dejaba el extractor medio ciego, y con
+    // todos los tests en verde porque los fixtures solo cubrían la forma de array.
+    if (typeof content === "string") {
+      if (content.trim()) {
+        const who = ev.message?.role === "assistant" ? "JANO" : "CAL";
+        out.push(`${who}: ${content.trim().slice(0, MAX_TEXT_PER_MSG)}`);
+      }
+      continue;
+    }
     if (!Array.isArray(content)) continue;
 
     for (const block of content as ContentBlock[]) {
@@ -753,7 +783,7 @@ export function buildDayTranscript(dir: string, sessionIds: string[]): string {
 - [ ] **Step 4: Correr los tests**
 
 Run: `npm run test -w @cos/daemon -- learning-transcript`
-Expected: PASS, 8 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -866,9 +896,9 @@ export function buildExtractPrompt(transcript: string, existentes: Learning[]): 
     : "(todavía no hay ninguno)";
 
   return [
-    "Sos el módulo de reflexión de Jano, el asistente personal de Cal.",
-    "Leé la transcripción del día y extraé aprendizajes que valgan para FUTURAS conversaciones.",
-    "Devolvé SOLO un array JSON, sin explicación ni fences.",
+    "Eres el módulo de reflexión de Jano, el asistente personal de Cal.",
+    "Lee la transcripción del día y extrae aprendizajes que valgan para FUTURAS conversaciones.",
+    "Devuelve SOLO un array JSON, sin explicación ni fences.",
     "",
     "Cada elemento: {\"tag\", \"text\", \"evidencia\"}",
     "",
@@ -878,7 +908,7 @@ export function buildExtractPrompt(transcript: string, existentes: Learning[]): 
     '- "err": error operativo de Jano — una tool que falló y por qué, un parámetro que no acepta.',
     '- "flujo": secuencia que Cal repite y Jano puede anticipar.',
     "",
-    '"text": máximo 2 líneas, en español, redactado como instrucción o hecho, no como narración.',
+    '"text": máximo 2 líneas, redactado como instrucción o hecho, no como narración.',
     '"evidencia": cita corta de la transcripción que lo justifica.',
     "",
     "REGLAS:",
@@ -886,8 +916,11 @@ export function buildExtractPrompt(transcript: string, existentes: Learning[]): 
     "2. NO anotes algo que pasó una sola vez: un pedido puntual no es una preferencia.",
     "3. NO anotes comportamiento genérico de un asistente ni cosas obvias.",
     "4. Los TOOL ERROR de la transcripción son la mejor fuente de learnings tipo \"err\".",
-    "5. Si no hay nada que realmente valga, devolvé un array vacío []. Devolver vacío es el",
+    "5. Si no hay nada que realmente valga, devuelve un array vacío []. Devolver vacío es el",
     "   resultado ESPERADO la mayoría de los días — no inventes para justificar la llamada.",
+    "6. Escribe en español NEUTRO, sin voseo: \"prefiere\" no \"preferís\", \"usa\" no \"usá\".",
+    "   Estos textos se inyectan después en el system prompt de Jano, y el estilo se contagia",
+    "   a cómo le responde a Cal.",
     "",
     "Aprendizajes actuales:",
     yaSe,
