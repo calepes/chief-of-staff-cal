@@ -39,6 +39,16 @@ import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
 import { checkKpiIngest } from "./proactive/kpi-ingest-check.js";
 import { checkDailyNotes } from "./proactive/daily-note-check.js";
+import {
+  checkTaskEmails,
+  advanceTaskQueue,
+  postponeActiveTask,
+  createTaskFromProposal,
+  pendingTaskCount,
+  type CheckTaskEmailsOpts,
+} from "./proactive/task-check.js";
+import { TaskStore } from "./proactive/task-store.js";
+import { isTaskCallback, handleTaskCallback, applyTaskInput, parseTaskCallback } from "./proactive/task-callbacks.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf } from "./tools/vision.js";
@@ -186,6 +196,7 @@ const state = new ConversationState(kv, compactHistory);
 const journalStore = new JournalStore(kv);
 const backlogStore = new BacklogStore(kv);
 const learningStore = new LearningStore(kv);
+const taskStore = new TaskStore(kv);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
 // (ej. checkPlaylistsResumir/checkStarredResumir, que disparan un flujo fire-and-forget
@@ -748,6 +759,67 @@ async function processMessage(
       return;
     }
 
+    // Callbacks de la tarjeta de tareas (tsk:*) → mecánicos, sin LLM. "✅ Crear tarea" escribe la
+    // página en Notion, sube los adjuntos y archiva el mail, así que llevan el mismo lock
+    // anti-doble-tap que jnl:*/bklg:*/lrn:*.
+    // Va ARRIBA del catch-all de "Heavy callbacks legacy" más abajo, que se traga cualquier
+    // callback_data sin prefijo `j:`/`build:` y se lo manda al LLM como mensaje sintético. Puesto
+    // debajo de ese, `tsk:*` sería código muerto SIN dejar rastro en logs (mismo motivo por el que
+    // `bklg:*` y `lrn:*` están donde están).
+    if (isTaskCallback(cb.data)) {
+      const tchat = cb.message.chat.id;
+      const tanchor = cb.message.message_id;
+      const lockUserId = cb.from.id;
+
+      const acquired = await tryAcquireLock(kv, tchat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+
+      // Fire-and-forget, mismo patrón que jnl:*/bklg:*/lrn:*: crear la tarea baja adjuntos de
+      // Gmail, los sube a Notion y escribe la página (varios segundos). El poll loop del daemon es
+      // estrictamente secuencial — awaitear acá congelaría todos los chats mientras tanto.
+      void handleTaskCallback(
+        {
+          store: taskStore,
+          notionToken: env.NOTION_TOKEN,
+          // Hora de La Paz (UTC-4), no UTC: entre las 20:00 y las 23:59 hora de Cal,
+          // `new Date().toISOString()` ya cae en el día siguiente y el botón "📅 Hoy" pondría
+          // mañana. Mismo criterio que los bloques bklg:*/lrn:* de arriba.
+          today: () => nowInLaPaz().slice(0, 10),
+          log,
+          editCard: async (messageId, card) => {
+            // El teclado va SIEMPRE explícito: editMessageText no limpia reply_markup si se omite
+            // (gotcha de Telegram documentado en CLAUDE.md), y las tarjetas terminales quedarían
+            // con "✅ Crear tarea" tocable sobre un mensaje que ya dice "Tarea creada".
+            await editMessage(
+              env.COS_TELEGRAM_BOT_TOKEN,
+              tchat,
+              messageId,
+              card.text,
+              "HTML",
+              card.keyboard ?? { inline_keyboard: [] },
+            ).catch((err) => log({ msg: "task_edit_failed", err: String(err) }));
+          },
+          // El proposalId va sí o sí: con él, createTaskFromProposal relee la propuesta antes de
+          // adjuntar los seguimientos y no se pierde un correo del mismo hilo que haya llegado
+          // mientras se creaba la página.
+          createTask: (p) => createTaskFromProposal(taskEmailOpts(), p, parseTaskCallback(cb.data!)?.proposalId),
+          pendientes: () => pendingTaskCount(taskEmailOpts()),
+          advanceQueue: (proposalId) => advanceTaskQueue(taskEmailOpts(), proposalId),
+          postponeActive: () => postponeActiveTask(taskEmailOpts()),
+        },
+        tchat,
+        tanchor,
+        cb.data!,
+      )
+        .catch((err) => log({ msg: "task_callback_error", err: String(err) }))
+        .finally(() => releaseLock(kv, tchat, lockUserId).catch(() => {}));
+      return;
+    }
+
     // Checkpoint del resumidor: ✅ Guardar / 📄 Guardar artículo / ⏭️ Saltar / ⏹️ Parar → mecánico (sin LLM, edita la tarjeta).
     if (cb.data === "j:resu:save" || cb.data === "j:resu:savefull" || cb.data === "j:resu:skip" || cb.data === "j:resu:stop") {
       await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id);
@@ -999,9 +1071,13 @@ async function processMessage(
     // Las dos lecturas a KV van en paralelo: se pagan en CADA mensaje (aunque Cal no
     // use el journal) y son round-trips Mac→Cloudflare de ~100-300ms. Secuenciales
     // erosionaban el objetivo de "placeholder en <1s".
-    const [pendingEdit, journalMode] = await Promise.all([
+    // Las tres lecturas a KV van juntas por el mismo motivo que ya valía para dos: se pagan en
+    // CADA mensaje (aunque Cal no use ni el journal ni las tarjetas de tarea) y son round-trips
+    // Mac→Cloudflare de ~100-300ms. En serie erosionan el objetivo de "placeholder en <1s".
+    const [pendingEdit, journalMode, taskInput] = await Promise.all([
       text ? journalStore.getPendingEdit(chatId) : Promise.resolve(null),
       journalStore.getMode(chatId),
+      text ? taskStore.getPendingInput(chatId).catch(() => null) : Promise.resolve(null),
     ]);
 
     // Una edición pendiente (botón ✏️) gana sobre todo lo demás: el próximo texto
@@ -1012,6 +1088,46 @@ async function processMessage(
         chatId,
         text,
       );
+      if (consumido) return;
+    }
+
+    // Respuesta al botón ✍️ de una tarjeta de tarea (fecha o persona). Va antes del modo journal
+    // porque responde a una pregunta explícita del bot, no al ambiente; y solo consume el mensaje
+    // si el texto REALMENTE parsea como fecha o nombre — si no, sigue su curso normal hacia el
+    // agente. Sin esa condición este estado se tragaría un pedido real de Cal, que es justo el
+    // gotcha que ya pagó el modo journal (ver CLAUDE.md).
+    if (text && taskInput) {
+      const consumido = await applyTaskInput(
+        {
+          store: taskStore,
+          notionToken: env.NOTION_TOKEN,
+          today: () => nowInLaPaz().slice(0, 10),
+          log,
+          pendientes: () => pendingTaskCount(taskEmailOpts()),
+          clearKeyboard: async (messageId) => {
+            // Solo se le quita el teclado: el texto de la tarjeta que preguntó queda igual y la
+            // respuesta nace en una tarjeta NUEVA debajo del mensaje de Cal (bloque B5 del skill
+            // telegram-bot-ux — editar la vieja la dejaría arriba del texto que la contestó).
+            await editMessageReplyMarkup(env.COS_TELEGRAM_BOT_TOKEN, chatId, messageId, {
+              inline_keyboard: [],
+            }).catch(() => {});
+          },
+          sendCard: async (card) => {
+            await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+              chatId,
+              text: card.text,
+              parseMode: "HTML",
+              replyMarkup: card.keyboard,
+            }).catch((err) => log({ msg: "task_input_send_failed", err: String(err) }));
+          },
+        },
+        chatId,
+        text,
+        taskInput,
+      ).catch((err) => {
+        log({ msg: "task_input_error", err: String(err) });
+        return false;
+      });
       if (consumido) return;
     }
     let journalTexto: string | null = null;
@@ -1530,6 +1646,36 @@ function scheduleDailyNoteCheck(): void {
   log({ msg: "daily_note_check_scheduled", interval: "every 15min 6-23h" });
 }
 
+/**
+ * Mails que Cal reenvía a mano con "(Tarea)" en el subject → tarjeta de propuesta en el chat, y
+ * la página de Notion recién al confirmarla (2026-07-28, pedido de Cal). Mismas credenciales que
+ * scheduleDailyNoteCheck/scheduleKpiIngestCheck. Ver task-check.ts (cola de a uno, dedup por
+ * threadId), task-card.ts (tarjetas) y task-callbacks.ts (botones tsk:*).
+ *
+ * Los mismos opts los usan el cron y los callbacks de la tarjeta: comparten el archivo de estado
+ * (la cola) y el store de propuestas, así que tienen que apuntar exactamente al mismo lugar.
+ */
+function taskEmailOpts(): CheckTaskEmailsOpts {
+  return {
+    botToken: env.COS_TELEGRAM_BOT_TOKEN,
+    chatId: ALERT_CHAT_ID,
+    notionToken: env.NOTION_TOKEN,
+    gmail: {
+      clientId: env.GMAIL_OAUTH_CLIENT_ID,
+      clientSecret: env.GMAIL_OAUTH_CLIENT_SECRET,
+      refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN,
+    },
+    store: taskStore,
+  };
+}
+
+function scheduleTaskEmailCheck(): void {
+  cron.schedule("*/15 6-23 * * *", () => {
+    void checkTaskEmails(taskEmailOpts()).catch((err) => log({ msg: "task_check_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "task_check_scheduled", interval: "every 15min 6-23h" });
+}
+
 function scheduleFocoCheckinsLocal(): void {
   scheduleFocoCheckins({
     kv,
@@ -1597,9 +1743,11 @@ async function loop(): Promise<void> {
   if (env.GMAIL_OAUTH_CLIENT_ID && env.GMAIL_OAUTH_CLIENT_SECRET && env.GMAIL_OAUTH_REFRESH_TOKEN) {
     scheduleKpiIngestCheck();
     scheduleDailyNoteCheck();
+    scheduleTaskEmailCheck();
   } else {
     log({ msg: "kpi_ingest_check_skipped_no_credentials" });
     log({ msg: "daily_note_check_skipped_no_credentials" });
+    log({ msg: "task_check_skipped_no_credentials" });
   }
   // Auto-resumidor de playlist de YouTube — DESACTIVADO 2026-07-14 (pedido de Cal). Estuvo activo
   // desde 2026-06-20 (opt-in). Jano queda 100% reactivo salvo el webhook watchdog (infra) y el

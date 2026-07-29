@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { sendMessage } from "@cos/shared";
 import { gmailAccessToken, searchDailyNoteEmails, getGmailMessage, type GmailCreds } from "./kpi-ingest-gmail.js";
 import { hasDnTag, stripDnTag, htmlToMarkdown, createDailyNotePage } from "./daily-note-ingest.js";
+import { nowInLaPaz } from "../journal-capture.js";
 
 const ERROR_DEDUP_MS = 2 * 60 * 60 * 1000;
 const MAX_PROCESSED = 200;
@@ -36,8 +37,12 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// nunca toISOString() directo acá: eso da la fecha en UTC, y La Paz es UTC-4 — un mail recibido
+// entre las 20:00 y medianoche hora local quedaría fechado al día siguiente. nowInLaPaz() ya
+// resuelve el offset fijo -04:00 (ver journal-capture.ts). Mismo bug encontrado y arreglado en
+// task-check.ts (2026-07-28) — portado acá por pedido de Cal.
 function isoDateFromMillis(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+  return nowInLaPaz(new Date(ms)).slice(0, 10);
 }
 
 export interface CheckDailyNotesOpts {

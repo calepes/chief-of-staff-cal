@@ -1,5 +1,67 @@
 # CHANGELOG — Jano
 
+## 2026-07-28 (3)
+
+### Feature — Tareas por mail: de "se crea sola" a "la confirmás vos", con cola
+El pipeline de mails "(Tarea)" (implementado el mismo día, ver entrada 1) creaba la página de
+Notion directo y avisaba después. Cal pidió cuatro cosas: **Sonnet** en la extracción, una
+**tarjeta de confirmación** que muestre a quién está asignado + Fecha + Deadline con opción de
+ajustar cada uno (estilo Pecunia), el listado de **People de Yape cacheado** para no ir a Notion, y
+**botones de fecha** (hoy / esta semana / próxima / escribir). Sobre la marcha sumó: si llegan
+varios mails juntos, **una cola** para procesarlos de a uno.
+
+- **Crear al confirmar** (decisión explícita de Cal sobre la alternativa "crear y luego ajustar"):
+  la propuesta vive 7 días en KV y la página nace al tocar `✅ Crear tarea`. El costo aceptado es
+  que una propuesta ignorada es una tarea que no nace; por eso el mail **no se archiva** hasta
+  crearla — la inbox es el respaldo.
+- **Una tarjeta activa por vez.** El resto se encola guardando solo `{messageId, threadId, subject}`:
+  el cuerpo, los adjuntos y la llamada a Sonnet se resuelven cuando el ítem llega al frente, así un
+  tick con 5 mails no dispara 5 llamadas al modelo ni deja correos escritos en disco. `⏭️ Después`
+  manda al final de la cola; al resolver, la siguiente llega como mensaje nuevo (un edit no
+  notifica, y el punto es que Cal se entere).
+- **Snapshot estático de 20 personas** (`task-people.ts`), ordenado por uso real en "Asignado a"
+  sobre las 763 tareas de la DB. El picker pagina de a 6 sin tocar Notion (la DB People tiene 639
+  filas); `✍️ Otro` resuelve primero contra el snapshot y solo consulta Notion si el nombre no
+  está. Con 0 o 2+ coincidencias repregunta: nunca asigna a quien no era. Regenerable con
+  `scripts/refresh-task-people.ts`.
+- **Atajos de fecha al viernes** (hoy / viernes de esta semana / de la próxima / sin fecha /
+  escribir), mismo set para Fecha y Deadline. En fin de semana "esta semana" salta al viernes
+  siguiente: un atajo nunca propone una fecha ya pasada.
+- **El texto libre solo consume el mensaje si parsea** como fecha o como nombre; si no, sigue su
+  curso normal hacia el agente. Es la lección del modo journal, que intercepta todo mientras está
+  abierto y ya se tragó un pedido real.
+
+#### Lo que encontró el review de salud (tres pasadas) — dos bloqueantes y dos carreras
+- **Cola trabada 7 días.** El orden era `active = ...` y después mandar la tarjeta. Un fallo de
+  envío (blip de red, el SNI filtering ya documentado) dejaba `active` apuntando a una propuesta
+  cuya tarjeta nunca llegó: el cron la veía viva por el TTL del KV, no proponía nada más, y todos
+  los mails siguientes se acumulaban **sin ningún aviso**. Ahora se manda primero y se marca
+  activo solo si el envío salió bien.
+- **Tarea duplicada en Notion.** El botón `✅ Crear tarea` seguía visible durante todo el trabajo
+  (adjuntos + página), que supera los 60 s del lock anti-doble-tap: un segundo toque creaba otra
+  página. El fix real es quitar el teclado con un `⏳ Creando la tarea…` antes de arrancar; el
+  guard de idempotencia por hilo (`threadPages`) cubre el `🔄 Reintentar` y cualquier reintento
+  secuencial.
+- **Dos promociones simultáneas.** El flag `running` del cron solo lo protege de sí mismo: los
+  botones entran por otro camino. Toda promoción pasa ahora por una cadena serializada **con
+  timeout de 120 s** — al ser un cuello de botella global, un solo await colgado (`extractTaskFields`
+  no tiene timeout, y `sendMessage` de `shared-v2` es un `fetch` pelado) habría dejado esperando a
+  todos los avances posteriores, incluidos los de los botones. Y `advanceTaskQueue` recibe el
+  `proposalId` para liberar el turno **solo si sigue siendo el activo**: si no, un avance que llega
+  tarde pisaba una tarjeta recién mandada y promovía otra más.
+- **Sonnet quemado cada 15 minutos.** Con Telegram caído, el reintento rehacía Gmail + síntesis
+  sobre el mismo correo en cada tick. La propuesta ya sintetizada queda cacheada en el ítem de la
+  cola y se reusa.
+- Menores con síntoma visible: el cuerpo del mail entra recortado a 40 K (la forma exacta que
+  produjo los cuatro "Autocompact is thrashing"), `accionRequerida`/`contextoRelevante` se cortan
+  a 1800 para no chocar con el límite de 2000 de Notion, la tarjeta muestra el conteo **real** de
+  adjuntos subidos (Notion corta el upload en ~20 MB y decir "2 adjuntos" con la página vacía los
+  daba por guardados), y `"gracias"`/`"ok"` dejaron de contar como nombre de persona.
+
+**Estado:** 754 tests, typecheck y build limpios, daemon reiniciado. Verificado en vivo que la
+búsqueda de Gmail devuelve los 6 correos "(Tarea)" con sus adjuntos; la tarjeta en sí no se probó
+todavía porque esos 6 ya tenían tarea creada (queda en BACKLOG).
+
 ## 2026-07-28 (2)
 
 ### Feature — Self-learning: la reflexión sale del turno

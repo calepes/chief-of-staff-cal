@@ -40,6 +40,27 @@ j:brief:bo      → LLM recibe "Genera el briefing para Bolivia" (heavy)
 j:tasks:new     → LLM recibe "Quiero agregar una nueva tarea" (heavy)
 ```
 
+## Prefijos mecánicos fuera del menú (interceptados en `index.ts`, sin LLM)
+
+Flujos con tarjeta propia. Todos se resuelven en el daemon editando la tarjeta; ninguno pasa por el
+modelo. Los que escriben algo (Notion, disco, Gmail) llevan el lock anti-doble-tap de `cf-kv.ts`.
+
+| Prefijo | Flujo | Escribe | Archivo |
+|---|---|---|---|
+| `jnl:*` | Journal de reflexión | Notion | `journal-callbacks.ts` |
+| `bklg:*` | Ítems de `BACKLOG.md` | disco | `backlog-callbacks.ts` |
+| `lrn:*` | Reflexión nocturna del self-learning | disco | `learning-callbacks.ts` |
+| `tsk:*` | Propuesta de tarea desde un mail "(Tarea)" | Notion + Gmail | `proactive/task-callbacks.ts` |
+| `resu-pick:*`, `j:resu:*` | Selector y checkpoint del resumidor | Readwise / YouTube / Feedbin | `tools/resumir.ts` |
+| `mlog:`, `mskip:`, `msel:` | Reuniones → Foco Log (legacy) | Notion | `index.ts` |
+
+⚠️ **Todos tienen que ir ARRIBA del catch-all de "Heavy callbacks legacy"** de `index.ts` — ese
+bloque se traga cualquier `callback_data` sin prefijo `j:`/`build:` y se lo manda al LLM como
+mensaje sintético. Puesto debajo, el botón es **código muerto sin ningún rastro en logs**, que es
+un modo de falla caro de diagnosticar. Mismo motivo por el que `j:journal` va arriba del
+`startsWith("j:")` genérico. Ya pasó con `bklg:*` y con `j:journal`, ambos detectados en review
+antes de llegar a producción.
+
 ## Callback router edge (worker)
 
 Light callbacks resueltos en CF Worker sin LLM (~300ms):

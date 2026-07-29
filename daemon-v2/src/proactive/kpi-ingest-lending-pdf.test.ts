@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractLendingFunnel,
   reconcileLendingFunnel,
+  deriveMissingField,
   parseReportDateFromBody,
   parseAndValidateLendingReport,
   type LendingFunnelFields,
@@ -23,6 +24,12 @@ const REAL_TEXT_2026_07_23 =
 
 const REAL_TEXT_2026_07_26 =
   "Power BI Desktop\nLEADS ENVIADOS\n0 \t29.090\n15.720\nNOTIFICACIONES\n0,00K \t15,72K\n12K\nCLICK POP UP\n0,00K \t12,13K\n2066\nCONTACTADOS\n0 \t2066\n1098\nFUNNEL PILOTO YAPE LENDING\nDERIVADOS AGENCIA\n0 \t1098\n435\nDESEMBOLSOS\n0 \t140\n85\nLEADS\n15.720\n100 %\nVISTOS\n12.129\n77,2 %\nNO VISTOS\n3.591\n22,8 %\nME INTERESA\n2.066\nNO ME INTERESA\n3.717\n17,0 %\n30,6 %\nCONTACTADO\n1.098\nNO CONTACTADO\n968\n53,1 %\n46,9 %\nMONTO APROBADO\nAll \t\nCIUDAD\nAll \t\nDESEMBOLSO\n85\nEN PROCESO\n44\n60,7 %\n31,4 %NO DERIVADOS\n663\nDERIVADOS\n435\n60,4 %\n39,6 %\nEN PROCESO\n295\n67,8 %\nAGENCIA\n140\n32,2 %\nRECHAZADO\n11\n7,9 %\nSIN INTERACCIÓN\n6.346\n52,3 %\n\n-- 1 of 1 --\n\n";
+
+// 2026-07-27 real (mail id 19fa930663dfec44) — Power BI abrevió "NO CONTACTADO" como "1K" en vez
+// del número completo ("1.179"), la única vez que se vio esto en un campo del schema. El resto
+// de los 14 campos parsea normal — cubre deriveMissingField()/el fallback de reconciliación.
+const REAL_TEXT_2026_07_27 =
+  "Power BI Desktop\nLEADS ENVIADOS\n0 \t29.090\n17.220\nNOTIFICACIONES\n0,00K \t17,22K\n14K\nCLICK POP UP\n0,00K \t13,75K\n2358\nCONTACTADOS\n0 \t2358\n1179\nFUNNEL PILOTO YAPE LENDING\nDERIVADOS AGENCIA\n0 \t1179\n459\nDESEMBOLSOS\n0 \t166\n86\nLEADS\n17.220\n100 %\nVISTOS\n13.746\n79,8 %\nNO VISTOS\n3.474\n20,2 %\nME INTERESA\n2.358\nNO ME INTERESA\n4.606\n17,2 %\n33,5 %\nCONTACTADO\n1.179\nNO CONTACTADO\n1K\n50,0 %\n50,0 %\nMONTO APROBADO\nAll \t\nCIUDAD\nAll \t\nDESEMBOLSO\n86\nEN PROCESO\n69\n51,8 %\n41,6 %NO DERIVADOS\n720\nDERIVADOS\n459\n61,1 %\n38,9 %\nEN PROCESO\n293\n63,8 %\nAGENCIA\n166\n36,2 %\nRECHAZADO\n11\n6,6 %\nSIN INTERACCIÓN\n6.782\n49,3 %\n\n-- 1 of 1 --\n\n";
 
 describe("extractLendingFunnel", () => {
   it("parsea los 15 nodos del 2026-07-21 (label 'SIN INTERACCION' sin tilde)", () => {
@@ -118,6 +125,57 @@ describe("extractLendingFunnel", () => {
     expect(fields.noVistos).toBe(999);
     expect(fields.vistos).toBe(111);
   });
+
+  it("el 2026-07-27 reporta un issue en noContactado ('1K' no es un número parseable) — extractLendingFunnel por sí solo no lo deduce", () => {
+    const { fields, issues } = extractLendingFunnel(REAL_TEXT_2026_07_27);
+    expect(fields.noContactado).toBeNull();
+    expect(issues).toEqual([{ campo: "noContactado", motivo: "no pude leer el valor tras la label en línea 37" }]);
+  });
+});
+
+describe("deriveMissingField", () => {
+  const base: LendingFunnelFields = {
+    leads: 15720,
+    vistos: 12129,
+    noVistos: 3591,
+    meInteresa: 2066,
+    noMeInteresa: 3717,
+    sinInteraccion: 6346,
+    contactado: 1098,
+    noContactado: 968,
+    derivados: 435,
+    noDerivados: 663,
+    enProcesoDerivados: 295,
+    agencia: 140,
+    desembolso: 85,
+    enProcesoAgencia: 44,
+    rechazado: 11,
+  };
+
+  it("deduce un campo que es 'parte' de una ecuación (noContactado desde Contactado+NoContactado=MeInteresa)", () => {
+    const { fields } = extractLendingFunnel(REAL_TEXT_2026_07_27);
+    const derived = deriveMissingField(fields);
+    expect(derived).toEqual({ campo: "noContactado", valor: 1179, ecuacion: "Contactado+NoContactado=MeInteresa" });
+  });
+
+  it("deduce un campo que es el 'total' de una ecuación (leads desde Vistos+NoVistos)", () => {
+    const derived = deriveMissingField({ ...base, leads: null });
+    expect(derived).toEqual({ campo: "leads", valor: 15720, ecuacion: "Vistos+NoVistos=Leads" });
+  });
+
+  it("devuelve null si faltan 2 o más campos (no es 'exactamente uno')", () => {
+    expect(deriveMissingField({ ...base, leads: null, agencia: null })).toBeNull();
+  });
+
+  it("devuelve null si no falta ningún campo", () => {
+    expect(deriveMissingField(base)).toBeNull();
+  });
+
+  it("devuelve null en vez de un valor negativo (sin sentido de negocio)", () => {
+    // noVistos = leads(10) - vistos(15) = -5 → se rechaza en vez de "inventar" un negativo.
+    const adversarial = { ...base, leads: 10, vistos: 15, noVistos: null };
+    expect(deriveMissingField(adversarial)).toBeNull();
+  });
 });
 
 describe("reconcileLendingFunnel", () => {
@@ -179,5 +237,20 @@ describe("parseAndValidateLendingReport", () => {
     const result = parseAndValidateLendingReport(broken);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("ok:true para el 2026-07-27 pese a 'NO CONTACTADO' abreviado como '1K' — lo deduce por reconciliación", () => {
+    const result = parseAndValidateLendingReport(REAL_TEXT_2026_07_27);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.fields.noContactado).toBe(1179);
+      expect(reconcileLendingFunnel(result.fields).ok).toBe(true);
+    }
+  });
+
+  it("ok:false si faltan 2+ campos, aunque uno sea matemáticamente deducible (nunca deriva de a más de uno)", () => {
+    const broken = REAL_TEXT_2026_07_27.replace("AGENCIA\n166", "AGENCIA\nXYZ");
+    const result = parseAndValidateLendingReport(broken);
+    expect(result.ok).toBe(false);
   });
 });

@@ -46,6 +46,10 @@ const LENDING_SEARCH_QUERY =
 // no traer ningún adjunto (el contenido relevante está en el cuerpo).
 const DAILY_NOTE_SEARCH_QUERY = 'to:carlos@lepesqueur.net from:clepesqueur@bcp.com.bo subject:"(DN)" newer_than:3d';
 
+// Igual criterio que DAILY_NOTE_SEARCH_QUERY (sin has:attachment) — un mail marcado (Tarea) por
+// Cal puede no traer ningún adjunto, el pedido está en el cuerpo del mail.
+const TASK_SEARCH_QUERY = 'to:carlos@lepesqueur.net from:clepesqueur@bcp.com.bo subject:"(Tarea)" newer_than:3d';
+
 export interface GmailMessageRef {
   id: string;
 }
@@ -94,6 +98,13 @@ export async function searchDailyNoteEmails(
   return searchEmails(DAILY_NOTE_SEARCH_QUERY, accessToken, fetchFn);
 }
 
+export async function searchTaskEmails(
+  accessToken: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<GmailMessageRef[]> {
+  return searchEmails(TASK_SEARCH_QUERY, accessToken, fetchFn);
+}
+
 export interface GmailAttachmentPart {
   filename: string;
   mimeType: string;
@@ -109,6 +120,9 @@ export interface GmailMessageDetail {
   /** HTML crudo del body (sin strip) — para conversiones que necesitan preservar links/formato. */
   bodyHtml?: string | null;
   subject?: string | null;
+  /** ID del hilo de Gmail (agrupa reenvíos/respuestas del mismo thread) — usado por el pipeline
+   * de Tareas para anti-duplicados y para armar el link permalink al mail. */
+  threadId?: string;
 }
 
 interface GmailPart {
@@ -200,7 +214,7 @@ export async function getGmailMessage(
   });
   if (!res.ok)
     throw new Error(`gmail get message ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
-  const d = (await res.json()) as { id: string; internalDate: string; payload: GmailPart };
+  const d = (await res.json()) as { id: string; internalDate: string; payload: GmailPart; threadId?: string };
   const attachments: GmailAttachmentPart[] = [];
   collectAttachments(d.payload, attachments);
   return {
@@ -210,6 +224,7 @@ export async function getGmailMessage(
     bodyText: extractPlainTextBody(d.payload),
     bodyHtml: extractHtmlBody(d.payload),
     subject: extractHeader(d.payload.headers, "Subject"),
+    threadId: d.threadId,
   };
 }
 

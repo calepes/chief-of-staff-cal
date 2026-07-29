@@ -174,6 +174,26 @@ export interface LendingReconcileResult {
   errors: string[];
 }
 
+type FieldKey = keyof LendingFunnelFields;
+
+interface FunnelEquation {
+  label: string;
+  parts: FieldKey[];
+  total: FieldKey;
+}
+
+/** 6 igualdades que cubren los 15 campos — verificadas contra 4 días reales (cierran exacto).
+ * Estructura compartida entre reconcileLendingFunnel() (valida) y deriveMissingField() (deduce
+ * un campo faltante) — antes vivían duplicadas como 6 llamadas a checkSum() inline. */
+const FUNNEL_EQUATIONS: FunnelEquation[] = [
+  { label: "Vistos+NoVistos=Leads", parts: ["vistos", "noVistos"], total: "leads" },
+  { label: "MeInteresa+NoMeInteresa+SinInteraccion=Vistos", parts: ["meInteresa", "noMeInteresa", "sinInteraccion"], total: "vistos" },
+  { label: "Contactado+NoContactado=MeInteresa", parts: ["contactado", "noContactado"], total: "meInteresa" },
+  { label: "Derivados+NoDerivados=Contactado", parts: ["derivados", "noDerivados"], total: "contactado" },
+  { label: "Agencia+EnProcesoDerivados=Derivados", parts: ["agencia", "enProcesoDerivados"], total: "derivados" },
+  { label: "Desembolso+EnProcesoAgencia+Rechazado=Agencia", parts: ["desembolso", "enProcesoAgencia", "rechazado"], total: "agencia" },
+];
+
 function checkSum(label: string, parts: Array<[string, number | null]>, total: number | null): string | null {
   if (total == null || parts.some(([, v]) => v == null)) {
     const faltantes = [...(total == null ? ["total"] : []), ...parts.filter(([, v]) => v == null).map(([n]) => n)];
@@ -184,26 +204,54 @@ function checkSum(label: string, parts: Array<[string, number | null]>, total: n
   return null;
 }
 
-/** 6 igualdades que cubren los 15 campos — verificadas contra 4 días reales (cierran exacto). */
 export function reconcileLendingFunnel(f: LendingFunnelFields): LendingReconcileResult {
-  const errors = [
-    checkSum("Vistos+NoVistos=Leads", [["vistos", f.vistos], ["noVistos", f.noVistos]], f.leads),
-    checkSum(
-      "MeInteresa+NoMeInteresa+SinInteraccion=Vistos",
-      [["meInteresa", f.meInteresa], ["noMeInteresa", f.noMeInteresa], ["sinInteraccion", f.sinInteraccion]],
-      f.vistos,
-    ),
-    checkSum("Contactado+NoContactado=MeInteresa", [["contactado", f.contactado], ["noContactado", f.noContactado]], f.meInteresa),
-    checkSum("Derivados+NoDerivados=Contactado", [["derivados", f.derivados], ["noDerivados", f.noDerivados]], f.contactado),
-    checkSum("Agencia+EnProcesoDerivados=Derivados", [["agencia", f.agencia], ["enProcesoDerivados", f.enProcesoDerivados]], f.derivados),
-    checkSum(
-      "Desembolso+EnProcesoAgencia+Rechazado=Agencia",
-      [["desembolso", f.desembolso], ["enProcesoAgencia", f.enProcesoAgencia], ["rechazado", f.rechazado]],
-      f.agencia,
-    ),
-  ].filter((e): e is string => e !== null);
-
+  const errors = FUNNEL_EQUATIONS.map((eq) => checkSum(eq.label, eq.parts.map((k) => [k, f[k]]), f[eq.total])).filter(
+    (e): e is string => e !== null,
+  );
   return { ok: errors.length === 0, errors };
+}
+
+export interface DerivedFieldInfo {
+  campo: FieldKey;
+  valor: number;
+  ecuacion: string;
+}
+
+/**
+ * Si falta EXACTAMENTE UN campo del funnel (los otros 14 sí se leyeron del PDF) y ese campo
+ * aparece en alguna de las 6 ecuaciones con todos los demás términos ya conocidos, lo deduce por
+ * aritmética simple — nunca si falta más de uno, nunca si el resultado da negativo (sin sentido
+ * de negocio, mejor fallar explícito que inventar). El caller SIEMPRE debe re-verificar con
+ * reconcileLendingFunnel() antes de aceptar el valor derivado.
+ *
+ * Motivo real (encontrado 2026-07-27): Power BI a veces abrevia un único valor puntual como "1K"
+ * en vez del número completo ("NO CONTACTADO" ese día, en vez de "1.179") — probablemente por
+ * ancho de la tarjeta — mientras el resto del funnel se lee normal. El resto de los 14 campos
+ * alcanza para reconstruir el que falta sin ambigüedad.
+ */
+export function deriveMissingField(fields: LendingFunnelFields): DerivedFieldInfo | null {
+  const missing = (Object.keys(fields) as FieldKey[]).filter((k) => fields[k] == null);
+  if (missing.length !== 1) return null;
+  const campo = missing[0];
+
+  for (const eq of FUNNEL_EQUATIONS) {
+    if (eq.total === campo) {
+      const parts = eq.parts.map((k) => fields[k]);
+      if (parts.some((v) => v == null)) continue;
+      const valor = parts.reduce<number>((acc, v) => acc + (v ?? 0), 0);
+      return { campo, valor, ecuacion: eq.label };
+    }
+    if (eq.parts.includes(campo)) {
+      const total = fields[eq.total];
+      if (total == null) continue;
+      const otherParts = eq.parts.filter((k) => k !== campo).map((k) => fields[k]);
+      if (otherParts.some((v) => v == null)) continue;
+      const valor = total - otherParts.reduce<number>((acc, v) => acc + (v ?? 0), 0);
+      if (valor < 0) continue;
+      return { campo, valor, ecuacion: eq.label };
+    }
+  }
+  return null;
 }
 
 /** Fecha del CUERPO del email ("...cierre de la jornada de 2026-07-26..."). El PDF no trae fecha
@@ -222,6 +270,26 @@ export type LendingParseOutcome =
 export function parseAndValidateLendingReport(text: string): LendingParseOutcome {
   const { fields, issues } = extractLendingFunnel(text);
   if (issues.length > 0) {
+    // Un único campo ilegible (ver deriveMissingField) es recuperable por aritmética — cualquier
+    // otra combinación (2+ campos, o "EN PROCESO sin ancla"/conteo raro) sigue rechazando el
+    // reporte entero como antes.
+    const derived = issues.length === 1 ? deriveMissingField(fields) : null;
+    if (derived) {
+      const repaired = { ...fields, [derived.campo]: derived.valor };
+      if (reconcileLendingFunnel(repaired).ok) {
+        console.log(
+          JSON.stringify({
+            ts: Date.now(),
+            msg: "kpi_ingest_lending_field_derived",
+            campo: derived.campo,
+            valor: derived.valor,
+            ecuacion: derived.ecuacion,
+            motivoOriginal: issues[0],
+          }),
+        );
+        return { ok: true, fields: repaired };
+      }
+    }
     return { ok: false, errors: issues.map((i) => `${i.campo}: ${i.motivo}`) };
   }
   const missing = (Object.entries(fields) as Array<[string, number | null]>).filter(([, v]) => v == null).map(([k]) => k);

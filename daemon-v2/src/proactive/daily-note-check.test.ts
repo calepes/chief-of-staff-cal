@@ -58,6 +58,25 @@ describe("checkDailyNotes", () => {
     expect(state.processed).toContain("m1");
   });
 
+  it("la fecha de la nota usa el día calendario de La Paz (UTC-4), no el de UTC", async () => {
+    vi.mocked(searchDailyNoteEmails).mockResolvedValue([{ id: "m1" }]);
+    // 2026-07-27 23:30 hora La Paz == 2026-07-28 03:30 UTC — un toISOString() directo fecharía
+    // esto 07-28, que es el día equivocado para Cal.
+    vi.mocked(getGmailMessage).mockResolvedValue({
+      id: "m1",
+      internalDate: new Date("2026-07-28T03:30:00Z").getTime(),
+      attachments: [],
+      subject: "(DN) test tarde",
+      bodyHtml: "<p>cuerpo</p>",
+    });
+    vi.mocked(createDailyNotePage).mockResolvedValue({ pageId: "page-1" });
+
+    await checkDailyNotes({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+
+    const [, arg] = vi.mocked(createDailyNotePage).mock.calls[0];
+    expect(arg.fecha).toBe("2026-07-27");
+  });
+
   it("prefiere bodyHtml sobre bodyText cuando ambos están presentes", async () => {
     vi.mocked(searchDailyNoteEmails).mockResolvedValue([{ id: "m1" }]);
     vi.mocked(getGmailMessage).mockResolvedValue({
