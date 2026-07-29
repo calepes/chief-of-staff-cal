@@ -1,5 +1,32 @@
 # CHANGELOG — Jano
 
+## 2026-07-29
+
+### UX — El reporte diario de KPIs (CSV) pasó de ~30 líneas a 2
+Cal: *"repensemos esta notificación, es demasiado ruido"*, con el mensaje pegado: 27 fechas, cada
+una repitiendo los mismos 9 nombres de campo. Es la tercera pasada de ruido sobre este mismo
+reporte (las dos anteriores, 2026-07-24, habían limpiado la sección "Derivados"), pero esta vez el
+problema era el bloque grande — y estaba **mal diagnosticado en el código**.
+
+- **El "catch-up" no existía.** El comentario original trataba varias fechas en un tick como la
+  excepción. Los logs dicen lo contrario: los últimos 5 `kpi_ingest_full_report` arrancaban todos
+  en `2026-07-01`. El CSV del Self-Service trae el **mes-a-la-fecha completo todos los días**, así
+  que la corrida NORMAL desglosaba ~27 fechas idénticas. La pared crecía un renglón por jornada y
+  a fin de mes tocaba `MAX_REPORT_LINES` y se truncaba sola.
+- **Dos líneas en el caso normal** (`✅ KPIs diarios · Self-Service` + `📅 {última} · {N} fechas ·
+  {M} campos`). El desglose por fecha aparece solo bajo `⚠️ Revisar:` y solo para lo que se sale de
+  la norma: fecha creada (registro nuevo), cero campos escritos, un conteo distinto al **modal** de
+  la corrida — así se detecta una columna que dejó de venir —, columnas ilegibles o no mapeadas.
+- **`formatSuccessReport()` recibe `CsvIngestRow[]`**, no strings ya formateados: decidir qué es
+  anómalo exige los datos, no un texto armado. En el log estructurado el campo pasó de
+  `ingestSummary` a `ingestRows` (romper greps viejos es el único costo; el detalle completo sigue
+  ahí para debug).
+- **`Derivados: • nada pendiente` dejó de imprimirse**, acá y en el reporte del PDF. Era una línea
+  fija en cada corrida que nunca comunicó nada.
+
+El principio que unifica los tres casos: **reportar la excepción, no la confirmación**. Si algo se
+imprime siempre, no es información.
+
 ## 2026-07-28 (3)
 
 ### Feature — Tareas por mail: de "se crea sola" a "la confirmás vos", con cola

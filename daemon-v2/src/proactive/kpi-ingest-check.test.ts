@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatSuccessReport, formatPdfSuccessReport } from "./kpi-ingest-check.js";
+import { formatSuccessReport, formatPdfSuccessReport, type CsvIngestRow } from "./kpi-ingest-check.js";
 import type { PdfKpiFields } from "./kpi-ingest-pdf.js";
 
 // Fechas relativas a "ahora" para no dejar time-bombs en los tests (el filtro de recencia
@@ -11,61 +11,156 @@ function daysAgo(n: number): string {
   return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+const NINE_FIELDS = [
+  "Activos 30d",
+  "Stock Afiliados",
+  "Saldo",
+  "Activos 30d %",
+  "Activos DAU %",
+  "DAU Promedio 7d",
+  "Ingresos Recaudacion",
+  "Ingresos Recargas",
+  "Ingresos PDS",
+];
+
+function csvRow(overrides: Partial<CsvIngestRow> = {}): CsvIngestRow {
+  return {
+    fecha: "2026-07-20",
+    created: false,
+    fieldsWritten: [...NINE_FIELDS],
+    unmapped: [],
+    illegible: [],
+    ...overrides,
+  };
+}
+
+// El CSV del Self-Service trae el mes-a-la-fecha COMPLETO cada día, así que la corrida
+// típica reescribe ~27 fechas con los mismos 9 campos. Ese es el caso normal, no un
+// catch-up: si el reporte lo desglosa fecha por fecha, Cal recibe la misma pared de texto
+// todos los días. Ver Jano/CLAUDE.md, sección "scheduleKpiIngestCheck".
+function monthToDate(days = 27): CsvIngestRow[] {
+  return Array.from({ length: days }, (_, i) =>
+    csvRow({ fecha: `2026-07-${String(i + 1).padStart(2, "0")}` }),
+  );
+}
+
 describe("formatSuccessReport", () => {
-  it("arma el texto con ingesta y derivados completados", () => {
+  it("colapsa la corrida típica (mes-a-la-fecha) en una sola línea de resumen", () => {
+    const text = formatSuccessReport(monthToDate(), { completados: [], noCalculables: [] });
+
+    expect(text).toContain("📅 <b>2026-07-27</b> · 27 fechas · 9 campos");
+    // El desglose fecha-por-fecha es exactamente el ruido que este formato elimina.
+    expect(text).not.toContain("2026-07-01");
+    expect(text).not.toContain("Ingresos Recargas");
+    expect(text.split("\n").length).toBeLessThanOrEqual(3);
+  });
+
+  it("omite el conteo de fechas cuando el mail trae una sola", () => {
+    const text = formatSuccessReport([csvRow()], { completados: [], noCalculables: [] });
+
+    expect(text).toContain("📅 <b>2026-07-20</b> · 9 campos");
+    expect(text).not.toContain("fechas ·");
+  });
+
+  it("muestra un texto explícito si no hubo ninguna fila con Fecha válida", () => {
+    const text = formatSuccessReport([], { completados: [], noCalculables: [] });
+    expect(text).toContain("sin filas con Fecha válida");
+  });
+
+  it("señala una fecha creada (registro nuevo) como algo a revisar", () => {
+    const text = formatSuccessReport([...monthToDate(), csvRow({ fecha: "2026-07-28", created: true })], {
+      completados: [],
+      noCalculables: [],
+    });
+
+    expect(text).toContain("⚠️");
+    expect(text).toContain("2026-07-28 → creado (fecha nueva)");
+    // Las 27 fechas normales siguen sin desglosarse: solo se nombra la excepción.
+    expect(text).not.toContain("2026-07-15");
+  });
+
+  it("señala columnas ilegibles y no mapeadas", () => {
     const text = formatSuccessReport(
-      ["2026-07-20: actualizado (Stock Afiliados, Saldo)"],
-      {
-        completados: [{ fecha: "2026-07-20", campo: "Afiliados 7d", valor: 120 }],
-        noCalculables: [{ fecha: daysAgo(7), campo: "TRX vs. Sem. anterior (%)", motivo: "no existe registro D-7" }],
-      },
+      [csvRow(), csvRow({ fecha: "2026-07-21", illegible: ["Saldo"], unmapped: ["Columna Rara"] })],
+      { completados: [], noCalculables: [] },
     );
 
-    expect(text).toContain("2026-07-20: actualizado (Stock Afiliados, Saldo)");
-    expect(text).toContain("Afiliados 7d → 120");
-    expect(text).toContain("no calculable (no existe registro D-7)");
+    expect(text).toContain("2026-07-21 → ilegibles: Saldo · no mapeadas: Columna Rara");
+  });
+
+  it("señala una fecha cuyo set de campos difiere del habitual (columna que dejó de venir)", () => {
+    const text = formatSuccessReport(
+      [...monthToDate(), csvRow({ fecha: "2026-07-28", fieldsWritten: NINE_FIELDS.slice(0, 7) })],
+      { completados: [], noCalculables: [] },
+    );
+
+    expect(text).toContain("2026-07-28 → 7 campos (lo habitual son 9)");
+  });
+
+  it("señala una fecha sin ningún campo escrito", () => {
+    const text = formatSuccessReport([csvRow(), csvRow({ fecha: "2026-07-21", fieldsWritten: [] })], {
+      completados: [],
+      noCalculables: [],
+    });
+
+    expect(text).toContain("2026-07-21 → sin campos");
+  });
+
+  it("NO agrega el bloque de revisión cuando todo salió normal", () => {
+    const text = formatSuccessReport(monthToDate(), { completados: [], noCalculables: [] });
+    expect(text).not.toContain("Revisar");
+    expect(text).not.toContain("⚠️");
+  });
+
+  it("cap el bloque de revisión y avisa cuántas fechas faltan", () => {
+    const rows = Array.from({ length: 40 }, (_, i) =>
+      csvRow({ fecha: `2026-06-${String(i + 1).padStart(2, "0")}`, created: true }),
+    );
+
+    const text = formatSuccessReport(rows, { completados: [], noCalculables: [] });
+
+    expect(text).toContain("+15 más");
+    expect(text).not.toContain("2026-06-30 → creado");
   });
 
   it("escapa HTML en contenido dinámico (nombres de columna de un CSV real)", () => {
-    const text = formatSuccessReport(
-      ["2026-07-20: actualizado (Trx & Remesas)"],
-      { completados: [], noCalculables: [] },
-    );
+    const text = formatSuccessReport([csvRow({ illegible: ["Trx & Remesas"] })], {
+      completados: [],
+      noCalculables: [],
+    });
 
     expect(text).toContain("Trx &amp; Remesas");
     expect(text).not.toContain("Trx & Remesas");
   });
 
-  it("muestra un texto por default si no hay ingesta ni derivados", () => {
-    const text = formatSuccessReport([], { completados: [], noCalculables: [] });
-    expect(text).toContain("sin filas con Fecha válida");
-    expect(text).toContain("nada pendiente");
+  it("omite la sección de derivados cuando no hay nada pendiente", () => {
+    const text = formatSuccessReport(monthToDate(), { completados: [], noCalculables: [] });
+    expect(text).not.toContain("Derivados");
+    expect(text).not.toContain("nada pendiente");
   });
 
-  it("agrega un header con el conteo cuando hay más de 1 fecha (catch-up)", () => {
-    const text = formatSuccessReport(
-      ["2026-07-19: actualizado (Saldo)", "2026-07-20: actualizado (Saldo)", "2026-07-21: actualizado (Saldo)"],
-      { completados: [], noCalculables: [] },
-    );
-    expect(text).toContain("📋 3 fechas actualizadas");
-  });
+  it("muestra los derivados completados cuando los hay", () => {
+    const text = formatSuccessReport(monthToDate(), {
+      completados: [{ fecha: "2026-07-20", campo: "Afiliados 7d", valor: 120 }],
+      noCalculables: [{ fecha: daysAgo(7), campo: "TRX vs. Sem. anterior (%)", motivo: "no existe registro D-7" }],
+    });
 
-  it("NO muestra el header de conteo con una sola fecha", () => {
-    const text = formatSuccessReport(["2026-07-20: actualizado (Saldo)"], { completados: [], noCalculables: [] });
-    expect(text).not.toContain("fechas actualizadas");
+    expect(text).toContain("Derivados");
+    expect(text).toContain("Afiliados 7d → 120");
+    expect(text).toContain("no calculable (no existe registro D-7)");
   });
 
   it("oculta 'no calculables' viejos (>30 días) — son permanentes, ruido puro en cada corrida", () => {
-    const text = formatSuccessReport([], {
+    const text = formatSuccessReport(monthToDate(), {
       completados: [],
       noCalculables: [{ fecha: daysAgo(200), campo: "TRX vs. Sem. anterior (%)", motivo: "no existe registro D-7 (permanente, antes del histórico)" }],
     });
     expect(text).not.toContain("permanente, antes del histórico");
-    expect(text).toContain("nada pendiente"); // sin nada reciente que mostrar, cae al default
+    expect(text).not.toContain("Derivados"); // sin nada reciente, la sección entera se omite
   });
 
   it("SÍ muestra 'no calculables' recientes (≤30 días) — son accionables", () => {
-    const text = formatSuccessReport([], {
+    const text = formatSuccessReport(monthToDate(), {
       completados: [],
       noCalculables: [{ fecha: daysAgo(5), campo: "TRX vs. Sem. anterior (%)", motivo: "falta TRX el D-7" }],
     });
@@ -78,12 +173,12 @@ describe("formatSuccessReport", () => {
     while (sunday.getUTCDay() !== 0) sunday.setUTCDate(sunday.getUTCDate() - 1);
     const fecha = sunday.toISOString().slice(0, 10);
 
-    const text = formatSuccessReport([], {
+    const text = formatSuccessReport(monthToDate(), {
       completados: [],
       noCalculables: [{ fecha, campo: "Afiliaciones vs. Sem. anterior (%)", motivo: `falta afiliacionesDiarias el ${fecha}` }],
     });
     expect(text).not.toContain("Afiliaciones vs. Sem. anterior");
-    expect(text).toContain("nada pendiente");
+    expect(text).not.toContain("Derivados");
   });
 
   it("NO oculta 'falta afiliacionesDiarias' si NO es domingo (hueco real)", () => {
@@ -92,7 +187,7 @@ describe("formatSuccessReport", () => {
     while (monday.getUTCDay() !== 1) monday.setUTCDate(monday.getUTCDate() - 1);
     const fecha = monday.toISOString().slice(0, 10);
 
-    const text = formatSuccessReport([], {
+    const text = formatSuccessReport(monthToDate(), {
       completados: [],
       noCalculables: [{ fecha, campo: "Afiliaciones vs. Sem. anterior (%)", motivo: `falta afiliacionesDiarias el ${fecha}` }],
     });
@@ -106,7 +201,7 @@ describe("formatSuccessReport", () => {
       valor: i,
     }));
 
-    const text = formatSuccessReport([], { completados, noCalculables: [] });
+    const text = formatSuccessReport(monthToDate(), { completados, noCalculables: [] });
 
     expect(text).toContain("+15 más");
     // La entrada #30 (índice 29) queda fuera del cap de 25 — no debe aparecer completa.
@@ -161,7 +256,8 @@ describe("formatPdfSuccessReport", () => {
     expect(text).toContain("🔁 TRX Promedio 7d: <b>3,909,550</b>");
     expect(text).toContain("📊 Activos DAU: <b>1,150,676</b>");
     expect(text).toContain("▲ +0.1% día · ▼ -3.3% sem.");
-    expect(text).toContain("nada pendiente");
+    // Sin derivados pendientes la sección entera se omite (antes imprimía "• nada pendiente").
+    expect(text).not.toContain("Derivados");
   });
 
   it("omite líneas de campos que vinieron null (PDF parcial)", () => {

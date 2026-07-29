@@ -131,16 +131,69 @@ function formatDerivedLines(derived: DerivedFillReport): string[] {
   ]);
 }
 
-export function formatSuccessReport(ingestSummary: string[], derived: DerivedFillReport): string {
-  const header = "✅ <b>KPIs diarios actualizados</b> · Self-Service";
-  const lines: string[] =
-    ingestSummary.length > 1 ? [header, `📋 ${ingestSummary.length} fechas actualizadas`, ""] : [header, ""];
-  lines.push("<b>Ingesta:</b>");
-  const ingestLines = ingestSummary.length ? capLines(ingestSummary.map((s) => `• ${escapeHtml(s)}`)) : ["• sin filas con Fecha válida"];
-  lines.push(...ingestLines);
-  lines.push("", "<b>Derivados:</b>");
+/** Una fila del CSV ya escrita en Notion — la materia prima del reporte de ingesta. */
+export interface CsvIngestRow {
+  fecha: string;
+  created: boolean;
+  fieldsWritten: string[];
+  unmapped: string[];
+  illegible: string[];
+}
+
+/** Los `campos` que escribe la corrida, si TODAS las fechas coinciden; si no, el set más común. */
+function modalFieldCount(rows: CsvIngestRow[]): number {
+  const counts = new Map<number, number>();
+  for (const r of rows) counts.set(r.fieldsWritten.length, (counts.get(r.fieldsWritten.length) ?? 0) + 1);
+  let best = 0;
+  let bestFreq = -1;
+  for (const [n, freq] of counts) {
+    if (freq > bestFreq) {
+      best = n;
+      bestFreq = freq;
+    }
+  }
+  return best;
+}
+
+// El CSV del Self-Service trae el mes-a-la-fecha COMPLETO cada día: la corrida normal reescribe
+// ~27 fechas con exactamente los mismos campos. Desglosarlas una por una producía la misma pared
+// de texto todos los días (creciendo un renglón por jornada, hasta tocar el cap y truncarse), sin
+// una sola línea accionable. Acá solo se nombra lo que se sale de esa norma; el detalle completo
+// queda en el log estructurado `kpi_ingest_full_report`.
+function formatAnomalyLines(rows: CsvIngestRow[]): string[] {
+  const habitual = modalFieldCount(rows);
+  const out: string[] = [];
+  for (const r of rows) {
+    const notas: string[] = [];
+    if (r.created) notas.push("creado (fecha nueva)");
+    if (!r.fieldsWritten.length) notas.push("sin campos");
+    else if (r.fieldsWritten.length !== habitual) notas.push(`${r.fieldsWritten.length} campos (lo habitual son ${habitual})`);
+    if (r.illegible.length) notas.push(`ilegibles: ${r.illegible.map(escapeHtml).join(", ")}`);
+    if (r.unmapped.length) notas.push(`no mapeadas: ${r.unmapped.map(escapeHtml).join(", ")}`);
+    if (notas.length) out.push(`• ${escapeHtml(r.fecha)} → ${notas.join(" · ")}`);
+  }
+  return capLines(out);
+}
+
+export function formatSuccessReport(rows: CsvIngestRow[], derived: DerivedFillReport): string {
+  const lines: string[] = ["✅ <b>KPIs diarios</b> · Self-Service"];
+
+  if (!rows.length) {
+    lines.push("⚠️ sin filas con Fecha válida");
+  } else {
+    const ultima = rows.map((r) => r.fecha).sort().at(-1)!;
+    const conteo = rows.length > 1 ? `${rows.length} fechas · ` : "";
+    lines.push(`📅 <b>${escapeHtml(ultima)}</b> · ${conteo}${modalFieldCount(rows)} campos`);
+
+    const anomalias = formatAnomalyLines(rows);
+    if (anomalias.length) lines.push("", "⚠️ <b>Revisar:</b>", ...anomalias);
+  }
+
+  // Sin nada que completar ni ningún hueco reciente, la sección entera se omite: un
+  // "• nada pendiente" fijo en cada corrida es ruido, no confirmación útil.
   const derivedLines = formatDerivedLines(derived);
-  lines.push(...(derivedLines.length ? derivedLines : ["• nada pendiente"]));
+  if (derivedLines.length) lines.push("", "<b>Derivados:</b>", ...derivedLines);
+
   return lines.join("\n");
 }
 
@@ -190,9 +243,8 @@ export function formatPdfSuccessReport(
   }
   if (!result.fieldsWritten.length) lines.push("sin campos");
 
-  lines.push("", "<b>Derivados:</b>");
   const derivedLines = formatDerivedLines(derived);
-  lines.push(...(derivedLines.length ? derivedLines : ["• nada pendiente"]));
+  if (derivedLines.length) lines.push("", "<b>Derivados:</b>", ...derivedLines);
   return lines.join("\n");
 }
 
@@ -368,7 +420,7 @@ async function processCsvMessage(id: string, state: KpiIngestState, opts: CheckK
       if (!best || parsed.headerMapped > best.headerMapped) best = parsed;
     }
 
-    const ingestSummary: string[] = [];
+    const ingestRows: CsvIngestRow[] = [];
     const touchedFechas: string[] = [];
     for (const row of best!.rows) {
       if (!row.fecha) continue;
@@ -376,20 +428,19 @@ async function processCsvMessage(id: string, state: KpiIngestState, opts: CheckK
       for (const prop of PDF_OWNED_RAW_PROPS) delete raw[prop];
       const result = await upsertKpiRow(notionToken, row.fecha, raw);
       touchedFechas.push(result.fecha);
-      const extras = [
-        row.unmapped.length ? `no mapeadas: ${row.unmapped.join(", ")}` : "",
-        row.illegible.length ? `ilegibles: ${row.illegible.join(", ")}` : "",
-      ].filter(Boolean);
-      ingestSummary.push(
-        `${result.fecha}: ${result.created ? "creado" : "actualizado"} (${result.fieldsWritten.join(", ") || "sin campos"})` +
-          (extras.length ? ` · ${extras.join(" · ")}` : ""),
-      );
+      ingestRows.push({
+        fecha: result.fecha,
+        created: result.created,
+        fieldsWritten: result.fieldsWritten,
+        unmapped: row.unmapped,
+        illegible: row.illegible,
+      });
     }
 
     // Solo las fechas recién tocadas en ESTE mail — no todo el histórico (ver fillDerivedFields).
     const derived = await fillDerivedFields(notionToken, touchedFechas);
-    console.log(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_full_report", id, ingestSummary, derived }));
-    await sendReport(botToken, chatId, formatSuccessReport(ingestSummary, derived));
+    console.log(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_full_report", id, ingestRows, derived }));
+    await sendReport(botToken, chatId, formatSuccessReport(ingestRows, derived));
     markProcessed(state, id);
   } catch (err) {
     const now = Date.now();
