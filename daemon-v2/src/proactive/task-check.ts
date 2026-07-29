@@ -374,16 +374,28 @@ let promoteChain: Promise<void> = Promise.resolve();
 const PROMOTE_TIMEOUT_MS = 120_000;
 
 function serializePromote(fn: () => Promise<void>): Promise<void> {
-  const conTecho = () =>
-    Promise.race([
-      fn(),
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          console.error(JSON.stringify({ ts: Date.now(), msg: "task_promote_timeout", ms: PROMOTE_TIMEOUT_MS }));
-          resolve();
-        }, PROMOTE_TIMEOUT_MS).unref(),
-      ),
-    ]);
+  const conTecho = async () => {
+    // El timer se limpia SIEMPRE al resolverse la carrera. Sin el clearTimeout, `Promise.race`
+    // resuelve apenas termina fn() pero deja el timeout corriendo: 120 s después loguea
+    // task_promote_timeout igual, aunque la promoción haya durado milisegundos. Con el cron cada
+    // 15 min eso era un falso positivo por tick, y el ruido tapaba justo lo que el techo existe
+    // para detectar — una cadena colgada de verdad.
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        fn(),
+        new Promise<void>((resolve) => {
+          handle = setTimeout(() => {
+            console.error(JSON.stringify({ ts: Date.now(), msg: "task_promote_timeout", ms: PROMOTE_TIMEOUT_MS }));
+            resolve();
+          }, PROMOTE_TIMEOUT_MS);
+          handle.unref();
+        }),
+      ]);
+    } finally {
+      if (handle) clearTimeout(handle);
+    }
+  };
   promoteChain = promoteChain.then(conTecho, conTecho);
   return promoteChain;
 }

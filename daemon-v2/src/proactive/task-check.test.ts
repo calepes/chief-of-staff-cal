@@ -528,3 +528,22 @@ describe("createTaskFromProposal", () => {
     });
   });
 });
+
+describe("serializePromote — techo de la cadena", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("no loguea task_promote_timeout cuando la promoción termina rápido", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+
+    // Cola vacía y sin propuesta activa: promoteNextUnsafe vuelve enseguida, así que el techo
+    // de 120 s nunca debería llegar a disparar. Es el caso de CADA tick del cron.
+    await ensureActiveProposal(opts());
+    await vi.advanceTimersByTimeAsync(200_000);
+
+    const timeouts = errSpy.mock.calls.filter((c) => String(c[0]).includes("task_promote_timeout"));
+    expect(timeouts).toEqual([]);
+  });
+});
