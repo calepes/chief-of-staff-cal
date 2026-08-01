@@ -22,6 +22,9 @@ export interface CaptureResult {
  * resolveAllowedLocalFile en telegram-files.ts para poder mandarlo por Telegram después.
  */
 export async function captureDesignScreenshot(url: string, cookies: StructuredCookie[]): Promise<CaptureResult> {
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(`Solo se admiten URLs http/https, recibido: ${url}`);
+  }
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext();
@@ -32,7 +35,7 @@ export async function captureDesignScreenshot(url: string, cookies: StructuredCo
     await page.goto(url, { waitUntil: "networkidle", timeout: 20_000 });
     const title = await page.title();
     const screenshotPath = join(tmpdir(), `disref-${Date.now()}.png`);
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await page.screenshot({ path: screenshotPath, fullPage: true, timeout: 15_000 });
     return { screenshotPath, title };
   } finally {
     await browser.close();

@@ -913,7 +913,7 @@ export function buildSdkTools(deps: ToolDeps) {
       "shotPath devuelto y un caption corto (título + tipo). No hace falta pedir confirmación: " +
       "es informativo.",
       {
-        url: z.string().url().describe("URL del recurso a capturar y guardar"),
+        url: z.string().url().refine((u) => /^https?:\/\//i.test(u), { message: "Solo se admiten URLs http/https" }).describe("URL del recurso a capturar y guardar"),
         aplicableA: z.string().optional().describe("Apps de Cal a las que aplica esta referencia, SOLO si es evidente por el contexto de la charla (ej. 'Combustible, Presupuesto Privado'). Omitir si no está claro."),
       },
       async ({ url, aplicableA }) => {
