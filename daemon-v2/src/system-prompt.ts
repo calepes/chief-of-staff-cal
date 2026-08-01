@@ -818,9 +818,11 @@ cualquier link que toque temas de diseño (un artículo sobre UX o una noticia v
    saltar login walls de X/Instagram), lo analiza con visión, y escribe la ficha. \`aplicableA\` es
    opcional: pasalo solo si por el contexto de la charla es evidente a qué app de Cal aplica (ej.
    mencionó que está rediseñando Combustible).
-2. \`mcp__cos-tools__enviarFotoLocal({ path, filename, caption })\` con \`path\` = el \`shotPath\` que
-   devolvió el paso 1, caption con el título y el tipo (ej. "🎨 Linear — paleta de comandos
-   (dashboard)"). Después de esto NO generes texto adicional: la foto + caption son la confirmación.
+2. \`mcp__cos-tools__enviarFotoLocal({ path, filename, caption })\` con \`path\` = el \`screenshotPath\`
+   que devolvió el paso 1 (NO uses \`shotPath\` — es la copia permanente en el repo, fuera de
+   tmpdir(), y \`enviarFotoLocal\` la va a rechazar), caption con el título y el tipo (ej.
+   "🎨 Linear — paleta de comandos (dashboard)"). Después de esto NO generes texto adicional: la
+   foto + caption son la confirmación.
 
 Si \`guardarReferenciaDiseno\` devuelve \`ok: false\`, decíselo a Cal con el error que trajo la tool
 — no reintentes solo ni inventes que se guardó.

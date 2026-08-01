@@ -925,7 +925,18 @@ export function buildSdkTools(deps: ToolDeps) {
           const critique = parseDesignCritique(analysis.text);
           const fecha = nowInLaPaz(new Date()).slice(0, 10);
           const result = writeDesignRef({ fuente: url, fecha, critique, aplicableA }, capture.screenshotPath);
-          return asText({ ok: true, ...result, titulo: critique.titulo, tipo: critique.tipo, tags: critique.tags });
+          // screenshotPath (tmpdir(), disref-*.png) es DISTINTO de result.shotPath (la copia
+          // permanente en Personal/Referencias de Diseño/shots/) — enviarFotoLocal exige el
+          // primero (dentro de tmpdir(), matcheando el patrón disref-*.png); el segundo vive fuera
+          // de tmpdir() y con otro nombre, así que enviarFotoLocal lo rechaza si se le pasa ese.
+          return asText({
+            ok: true,
+            ...result,
+            screenshotPath: capture.screenshotPath,
+            titulo: critique.titulo,
+            tipo: critique.tipo,
+            tags: critique.tags,
+          });
         } catch (e) {
           return asText({ ok: false, error: e instanceof Error ? e.message : String(e) });
         }
