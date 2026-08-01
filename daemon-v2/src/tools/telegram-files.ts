@@ -13,7 +13,7 @@ const TG_API = "https://api.telegram.org";
  * `~/.ssh/id_ed25519`) pasaría la validación de superficie y se leería/
  * mandaría igual. Devuelve el path real ya verificado, o `null` si no pasa.
  */
-async function resolveAllowedLocalFile(filePath: string, allowedName: RegExp): Promise<string | null> {
+export async function resolveAllowedLocalFile(filePath: string, allowedName: RegExp): Promise<string | null> {
   const allowedDir = tmpdir();
   const resolved = resolve(filePath);
   if (!resolved.startsWith(allowedDir + sep) || !allowedName.test(basename(resolved))) return null;
@@ -149,12 +149,12 @@ export async function enviarFotoLocal(
   caption?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   // boa-wallet-*: tarjeta de embarque BoA. kpi-card-*: tarjeta diaria de KPIs Yape.
-  // cine-*: mapa/resumen/QR/entradas del MCP de cine.
-  const resolved = await resolveAllowedLocalFile(filePath, /^(boa-wallet|kpi-card|cine)-.+\.png$/);
+  // cine-*: mapa/resumen/QR/entradas del MCP de cine. disref-*: capturas de Referencias de Diseño.
+  const resolved = await resolveAllowedLocalFile(filePath, /^(boa-wallet|kpi-card|cine|disref)-.+\.png$/);
   if (!resolved) {
     return {
       ok: false,
-      error: `Path no permitido: solo se puede enviar boa-wallet-*.png, kpi-card-*.png o cine-*.png dentro de ${tmpdir()}.`,
+      error: `Path no permitido: solo se puede enviar boa-wallet-*.png, kpi-card-*.png, cine-*.png o disref-*.png dentro de ${tmpdir()}.`,
     };
   }
   try {

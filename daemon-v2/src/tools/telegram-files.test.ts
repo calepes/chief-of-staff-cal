@@ -51,3 +51,16 @@ describe("enviarFotoLocal", () => {
     expect(result.ok).toBe(true);
   });
 });
+
+describe("enviarFotoLocal — disref-*.png (Referencias de Diseño)", () => {
+  it("acepta un archivo disref-*.png dentro de tmpdir", async () => {
+    const path = join(tmpdir(), "disref-linear-command-palette.png");
+    await writeFile(path, Buffer.from("fake-png"));
+    testFiles.push(path);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+
+    const result = await enviarFotoLocal("tok", 123, path, "disref.png");
+
+    expect(result.ok).toBe(true);
+  });
+});
