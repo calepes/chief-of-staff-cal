@@ -3,7 +3,7 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { getOutlookEvents } from "./tools/outlook.js";
 import { manageLearning } from "./tools/learnings.js";
@@ -100,9 +100,10 @@ import {
   getVacacionDetail,
 } from "./tools/schedule-cal.js";
 import { fetchNotionAttachments } from "./tools/notion-files.js";
-import { enviarDocumentoLocal, enviarFotoLocal, resolveAllowedLocalFile } from "./tools/telegram-files.js";
+import { enviarDocumentoLocal, enviarFotoLocal } from "./tools/telegram-files.js";
 import { analyzePhoto } from "./tools/vision.js";
 import { parseDesignCritique, writeDesignRef } from "./tools/design-refs.js";
+import { captureDesignScreenshot } from "./tools/design-capture.js";
 import { sendPhoto, sendDocument, sendChatAction } from "@cos/shared";
 import {
   resolveTraveler,
@@ -901,44 +902,29 @@ export function buildSdkTools(deps: ToolDeps) {
       async ({ domain }) => asText(await addDomainAndSync(domain)),
     ),
     tool(
-      "obtenerCookiesReferenciaDiseno",
-      "Devuelve las cookies guardadas del Cookie Broker para el dominio de una URL, en formato " +
-      "listo para inyectar a un contexto de Playwright con context.addCookies(...). " +
-      "Usar ANTES de navegar con Playwright a un link que se vaya a guardar como referencia de " +
-      "diseño (mcp__cos-tools__guardarReferenciaDiseno) — así la captura sale logueada en vez de " +
-      "mostrar un muro de login. Si el dominio no está whitelisteado o no hay cookie sincronizada, " +
-      "devuelve cookies:[] y hay que navegar igual sin inyectar nada.",
-      { url: z.string().url().describe("URL completa del recurso a capturar") },
-      async ({ url }) => {
-        const hostname = new URL(url).hostname;
-        return asText(await getStructuredCookies(hostname, deps.cookieJarKv));
-      },
-      READ_ONLY,
-    ),
-    tool(
       "guardarReferenciaDiseno",
-      "Guarda un screenshot ya capturado como referencia de diseño: lo analiza con visión " +
-      "(jerarquía, paleta, spacing, el patrón concreto que lo hace bueno) y escribe la ficha + el " +
-      "screenshot en 'Personal/Referencias de Diseño/'. Usar DESPUÉS de capturar el screenshot con " +
-      "Playwright (navigate + opcionalmente obtenerCookiesReferenciaDiseno + browser_run_code_unsafe " +
-      "para inyectar cookies + browser_take_screenshot con filename 'disref-<algo>.png'). " +
-      "Después de llamar esta tool, mandá el screenshot a Cal con enviarFotoLocal usando el shotPath " +
-      "devuelto y un caption corto (título + tipo). No hace falta pedir confirmación: es informativo.",
+      "Captura un screenshot de una URL como referencia de diseño (dashboards, UI, paletas, " +
+      "patrones de X/Instagram/webs) y la guarda: navega con un navegador headless (inyectando " +
+      "cookies del Cookie Broker si el dominio está whitelisteado, para saltar login walls), " +
+      "analiza el screenshot con visión (jerarquía, paleta, spacing, el patrón concreto que lo " +
+      "hace bueno) y escribe la ficha + el screenshot en 'Personal/Referencias de Diseño/'. " +
+      "Usar cuando Cal comparta un link con intención de guardarlo como inspiración de diseño. " +
+      "Después de llamar esta tool, mandá el screenshot a Cal con enviarFotoLocal usando el " +
+      "shotPath devuelto y un caption corto (título + tipo). No hace falta pedir confirmación: " +
+      "es informativo.",
       {
-        fuente: z.string().url().describe("URL original del recurso"),
-        screenshotPath: z.string().describe("Path absoluto del PNG capturado por Playwright — debe estar dentro de tmpdir() y nombrarse disref-*.png"),
+        url: z.string().url().describe("URL del recurso a capturar y guardar"),
         aplicableA: z.string().optional().describe("Apps de Cal a las que aplica esta referencia, SOLO si es evidente por el contexto de la charla (ej. 'Combustible, Presupuesto Privado'). Omitir si no está claro."),
       },
-      async ({ fuente, screenshotPath, aplicableA }) => {
+      async ({ url, aplicableA }) => {
         try {
-          const validated = await resolveAllowedLocalFile(screenshotPath, /^disref-.+\.png$/i);
-          if (!validated) {
-            return asText({ ok: false, error: `Path no permitido: solo un PNG disref-*.png dentro de ${tmpdir()}.` });
-          }
-          const analysis = await analyzePhoto({ imagePath: validated, task: "design_critique" });
+          const hostname = new URL(url).hostname;
+          const cookieResult = await getStructuredCookies(hostname, deps.cookieJarKv);
+          const capture = await captureDesignScreenshot(url, cookieResult.cookies);
+          const analysis = await analyzePhoto({ imagePath: capture.screenshotPath, task: "design_critique" });
           const critique = parseDesignCritique(analysis.text);
           const fecha = nowInLaPaz(new Date()).slice(0, 10);
-          const result = writeDesignRef({ fuente, fecha, critique, aplicableA }, validated);
+          const result = writeDesignRef({ fuente: url, fecha, critique, aplicableA }, capture.screenshotPath);
           return asText({ ok: true, ...result, titulo: critique.titulo, tipo: critique.tipo, tags: critique.tags });
         } catch (e) {
           return asText({ ok: false, error: e instanceof Error ? e.message : String(e) });
