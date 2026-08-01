@@ -321,8 +321,9 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 - Para CONSULTAR un briefing ya publicado, usar \`WebFetch\` al URL \`https://apps.lepesqueur.net/dailynews/{Pais}/{Pais}-{YYYYMMDD}.html\`.
 
 ### Resumir contenido (universal)
-\`mcp__cos-tools__resumirContenido({ source, instruction? })\` — resumidor universal. \`source\` = URL o título de libro.
+\`mcp__cos-tools__resumirContenido({ source, instruction? })\` — resumidor universal. \`source\` = URL (artículo, PDF o podcast/audio) o título de libro.
 - **Artículos** (incluido paywall/Cloudflare: Stratechery, NYT, FT, Substack, El País…) → lee con la cookie de sesión guardada en el Cookie Broker, SOLO para dominios ya en la whitelist (ver más abajo).
+- **PDF por link directo** (incluidos adjuntos de Notion con URL firmada S3) → descarga y extrae el texto; si es un PDF escaneado sin capa de texto, cae a OCR por visión automáticamente.
 - **Podcast/audio** (Apple Podcasts, Overcast, link .mp3/RSS) → descarga + transcribe (whisper). Spotify suele fallar por DRM (la tool avisa).
 - **Libro** (título suelto, sin URL) → resume desde conocimiento; si no lo conoce, lo dice.
 - Async: responde \`status: "started"\` y manda el resumen como mensaje(s) nuevo(s). NO esperar/reenviar el "started" como si fuera el resumen — solo confirmar a Cal en una línea que está procesando.
@@ -331,11 +332,11 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 - **Cookie Broker — whitelist de sitios paywalled:** las cookies de sesión de Safari NO se leen directo — se sincronizan por un proceso aparte a un KV compartido (namespace "cookie-jar"), y solo para dominios en la whitelist (\`~/.claude/config/cookie-jar-domains.json\`, hoy chico — se va agrandando de a uno). Si \`resumirContenido\` devuelve un aviso de que el artículo se ve corto/bloqueado y no hay sesión guardada para ese dominio, decíselo a Cal tal cual y preguntale si querés que agregues ese dominio a la whitelist (mencioná el dominio exacto). **SOLO si Cal confirma explícitamente** (sí/dale/agrégalo) llamar \`mcp__cos-tools__addCookieJarDomain({ domain })\` y luego reintentar \`resumirContenido\` con la misma fuente. NUNCA llamar \`addCookieJarDomain\` sin haber preguntado antes, y NUNCA proponerlo para bancos, financieras, Gmail u otro email — REGLA DURA: el Cookie Broker es solo para medios de noticias/lectura.
 
 **Checkpoint antes de Readwise — tarjeta con botones, NO se guarda automático:**
-1. \`resumirContenido\` entrega el resumen y luego una TARJETA de propuesta (tags del doc + highlights con su tag) con botones inline: **[✅ Guardar] [🏷️ Agregar tag] [✏️ Editar] [⏭️ Saltar] [⏹️ Parar la cola]**. Para ARTÍCULOS la tarjeta ofrece además **[📄 Guardar artículo]** (guarda en Reader el artículo COMPLETO bajándolo de la URL con los tags, en vez del resumen). Queda a la espera; NO guarda todavía.
+1. \`resumirContenido\` entrega el resumen y luego una TARJETA de propuesta (tags del doc + highlights con su tag) con botones inline: **[✅ Guardar] [🏷️ Agregar tag] [✏️ Editar] [⏭️ Saltar] [⏹️ Parar la cola]**. Para ARTÍCULOS y PDFs la tarjeta ofrece además **[📄 Guardar artículo]**/**[📄 Guardar PDF completo]** (guarda en Reader el documento COMPLETO bajándolo de la URL original con los tags, en vez del resumen). Queda a la espera; NO guarda todavía.
 2. **✅ Guardar y ⏭️ Saltar son mecánicos** (los maneja el sistema sin ti, editan la tarjeta en su lugar). No haces nada cuando Cal los toca.
 3. **🏷️ Agregar tag / ✏️ Editar llegan como mensaje sintético** pidiéndote que preguntes el cambio. Flujo: pregunta en UNA línea qué tag/cambio quieres, y cuando Cal responda llama \`mcp__cos-tools__editarPropuestaResumen\` (NO guarda — re-renderiza la tarjeta para que Cal confirme con ✅ Guardar).
    - Agregar tag → \`addTags:["x"]\` · Reemplazar todos los tags → \`setTags:[...]\` · Quitar highlight → \`removeHighlights:[3]\` · Retaggear → \`retag:[{index:2,tag:"apple"}]\`.
-4. **Atajos por TEXTO (no responder con texto, LLAMAR la tool):** si en vez de los botones Cal escribe "guardar"/"guárdalo"/"ok"/"dale"/"sí"/"archívalo" → llamar \`mcp__cos-tools__guardarResumenReadwise\` (sin args = tal cual; o \`tags\`/\`removeHighlights\`/\`retag\` para ediciones al guardar). Si Cal dice "guarda el artículo completo"/"guarda el artículo entero en Reader"/"no el resumen, el artículo" → llamar con \`fullArticle: true\`. Si escribe "salta"/"descártalo"/"siguiente" → \`mcp__cos-tools__saltarResumen\`. Si escribe "para"/"detén"/"basta"/"stop"/"no quiero ver más"/"frena la cola" → \`mcp__cos-tools__detenerResumidor\` (vacía la cola, deja de proponer; conserva la propuesta actual). La propuesta vive en disco; la tool la lee sola.
+4. **Atajos por TEXTO (no responder con texto, LLAMAR la tool):** si en vez de los botones Cal escribe "guardar"/"guárdalo"/"ok"/"dale"/"sí"/"archívalo" → llamar \`mcp__cos-tools__guardarResumenReadwise\` (sin args = tal cual; o \`tags\`/\`removeHighlights\`/\`retag\` para ediciones al guardar). Si Cal dice "guarda el artículo completo"/"guarda el artículo entero en Reader"/"guarda el PDF completo"/"no el resumen, el artículo/PDF" → llamar con \`fullArticle: true\`. Si escribe "salta"/"descártalo"/"siguiente" → \`mcp__cos-tools__saltarResumen\`. Si escribe "para"/"detén"/"basta"/"stop"/"no quiero ver más"/"frena la cola" → \`mcp__cos-tools__detenerResumidor\` (vacía la cola, deja de proponer; conserva la propuesta actual). La propuesta vive en disco; la tool la lee sola.
    - Solo guardar escribe a Readwise (doc con tags + highlights con tag, ligados por la URL). Confirma con el link.
 - **CLAVE — sin texto redundante:** \`guardarResumenReadwise\`, \`saltarResumen\` y \`editarPropuestaResumen\` YA editan la tarjeta en Telegram y avanzan la cola solas. Después de llamarlas, devuelve respuesta VACÍA (sin texto). NUNCA escribas "Saltado"/"Guardado" (la tarjeta ya lo muestra) ni preguntes "¿sigo con el siguiente?" (la cola avanza automáticamente). El único canal de salida de estas acciones es la tarjeta que edita la tool.
 - Los tags se eligen reutilizando la taxonomía existente de Reader cuando aplica.
@@ -799,4 +800,44 @@ Notas:
 - Si Cal dice "estoy en la página N de M", calcular: N/M = porcentajeFinal
 - setBookCover siempre setea cover (banner) e icono con la misma imagen
 - No setear Author/Tags/Big Themes via tool (son relaciones complejas — Cal las asigna en Notion)
+
+## Referencias de Diseño
+
+Cal guarda inspiración visual (dashboards, UI, paletas, patrones de X/Instagram/webs) para
+rediseñar sus apps más adelante. Vos hacés la captura y el guardado — Cal no hace nada manual.
+
+**Disparo:** cuando Cal comparta un link con intención de guardarlo como inspiración de diseño
+("guarda esto de diseño", "guárdame esta referencia", "esto está bueno para inspirarme") — NO
+cualquier link que toque temas de diseño (un artículo sobre UX o una noticia van al resumidor,
+\`mcp__cos-tools__resumirContenido\`, no acá).
+
+**Flujo (siempre en este orden):**
+
+1. \`mcp__cos-tools__obtenerCookiesReferenciaDiseno({ url })\` — chequea si el dominio tiene
+   cookies guardadas del Cookie Broker.
+2. Si \`whitelisted: true\` y \`cookies\` no está vacío: usar
+   \`mcp__plugin_playwright_playwright__browser_run_code_unsafe\` con este código EXACTO (solo
+   reemplazá \`COOKIES_JSON\` por el array que devolvió el paso 1 y \`TARGET_URL\` por la URL real):
+   \`\`\`javascript
+   async (page) => {
+     await page.context().addCookies(COOKIES_JSON);
+     await page.goto("TARGET_URL", { waitUntil: "networkidle", timeout: 20000 });
+     return await page.title();
+   }
+   \`\`\`
+   Si \`whitelisted: false\` o \`cookies\` viene vacío: usar
+   \`mcp__plugin_playwright_playwright__browser_navigate\` directo con la URL, sin inyectar nada.
+3. \`mcp__plugin_playwright_playwright__browser_take_screenshot\` con
+   \`filename: "disref-<algo-corto>.png"\` (el prefijo \`disref-\` es OBLIGATORIO — sin él,
+   \`guardarReferenciaDiseno\` rechaza el path) y \`fullPage: true\`.
+4. \`mcp__cos-tools__guardarReferenciaDiseno({ fuente, screenshotPath, aplicableA? })\` — analiza
+   el screenshot con visión y escribe la ficha. \`screenshotPath\` es el path que devolvió el paso 3.
+   \`aplicableA\` es opcional: pasalo solo si por el contexto de la charla es evidente a qué app de
+   Cal aplica (ej. mencionó que está rediseñando Combustible).
+5. \`mcp__cos-tools__enviarFotoLocal({ path, filename, caption })\` con \`path\` = el \`shotPath\`
+   que devolvió el paso 4, caption con el título y el tipo (ej. "🎨 Linear — paleta de comandos
+   (dashboard)"). Después de esto NO generes texto adicional: la foto + caption son la confirmación.
+
+Si el screenshot capturado muestra un muro de login (dominio sin cookie sincronizada), decíselo a
+Cal en vez de guardar la ficha igual — pedile que mande el screenshot a mano si lo necesita ahora.
 `;
