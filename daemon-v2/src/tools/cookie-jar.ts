@@ -139,3 +139,38 @@ export async function addDomainAndSync(domainRaw: string): Promise<AddDomainResu
       : `Agregué "${domain}" a la whitelist, pero no encontré sesión activa en Safari para ese dominio. Iniciá sesión ahí y pedime que reintente.`,
   };
 }
+
+export interface StructuredCookie {
+  name: string;
+  value: string;
+  url: string;
+}
+
+export interface StructuredCookiesResult {
+  whitelisted: boolean;
+  domain: string | null;
+  cookies: StructuredCookie[];
+}
+
+function parseCookieHeaderToStructured(header: string, domain: string): StructuredCookie[] {
+  return header
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const idx = pair.indexOf("=");
+      return { name: pair.slice(0, idx), value: pair.slice(idx + 1), url: `https://${domain}` };
+    });
+}
+
+/**
+ * Como getCookieHeader, pero en el formato que acepta context.addCookies() de Playwright
+ * ({name, value, url} por cookie) en vez del header HTTP crudo — ese header solo sirve para
+ * fetchAsUser. Usado por guardarReferenciaDiseno para autenticar la captura de X/Instagram.
+ */
+export async function getStructuredCookies(hostname: string, kv: CfKv): Promise<StructuredCookiesResult> {
+  const domain = findWhitelistedDomain(hostname);
+  if (!domain) return { whitelisted: false, domain: null, cookies: [] };
+  const header = await kv.getText(`cookie:${domain}`);
+  return { whitelisted: true, domain, cookies: header ? parseCookieHeaderToStructured(header, domain) : [] };
+}

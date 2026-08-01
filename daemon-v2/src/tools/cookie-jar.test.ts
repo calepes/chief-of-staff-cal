@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { matchesDomain, isDomainAllowed } from "./cookie-jar.js";
+import type { CfKv } from "../cf-kv.js";
+import { matchesDomain, isDomainAllowed, getStructuredCookies } from "./cookie-jar.js";
+
+function fakeKv(header: string | null): CfKv {
+  return {
+    async getText(): Promise<string | null> {
+      return header;
+    },
+  } as unknown as CfKv;
+}
 
 describe("matchesDomain", () => {
   it("matchea el mismo dominio exacto", () => {
@@ -51,5 +60,32 @@ describe("isDomainAllowed — regla dura: solo medios de noticias, nunca banca/e
     for (const d of ["yape.com.pe", "paypal.com", "mercadopago.com", "binance.com", "coinbase.com", "wise.com"]) {
       expect(isDomainAllowed(d)).toBe(false);
     }
+  });
+});
+
+describe("getStructuredCookies", () => {
+  it("devuelve whitelisted:false para un dominio fuera de la whitelist", async () => {
+    const result = await getStructuredCookies("noestaenlawhitelist.com", fakeKv(null));
+    expect(result).toEqual({ whitelisted: false, domain: null, cookies: [] });
+  });
+
+  it("parsea el header en cookies estructuradas cuando el dominio está whitelisteado", async () => {
+    const result = await getStructuredCookies("www.iupana.com", fakeKv("a=1; b=2"));
+    expect(result.whitelisted).toBe(true);
+    expect(result.domain).toBe("iupana.com");
+    expect(result.cookies).toEqual([
+      { name: "a", value: "1", url: "https://iupana.com" },
+      { name: "b", value: "2", url: "https://iupana.com" },
+    ]);
+  });
+
+  it("devuelve cookies:[] si está whitelisteado pero sin cookie sincronizada", async () => {
+    const result = await getStructuredCookies("iupana.com", fakeKv(null));
+    expect(result).toEqual({ whitelisted: true, domain: "iupana.com", cookies: [] });
+  });
+
+  it("preserva valores de cookie que contienen '=' (ej. base64/JWT)", async () => {
+    const result = await getStructuredCookies("iupana.com", fakeKv("sid=abc=def=="));
+    expect(result.cookies).toEqual([{ name: "sid", value: "abc=def==", url: "https://iupana.com" }]);
   });
 });
