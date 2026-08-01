@@ -9,7 +9,7 @@ export interface AnalyzePhotoOpts {
   imagePath: string;
   mimeType?: string;
   caption?: string;
-  task?: "ocr" | "classify" | "describe";
+  task?: "ocr" | "classify" | "describe" | "design_critique";
 }
 
 export interface PhotoAnalysis {
@@ -25,6 +25,18 @@ const TASK_PROMPTS: Record<NonNullable<AnalyzePhotoOpts["task"]>, string> = {
     "Clasifica esta foto en una de estas categorías y resume su contenido relevante para coordinación familiar (cumple, evento escolar, lista de mercado, ticket, recordatorio de salud, foto familiar, otro). Responde con: <categoría>: <resumen 1-2 líneas>.",
   describe:
     "Describe brevemente el contenido relevante de la foto en 1-3 líneas, enfocándote en información útil para una familia (Cal, Noe y sus hijas Antonia y Catalina).",
+  design_critique:
+    "Sos un crítico de diseño de producto evaluando este screenshot para guardarlo como referencia " +
+    "de inspiración. Respondé EXACTAMENTE en este formato, un campo por línea (sin markdown, sin " +
+    "viñetas extra):\n" +
+    "TITULO: <3-6 palabras, ej. 'Linear — paleta de comandos'>\n" +
+    "TIPO: <una sola palabra de: dashboard, landing, componente, paleta, tipografia, microinteraccion, otro>\n" +
+    "QUE_ES: <1 línea, qué es lo que se ve>\n" +
+    "POR_QUE_FUNCIONA: <2-4 líneas. El patrón CONCRETO que hace que funcione — jerarquía, spacing, " +
+    "contraste, densidad, el truco puntual. NUNCA una descripción genérica de \"qué se ve\".>\n" +
+    "TAGS: <3-6 tags cortos en inglés, separados por coma, ej. dark-mode, data-density, glass>\n" +
+    "Si la imagen muestra un muro de login o no cargó contenido real, decilo explícito en QUE_ES " +
+    "en vez de inventar contenido que no viste.",
 };
 
 function getApiKey(): string {
