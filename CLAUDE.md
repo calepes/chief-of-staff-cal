@@ -44,7 +44,7 @@ El watchdog re-setea el webhook solo cada 1 min. Re-set manual de webhook + debu
 
 ## Índice de tools + MCPs
 Implementación y detalle en código (ver "dónde vive qué"). Inventario:
-- **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo) · **mapaBacklogs/leerBacklog/proponerItemBacklog** (leer y escribir los `BACKLOG.md` de los proyectos de Cal — ver sección "Backlogs de proyectos" abajo).
+- **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo) · **mapaBacklogs/leerBacklog/proponerItemBacklog** (leer y escribir los `BACKLOG.md` de los proyectos de Cal — ver sección "Backlogs de proyectos" abajo) · **guardarReferenciaDiseno** (capturar y guardar referencias visuales de diseño en `Personal/Referencias de Diseño/` — ver sección "Referencias de Diseño" abajo).
 
 ### Resumidor (`tools/resumir.ts`) — checkpoint con tarjeta + colas
 Resumidor universal con checkpoint antes de guardar a Readwise. Reusa los scripts del skill `resumir` vía spawn (sin Bash); cookies Safari con `~/.claude/bin/node-fda` (requiere FDA bajo launchd).
@@ -238,6 +238,68 @@ Spec: `docs/superpowers/specs/2026-07-28-backlog-tool-y-self-learning-design.md`
 - **`✏️ Editar texto` y `✍️ Otro proyecto` no guardan estado propio:** quitan el teclado y le piden
   a Cal que escriba; su mensaje va al LLM, que vuelve a llamar `proponerItemBacklog` y nace una
   tarjeta nueva debajo. Un `pendingEdit` propio sería estado extra que se puede desincronizar.
+
+## Referencias de Diseño — agregado 2026-08-01
+
+Jano captura links de inspiración de diseño (X, Instagram, dashboards, webs) y los guarda en
+`Personal/Referencias de Diseño/` (fuera de este repo, hermano de `Personal/Agents/`) — ficha +
+screenshot + análisis de visión, para que Claude los use como contexto al rediseñar apps de Cal.
+Mismo flujo replicado en sesión interactiva vía el skill `guardar-referencia-diseno`. Spec:
+`docs/superpowers/specs/2026-07-31-referencias-diseno-design.md`.
+
+- **Una sola tool, `guardarReferenciaDiseno({ url, aplicableA? })`.** El diseño original (en el
+  spec) le pedía al LLM orquestar Playwright a mano (navigate + inyectar cookies con
+  `browser_run_code_unsafe` + screenshot) — **nunca llegó a producción así**: esos MCP tools están
+  bloqueados para Jano en `DISALLOWED_BUILTINS` (`agent-options.ts`, desde 2026-05-23, "Jano no
+  necesita control de navegador") y darle a la LLM `browser_run_code_unsafe` (RCE-equivalent por
+  su propia descripción) hubiera sido una regresión de seguridad real. Reescrito el mismo día antes
+  de llegar a producción, siguiendo el patrón que este repo ya usa para browser automation
+  (`boa-checkin`, `cine`): una tool angosta que controla Playwright **puertas adentro**, sin
+  exponerle nada al LLM. `tools/design-capture.ts` (`captureDesignScreenshot`) lanza Chromium
+  headless en proceso (paquete `playwright`, no MCP), inyecta cookies si las hay, navega, saca el
+  screenshot y cierra — todo dentro de la tool, un solo call desde el LLM.
+- **`url` restringido a http/https en dos capas** (zod `.refine()` en el schema + chequeo explícito
+  al inicio de `captureDesignScreenshot`, antes de `chromium.launch()`): sin esto, `page.goto()`
+  navega `file://` tal cual — a diferencia de `fetchAsUser` (usa `fetch()` nativo, que no puede
+  cargar `file://`). Encontrado en code review antes de producción: una inyección de prompt en
+  contenido que Jano ya ingesta (`fetchAndSummarize`/resumidor) podía apuntar
+  `guardarReferenciaDiseno` a `file:///Users/calepes/.ssh/id_ed25519`, capturar el screenshot,
+  mandarlo a una API externa de visión (OpenRouter) y guardarlo en disco/Telegram — un vector de
+  exfiltración real, cerrado antes de mergear.
+- **Riesgo residual aceptado, no bloqueante:** la restricción es de ESQUEMA, no de destino — una
+  URL `https://localhost:{puerto}/...` o a una IP de LAN sigue pasando la validación. Con el screenshot
+  yéndose a una API externa de visión, esto es SSRF-adjacent (no lee archivos, pero sí podría
+  exponer contenido de servicios internos vía captura). Inherente a cualquier tool de "screenshot de
+  una URL cualquiera" — no se cerró, queda documentado.
+- **Gap conocido, no bloqueante: el muro de login no siempre corta el guardado.** `vision.ts`
+  (task `design_critique`) instruye al modelo de visión a marcar explícito en `QUE_ES` si la imagen
+  muestra un muro de login — pero `guardarReferenciaDiseno` solo devuelve `titulo`/`tipo`/`tags` al
+  LLM, nunca `queEs`/`porQueFunciona`. Resultado: en un dominio sin cookie sincronizada,
+  `guardarReferenciaDiseno` puede devolver `ok:true` con una ficha que describe una pantalla de
+  login, y Jano se la manda a Cal como si fuera inspiración real — el `ok:false` que el system
+  prompt sabe manejar nunca se dispara en este caso. Pendiente: propagar la señal de "muro de
+  login"/"no cargó contenido real" desde `parseDesignCritique` hasta el resultado de la tool.
+- **Cookie Broker (`cookie-jar.ts`) ganó `getStructuredCookies`:** el broker solo daba un header
+  HTTP para `fetchAsUser`, no servía para autenticar un navegador real. La función nueva lo parsea
+  a `{name,value,url}` — formato mínimo que acepta `context.addCookies()` de Playwright.
+- **Excepción puntual a la regla dura del Cookie Broker:** `x.com`, `twitter.com` e
+  `instagram.com` se agregaron a la whitelist (`~/.claude/config/cookie-jar-domains.json`),
+  autorizado explícitamente por Cal el 2026-07-31 — la regla "solo medios de noticias/lectura"
+  sigue aplicando para cualquier otro dominio nuevo.
+- **`screenshotPath` ya NO lo provee el LLM** (a diferencia del diseño original del spec): lo
+  genera `captureDesignScreenshot` internamente (`disref-<timestamp>.png` en `tmpdir()`), así que
+  no hay superficie de path traversal desde el modelo. `resolveAllowedLocalFile`
+  (`telegram-files.ts`, ya exportada) sigue existiendo para otros usos pero `agent-tools.ts` no la
+  importa más para este flujo.
+- **El formato de ficha/índice vive en un solo lugar:** `Personal/Referencias de Diseño/_FORMATO.md`
+  — lo siguen tanto `design-refs.ts` (Jano) como el skill de sesión interactiva, para que no
+  diverjan con el tiempo. El skill SÍ sigue el diseño original (orquesta Playwright MCP a mano) —
+  ahí no hay problema de permisos: una sesión interactiva de Claude Code tiene esos MCP tools sin
+  restricción, a diferencia del agente headless de Jano.
+- **Sin tarjeta de confirmación** (informativo, como `mapaBacklogs`): no hay nada sensible que
+  aprobar, Jano manda el screenshot con `enviarFotoLocal` y un caption corto.
+- **`design-style-router`** (skill global) lee `INDEX.md` antes de preguntar la línea visual de un
+  rediseño y menciona referencias guardadas que apliquen.
 
 ## Runtime del SDK — modelo, effort, turnos y sesión (2026-07-27)
 
