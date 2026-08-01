@@ -811,33 +811,17 @@ rediseñar sus apps más adelante. Vos hacés la captura y el guardado — Cal n
 cualquier link que toque temas de diseño (un artículo sobre UX o una noticia van al resumidor,
 \`mcp__cos-tools__resumirContenido\`, no acá).
 
-**Flujo (siempre en este orden):**
+**Flujo:**
 
-1. \`mcp__cos-tools__obtenerCookiesReferenciaDiseno({ url })\` — chequea si el dominio tiene
-   cookies guardadas del Cookie Broker.
-2. Si \`whitelisted: true\` y \`cookies\` no está vacío: usar
-   \`mcp__plugin_playwright_playwright__browser_run_code_unsafe\` con este código EXACTO (solo
-   reemplazá \`COOKIES_JSON\` por el array que devolvió el paso 1 y \`TARGET_URL\` por la URL real):
-   \`\`\`javascript
-   async (page) => {
-     await page.context().addCookies(COOKIES_JSON);
-     await page.goto("TARGET_URL", { waitUntil: "networkidle", timeout: 20000 });
-     return await page.title();
-   }
-   \`\`\`
-   Si \`whitelisted: false\` o \`cookies\` viene vacío: usar
-   \`mcp__plugin_playwright_playwright__browser_navigate\` directo con la URL, sin inyectar nada.
-3. \`mcp__plugin_playwright_playwright__browser_take_screenshot\` con
-   \`filename: "disref-<algo-corto>.png"\` (el prefijo \`disref-\` es OBLIGATORIO — sin él,
-   \`guardarReferenciaDiseno\` rechaza el path) y \`fullPage: true\`.
-4. \`mcp__cos-tools__guardarReferenciaDiseno({ fuente, screenshotPath, aplicableA? })\` — analiza
-   el screenshot con visión y escribe la ficha. \`screenshotPath\` es el path que devolvió el paso 3.
-   \`aplicableA\` es opcional: pasalo solo si por el contexto de la charla es evidente a qué app de
-   Cal aplica (ej. mencionó que está rediseñando Combustible).
-5. \`mcp__cos-tools__enviarFotoLocal({ path, filename, caption })\` con \`path\` = el \`shotPath\`
-   que devolvió el paso 4, caption con el título y el tipo (ej. "🎨 Linear — paleta de comandos
+1. \`mcp__cos-tools__guardarReferenciaDiseno({ url, aplicableA? })\` — hace TODO internamente:
+   captura el screenshot (con cookies del Cookie Broker si el dominio está whitelisteado, para
+   saltar login walls de X/Instagram), lo analiza con visión, y escribe la ficha. \`aplicableA\` es
+   opcional: pasalo solo si por el contexto de la charla es evidente a qué app de Cal aplica (ej.
+   mencionó que está rediseñando Combustible).
+2. \`mcp__cos-tools__enviarFotoLocal({ path, filename, caption })\` con \`path\` = el \`shotPath\` que
+   devolvió el paso 1, caption con el título y el tipo (ej. "🎨 Linear — paleta de comandos
    (dashboard)"). Después de esto NO generes texto adicional: la foto + caption son la confirmación.
 
-Si el screenshot capturado muestra un muro de login (dominio sin cookie sincronizada), decíselo a
-Cal en vez de guardar la ficha igual — pedile que mande el screenshot a mano si lo necesita ahora.
+Si \`guardarReferenciaDiseno\` devuelve \`ok: false\`, decíselo a Cal con el error que trajo la tool
+— no reintentes solo ni inventes que se guardó.
 `;
