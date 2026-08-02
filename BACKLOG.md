@@ -6,6 +6,13 @@
 
 ## Pendientes
 
+### Surgió en sesión 2026-08-02
+- [ ] **Migrar los secretos de Jano de `apps.env` a 1Password** — fase 2 del piloto hecho en Vesta (fase 1, completa y validada el 2026-08-02: vault `Daemons`, wrapper `op run`, fail-loud real). El vault ya tiene 12 ítems creados y reusables (`Anthropic API Key`, `Notion Integration Token`, `SerpAPI`, `OpenRouter`, `ElevenLabs`, `Google Maps`, `Home PIN`, `OpenWeather`, `WeatherAPI`, `Pecunia Internal`, `Cloudflare Account ID`, `Cloudflare API Token`) — Jano comparte varias de estas credenciales (`ELEVENLABS_VOICE_ID` ya se agregó en texto plano al plist de Jano el mismo día, por ser la misma voz que Vesta; `HOME_PIN`/`GOOGLE_MAPS_API_KEY` genéricos también los usa Jano). Antes de sacar el fallback a `apps.env`: auditar bien las variables reales que lee Jano — el relevamiento de Vesta falló la primera vez porque un grep por `process.env.NOMBRE` no detectó las leídas vía `requireEnv()`/notación de corchete (causó una caída real en producción, con rollback). Referencia técnica completa: `Vesta/docs/superpowers/specs/2026-08-02-1password-secrets-pilot-design.md`. Pointer también en `Personal/Agents/CLAUDE.md`.
+
+### Surgió en sesión 2026-07-30
+- [ ] **Correr Graphify** — CLI + skill ya instalados en la máquina (`uv tool install graphifyy` + `graphify install`, `~/.claude/skills/graphify/`). Se probó `/graphify` sobre el repo `Claude Projects`: el corpus completo (3,340 archivos / 7.4M palabras) y luego `Personal/` completo (2,316 / ~6M) resultaron demasiado grandes para correr de un saque — Cal acotó a `Personal/Agents` + `Personal/Apps` pero decidió limpiar los repos de archivos innecesarios antes de retomar. Pendiente: volver a invocar `/graphify` sobre ese scope (o el que Cal defina) una vez terminada la limpieza.
+- [ ] **En el mensaje de alerta del cron de corte de sync de Apple Health (health-sync-check.ts): reemplazar el timestamp ISO crudo del "último dato" (ej. 2026-07-29T22:44:44.324Z) por un formato legible en hora La Paz (ej. "ayer 22:44") — el "hace Xh" ya está bien, es el timestamp entre paréntesis el que hay que arreglar**
+
 ### Surgió en sesión 2026-07-28
 - [ ] **Agregar una acción "cancelado"/"descartado" a proponerItemBacklog, distinta de "hecho" — hoy solo existe agregar/hecho y no se puede marcar un ítem como descartado sin que quede registrado como completado**
 
