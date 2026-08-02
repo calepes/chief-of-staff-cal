@@ -301,6 +301,42 @@ Mismo flujo replicado en sesión interactiva vía el skill `guardar-referencia-d
 - **`design-style-router`** (skill global) lee `INDEX.md` antes de preguntar la línea visual de un
   rediseño y menciona referencias guardadas que apliquen.
 
+### Gotchas de producción, encontrados el mismo día en pruebas reales con Cal (2026-08-01)
+
+- **Cookies inyectadas con `url` en vez de `domain` — la sesión se sincronizaba bien pero el
+  browser nunca la mandaba.** Primer smoke test real: Cal se logueó en Threads en Safari, la
+  sincronización trajo `sessionid`/`ds_user_id` reales, y el capture SEGUÍA mostrando el muro de
+  login. Causa: `getStructuredCookies` armaba cada cookie como `{name, value, url:
+  "https://threads.com"}` — el shorthand `url` de Playwright hace la cookie **host-only** (exacta
+  a `threads.com`, sin el punto inicial), y Chromium nunca la manda en pedidos a un subdominio
+  real como `www.threads.com` (que es literalmente la URL de cualquier link compartido de
+  Threads). Fix: `StructuredCookie` pasó a `{name, value, domain, path}` con
+  `domain: ".${dominio}"` (con el punto inicial, como el atributo real `Domain=.threads.com` que
+  usa el sitio) — aplica a cualquier subdominio. Tocó `cookie-jar.ts` (Jano) y
+  `design-ref-cookies.mjs` (skill) por igual, para no divergir.
+- **`screenshotPath` vs `shotPath` — dos paths distintos con nombres parecidos, `enviarFotoLocal`
+  necesita el primero.** `guardarReferenciaDiseno` solo devolvía `shotPath` (spread de
+  `writeDesignRef`) — la copia PERMANENTE en `Personal/Referencias de Diseño/shots/`, fuera de
+  `tmpdir()` y sin el prefijo `disref-`. `enviarFotoLocal` exige `disref-*` dentro de `tmpdir()`,
+  así que el primer smoke test real falló al mandar la foto (Jano lo diagnosticó solo y avisó en
+  vez de fallar en silencio). Fix: la tool ahora devuelve TAMBIÉN `screenshotPath` (el original en
+  `tmpdir()`, `capture.screenshotPath`) — el system prompt usa explícitamente ese campo, nunca
+  `shotPath`, para `enviarFotoLocal`.
+- **Un screenshot fullPage trae toda la interfaz de la red social, no el diseño compartido.**
+  Pedido de Cal viendo el resultado: para X/Instagram/Threads, `captureDesignScreenshot` ahora
+  primero busca el `<img>` más grande de la página (filtro de 200px para descartar
+  avatares/íconos, ignora `data:` URIs) y lo DESCARGA directo (sin recompresión de screenshot) en
+  vez de sacar un screenshot de la página completa. Solo cae al screenshot fullPage si no
+  encuentra ninguna imagen candidata (dashboards/webs renderizadas con CSS/canvas). La extensión
+  del archivo resultante ya NO es siempre `.png` — puede ser `.jpg`/`.webp`/`.gif` según el CDN de
+  origen; `design-refs.ts` la deriva del path real (`extname()`), y `enviarFotoLocal` se amplió
+  para aceptar esos formatos SOLO para el prefijo `disref-` (los demás prefijos siguen `.png`-only).
+- **`page.evaluate()` necesita tipos de DOM, pero NO se agregó `"DOM"` al `lib` del tsconfig.**
+  Eso aplicaría a todo el paquete y podría chocar con los tipos de `fetch`/`Response`/`Headers` de
+  Node ya usados en el resto del daemon. En cambio, `design-capture.ts` declara un `document`
+  mínimo con `declare const` dentro del propio módulo — queda acotado a ese archivo (es un módulo
+  con import/export, no un `.d.ts` global), sin tocar el resto del proyecto.
+
 ## Runtime del SDK — modelo, effort, turnos y sesión (2026-07-27)
 
 Origen: Cal pidió *"toma los valores de los sábados, ¿a este ritmo cuándo llegamos a 5MM?"* y recibió

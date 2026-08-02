@@ -63,4 +63,25 @@ describe("enviarFotoLocal — disref-*.png (Referencias de Diseño)", () => {
 
     expect(result.ok).toBe(true);
   });
+
+  it("acepta disref-*.jpg (imagen real de un post descargada, no un screenshot)", async () => {
+    const path = join(tmpdir(), "disref-1785600000000.jpg");
+    await writeFile(path, Buffer.from("fake-jpg"));
+    testFiles.push(path);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+
+    const result = await enviarFotoLocal("tok", 123, path, "disref.jpg");
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("sigue rechazando kpi-card-*.jpg (los otros prefijos siguen siendo png-only)", async () => {
+    const path = join(tmpdir(), "kpi-card-2026-07-17.jpg");
+    await writeFile(path, Buffer.from("fake-jpg"));
+    testFiles.push(path);
+
+    const result = await enviarFotoLocal("tok", 123, path, "kpi-card.jpg");
+
+    expect(result.ok).toBe(false);
+  });
 });

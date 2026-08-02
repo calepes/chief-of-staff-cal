@@ -67,6 +67,12 @@ describe("writeDesignRef", () => {
     return src;
   }
 
+  function fakeScreenshotJpg(): string {
+    const src = join(tmpdir(), `jano-test-shot-${process.pid}.jpg`);
+    writeFileSync(src, Buffer.from("fake-jpg"));
+    return src;
+  }
+
   it("escribe la ficha, copia el screenshot y prepende la línea en INDEX.md", () => {
     const result = writeDesignRef(
       {
@@ -112,6 +118,21 @@ describe("writeDesignRef", () => {
       ROOT,
     );
     expect(readFileSync(result.fichaPath, "utf8")).toContain("**Aplicable a:** Combustible");
+  });
+
+  it("preserva la extensión real del screenshot en vez de asumir .png", () => {
+    const result = writeDesignRef(
+      {
+        fuente: "https://x.com/usuario/status/123",
+        fecha: "2026-07-31",
+        critique: { titulo: "Post con imagen jpg", tipo: "otro", queEs: "x", porQueFunciona: "y", tags: [] },
+      },
+      fakeScreenshotJpg(),
+      ROOT,
+    );
+    expect(result.shotPath.endsWith(".jpg")).toBe(true);
+    expect(existsSync(result.shotPath)).toBe(true);
+    expect(readFileSync(result.fichaPath, "utf8")).toContain(`shot: ../shots/2026-07-31-post-con-imagen-jpg.jpg`);
   });
 
   it("resuelve colisión del mismo día con sufijo -2", () => {

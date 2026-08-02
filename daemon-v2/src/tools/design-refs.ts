@@ -8,7 +8,7 @@
 
 import { readFileSync, writeFileSync, renameSync, unlinkSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, extname } from "node:path";
 
 export const DESIGN_REFS_ROOT = join(homedir(), "Claude Projects", "Personal", "Referencias de Diseño");
 
@@ -139,7 +139,10 @@ export function writeDesignRef(
   const slug = uniqueSlug(refsDir, input.fecha, baseSlug);
   const filename = `${input.fecha}-${slug}`;
   const fichaPath = join(refsDir, `${filename}.md`);
-  const shotPath = join(shotsDir, `${filename}.png`);
+  // La extensión sale del screenshot de origen, no se asume .png: captureDesignScreenshot a veces
+  // descarga la imagen real del post (jpg/webp/gif) en vez de sacar un screenshot.
+  const ext = extname(screenshotSourcePath) || ".png";
+  const shotPath = join(shotsDir, `${filename}${ext}`);
 
   copyAtomic(screenshotSourcePath, shotPath);
 
@@ -150,7 +153,7 @@ export function writeDesignRef(
     `tipo: ${critique.tipo}`,
     `tags: [${critique.tags.join(", ")}]`,
     `capturado: ${input.fecha}`,
-    `shot: ../shots/${filename}.png`,
+    `shot: ../shots/${filename}${ext}`,
     "---",
     "",
     `**Qué es:** ${critique.queEs}`,

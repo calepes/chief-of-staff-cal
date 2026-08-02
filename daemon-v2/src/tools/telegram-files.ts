@@ -149,12 +149,15 @@ export async function enviarFotoLocal(
   caption?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   // boa-wallet-*: tarjeta de embarque BoA. kpi-card-*: tarjeta diaria de KPIs Yape.
-  // cine-*: mapa/resumen/QR/entradas del MCP de cine. disref-*: capturas de Referencias de Diseño.
-  const resolved = await resolveAllowedLocalFile(filePath, /^(boa-wallet|kpi-card|cine|disref)-.+\.png$/);
+  // cine-*: mapa/resumen/QR/entradas del MCP de cine. disref-*: capturas de Referencias de Diseño
+  // — png/jpg/jpeg/webp/gif porque captureDesignScreenshot a veces descarga la imagen real del
+  // post en vez de sacar un screenshot (siempre .png), y esa imagen puede venir en cualquiera de
+  // esos formatos según lo que sirva el CDN de origen.
+  const resolved = await resolveAllowedLocalFile(filePath, /^(boa-wallet|kpi-card|cine)-.+\.png$|^disref-.+\.(png|jpe?g|webp|gif)$/i);
   if (!resolved) {
     return {
       ok: false,
-      error: `Path no permitido: solo se puede enviar boa-wallet-*.png, kpi-card-*.png, cine-*.png o disref-*.png dentro de ${tmpdir()}.`,
+      error: `Path no permitido: solo se puede enviar boa-wallet-*.png, kpi-card-*.png, cine-*.png o disref-*.{png,jpg,jpeg,webp,gif} dentro de ${tmpdir()}.`,
     };
   }
   try {
