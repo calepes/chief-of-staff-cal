@@ -74,8 +74,8 @@ describe("getStructuredCookies", () => {
     expect(result.whitelisted).toBe(true);
     expect(result.domain).toBe("iupana.com");
     expect(result.cookies).toEqual([
-      { name: "a", value: "1", url: "https://iupana.com" },
-      { name: "b", value: "2", url: "https://iupana.com" },
+      { name: "a", value: "1", domain: ".iupana.com", path: "/" },
+      { name: "b", value: "2", domain: ".iupana.com", path: "/" },
     ]);
   });
 
@@ -86,6 +86,6 @@ describe("getStructuredCookies", () => {
 
   it("preserva valores de cookie que contienen '=' (ej. base64/JWT)", async () => {
     const result = await getStructuredCookies("iupana.com", fakeKv("sid=abc=def=="));
-    expect(result.cookies).toEqual([{ name: "sid", value: "abc=def==", url: "https://iupana.com" }]);
+    expect(result.cookies).toEqual([{ name: "sid", value: "abc=def==", domain: ".iupana.com", path: "/" }]);
   });
 });

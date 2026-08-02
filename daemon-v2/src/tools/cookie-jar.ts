@@ -143,7 +143,8 @@ export async function addDomainAndSync(domainRaw: string): Promise<AddDomainResu
 export interface StructuredCookie {
   name: string;
   value: string;
-  url: string;
+  domain: string;
+  path: string;
 }
 
 export interface StructuredCookiesResult {
@@ -159,14 +160,21 @@ function parseCookieHeaderToStructured(header: string, domain: string): Structur
     .filter(Boolean)
     .map((pair) => {
       const idx = pair.indexOf("=");
-      return { name: pair.slice(0, idx), value: pair.slice(idx + 1), url: `https://${domain}` };
+      // domain CON el punto inicial (".threads.com") en vez de url ("https://threads.com"):
+      // Playwright trata el shorthand `url` como cookie host-only, que Chromium nunca manda en
+      // pedidos a un subdominio real (ej. www.threads.com) — encontrado en producción 2026-08-01,
+      // la sesión estaba bien sincronizada pero threads.com/share/... seguía mostrando el muro de
+      // login porque el navegador jamás mandaba la cookie a www.threads.com. El punto inicial
+      // replica el atributo real `Domain=.threads.com` que el sitio real usa para que la cookie
+      // aplique a cualquier subdominio.
+      return { name: pair.slice(0, idx), value: pair.slice(idx + 1), domain: `.${domain}`, path: "/" };
     });
 }
 
 /**
  * Como getCookieHeader, pero en el formato que acepta context.addCookies() de Playwright
- * ({name, value, url} por cookie) en vez del header HTTP crudo — ese header solo sirve para
- * fetchAsUser. Usado por guardarReferenciaDiseno para autenticar la captura de X/Instagram.
+ * ({name, value, domain, path} por cookie) en vez del header HTTP crudo — ese header solo sirve
+ * para fetchAsUser. Usado por guardarReferenciaDiseno para autenticar la captura de X/Instagram.
  */
 export async function getStructuredCookies(hostname: string, kv: CfKv): Promise<StructuredCookiesResult> {
   const domain = findWhitelistedDomain(hostname);
