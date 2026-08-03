@@ -1,5 +1,4 @@
 import { writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
-import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
@@ -50,6 +49,7 @@ import {
 import { TaskStore } from "./proactive/task-store.js";
 import { isTaskCallback, handleTaskCallback, applyTaskInput, parseTaskCallback } from "./proactive/task-callbacks.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
+import { extractPdfFromBuffer } from "./tools/pdf-extract.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf } from "./tools/vision.js";
 import { buildMainMenu, handleMenuCallback } from "./menu.js";
@@ -228,6 +228,15 @@ function createFreshMcpServer() {
     name: "cos-tools",
     version: "0.1.0",
     tools: sdkTools,
+    // alwaysLoad (2026-08-02): con ToolSearch activo (2026-07-14), un server SIN esto
+    // queda diferido detrás de la búsqueda por default — cos-tools es el server MÁS
+    // usado de Jano (tools propias, llamadas casi todos los turnos), así que diferirlo
+    // le suma una llamada de ToolSearch extra por turno sin necesidad. Además, confirmado
+    // en el log: "No such tool available: mcp__cos-tools__*" 22x (16 sendNotification +
+    // 4 + 2 variantes) — mismo síntoma de conexión no-bloqueante que le pega a los MCP
+    // externos, aplicable también al server in-process. `alwaysLoad` en
+    // createSdkMcpServer se aplica a TODAS sus tools vía `_meta['anthropic/alwaysLoad']`.
+    alwaysLoad: true,
   });
 }
 
@@ -304,6 +313,13 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: MCP_REMOTE,
       args: ["https://mcp-naabol-flights.carlos-cb4.workers.dev/mcp"],
+      // alwaysLoad (2026-08-02): mismo fix de carrera de conexión portado desde Vesta
+      // (ver Vesta/daemon-v2/src/index.ts) — confirmado ahí con 4x "No such tool
+      // available" pegándole al primer tool_use tras warm_startup. Jano no mostró el
+      // mismo síntoma en naabol-flights/serpapi-flights todavía, pero comparte el mismo
+      // diseño de fresh startup() por invocación — se aplica preventivo, costo bajo (2
+      // tools por server).
+      alwaysLoad: true,
     },
     "feedbin": {
       type: "stdio",
@@ -331,6 +347,8 @@ const BASE_OPTIONS: Options = {
       command: NODE_BIN,
       args: [SERPAPI_FLIGHTS_DIST],
       env: { SERPAPI_KEY: env.SERPAPI_KEY },
+      // alwaysLoad: ver comentario en naabol-flights, mismo fix preventivo.
+      alwaysLoad: true,
     },
     "apple-notes": {
       type: "stdio",
@@ -389,6 +407,15 @@ const BASE_OPTIONS: Options = {
   // para todo: ver `effortForMessage()` abajo.
   effort: defaultEffort(),
 };
+
+// PENDIENTE — decisión de Cal, no aplicado: los MCP heredados de OAuth Max
+// (mcp__claude_ai_Google_Calendar__*, Notion) NO viven en `mcpServers` — los inyecta el
+// SDK directo desde la sesión OAuth Max, así que `alwaysLoad` (campo por-server) no
+// aplica ahí. Mismo bug de carrera confirmado en el log (48x "No such tool available"
+// sumando Calendar+Notion) — la única palanca documentada para esos es la env var
+// global `MCP_CONNECTION_NONBLOCKING=0` (espera hasta 5s a TODOS los servers antes del
+// primer turno), que va en el plist/wrapper de arranque, no en código — por eso queda
+// afuera de este cambio. Mismo caveat portado a Vesta/index.ts.
 
 // NOT using a warm pool. Pecunia v2 / Vesta v2 documented "Warm pool stale rompe
 // MCP custom" — if we reuse a WarmQuery prefetched from a previous startup(),
@@ -515,12 +542,10 @@ async function processDocument(
       // Try text extraction first (works for text-based PDFs)
       let text: string | null = null;
       try {
-        const require = createRequire(import.meta.url);
-        const pdfParse = require("pdf-parse");
         const { readFile } = await import("node:fs/promises");
         const buf = await readFile(file.path);
-        const data = await pdfParse(buf);
-        text = data.text?.trim() || null;
+        const extracted = await extractPdfFromBuffer(new Uint8Array(buf));
+        text = extracted.ok ? extracted.text?.trim() || null : null;
       } catch {
         // pdf-parse failed — fall through to vision
       }

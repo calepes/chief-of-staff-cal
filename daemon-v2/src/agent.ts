@@ -137,8 +137,6 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__claude_ai_Google_Calendar__create_event":      "📅 Creando evento...",
   "mcp__claude_ai_Google_Calendar__update_event":      "📅 Actualizando evento...",
   "mcp__claude_ai_Google_Calendar__delete_event":      "📅 Eliminando evento...",
-  "mcp__claude_ai_Gmail__search_threads":              "📧 Revisando Gmail...",
-  "mcp__claude_ai_Gmail__get_thread":                  "📧 Leyendo correo...",
   "mcp__inversiones-query__recordTransaction":          "📈 Registrando transacción...",
   "mcp__inversiones-query__kuberaCashFlow":             "📊 Registrando cash flow en Kubera...",
   "mcp__inversiones-query__kuberaUpdateShares":         "📊 Actualizando shares en Kubera...",

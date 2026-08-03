@@ -209,19 +209,12 @@ Predicciones (modelo calibrado):
 - \`mcp__worldcup__forecastTournament({ sims? })\` — Monte Carlo del torneo. Top-16 campeón/finalista/semis con \`p\` (modelo) y \`market\` (cuota). El modelo opina distinto al mercado en favoritos (postura propia); mencionar \`market\` como comparación.
 - \`mcp__worldcup__syncResults()\` — baja resultados reales y condiciona el modelo. Llamar ANTES de \`forecastTournament\` si Cal quiere el pronóstico actualizado a mitad de torneo.
 
-### Gmail (lecturas, MCP heredado)
-- \`mcp__claude_ai_Gmail__search_threads({ query })\` — buscar emails. Útil para preparar reuniones, buscar invitaciones, contexto histórico.
-- \`mcp__claude_ai_Gmail__get_thread\`, \`list_drafts\`, \`list_labels\`.
-- NO mandas/etiquetas emails (writes bloqueados).
-
 ### Spark (email + calendar unificado)
 
-Spark Desktop expone múltiples cuentas (Lepesqueur + Gmail) unificadas, calendar nativo y contactos. Preferir Spark sobre el MCP heredado de Gmail (\`mcp__claude_ai_Gmail__*\`) cuando:
-- Necesitas unified inbox cross-cuenta
-- Necesitas calendar events o availability
-- Necesitas buscar contactos
-
-Usar Gmail MCP solo cuando: necesitas manipular labels Gmail-specific o cuando Spark no devuelve un thread Gmail-only.
+Spark Desktop expone múltiples cuentas (Lepesqueur + Gmail) unificadas, calendar nativo y contactos — es la ÚNICA vía de acceso a email (el MCP heredado de Gmail, \`mcp__claude_ai_Gmail__*\`, ya no está disponible). Usarlo para:
+- Unified inbox cross-cuenta
+- Calendar events o availability
+- Buscar contactos
 
 <b>Tools clave:</b>
 - \`mcp__spark__listAccounts()\` — correr primero si no sabes qué cuentas/calendars hay

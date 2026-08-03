@@ -56,13 +56,6 @@ export const DISALLOWED_BUILTINS: string[] = [
   "mcp__claude_ai_Airtable__update_table",
   "mcp__claude_ai_Airtable__create_field",
   "mcp__claude_ai_Airtable__update_field",
-  // Gmail writes — CoS no manda emails
-  "mcp__claude_ai_Gmail__create_draft",
-  "mcp__claude_ai_Gmail__create_label",
-  "mcp__claude_ai_Gmail__label_message",
-  "mcp__claude_ai_Gmail__label_thread",
-  "mcp__claude_ai_Gmail__unlabel_message",
-  "mcp__claude_ai_Gmail__unlabel_thread",
   // Drive writes — CoS no crea archivos en Drive
   "mcp__claude_ai_Google_Drive__create_file",
   // 3rd party YouTube transcript MCP heredado de OAuth Max — usamos el custom
@@ -103,11 +96,6 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Web — briefings país, links de Notion/GCal, búsquedas
   "WebFetch",
   "WebSearch",
-  // Gmail (solo lecturas) — preparar reuniones, ver invitaciones
-  "mcp__claude_ai_Gmail__search_threads",
-  "mcp__claude_ai_Gmail__get_thread",
-  "mcp__claude_ai_Gmail__list_drafts",
-  "mcp__claude_ai_Gmail__list_labels",
   // Google Calendar — calendario laboral
   "mcp__claude_ai_Google_Calendar__list_calendars",
   "mcp__claude_ai_Google_Calendar__list_events",
