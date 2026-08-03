@@ -7,6 +7,8 @@ import { sanitizeForTelegram } from "../format.js";
 import type { CfKv } from "../cf-kv.js";
 import { fetchAsUser } from "./fetch-as-user.js";
 import { addDomainAndSync } from "./cookie-jar.js";
+import { extractPdfFromBuffer, fetchPdfBuffer } from "./pdf-extract.js";
+import { analyzePdf } from "./vision.js";
 
 // Resumidor universal para Jano. Reutiliza los MISMOS scripts standalone que el
 // skill `resumir` (~/.claude/scripts/*), invocándolos con spawn(argv) — sin shell,
@@ -30,6 +32,8 @@ const PENDING_DIR = `${HOME}/.cos-agent`; // estado de propuestas pendientes (en
 // umbral bajo el cual un artículo se considera "excerpt/bloqueado" — mismo criterio que ya
 // usaba fetchStarredContent para decidir si vale la pena reintentar con cookie.
 const LOOKS_BLOCKED_CHARS = 1500;
+// Mismo criterio de truncado que processDocument() en index.ts para PDFs adjuntos por Telegram.
+const MAX_PDF_CHARS = 50_000;
 
 export interface ResumirDeps {
   botToken: string;
@@ -48,7 +52,7 @@ export interface GuardarReadwiseArgs {
   fullArticle?: boolean;                        // guardar el ARTÍCULO COMPLETO (Reader baja la URL) + tags, no el resumen
 }
 
-type Kind = "article" | "video" | "podcast" | "book";
+type Kind = "article" | "video" | "podcast" | "book" | "pdf";
 
 interface PendingProposal {
   title: string;
@@ -173,6 +177,9 @@ function detectKind(src: string): Kind {
   if (host.endsWith("podcasts.apple.com")) return "podcast";
   if (host.endsWith("overcast.fm")) return "podcast";
   if (/\.(mp3|m4a|wav|aac|ogg)(\?|$)/i.test(s)) return "podcast";
+  // Chequeo por PATHNAME (no el string completo): URLs firmadas S3 (ej. adjuntos de Notion) llevan
+  // ".pdf" antes de query params tipo "?X-Amz-Signature=..." que un regex ingenuo sobre `s` rompería.
+  try { if (/\.pdf$/i.test(new URL(s).pathname)) return "pdf"; } catch { /* ya se cayó a article arriba si new URL falla */ }
   return "article";
 }
 
@@ -272,7 +279,7 @@ function buildPrompt(kind: Kind, label: string, text: string, instruction?: stri
       extra + formato + meta
     );
   }
-  const tipo = kind === "video" ? "la transcripción de este video" : kind === "podcast" ? "la transcripción de este podcast/audio" : "este artículo";
+  const tipo = kind === "video" ? "la transcripción de este video" : kind === "podcast" ? "la transcripción de este podcast/audio" : kind === "pdf" ? "el contenido de este PDF" : "este artículo";
   return (
     langRule +
     `Tienes ${tipo} de ${label}:\n\n` + text + `\n\n---\n` +
@@ -311,7 +318,7 @@ function splitMeta(raw: string): { md: string; title: string; tags: string[]; hi
 function deriveTitle(kind: Kind, source: string, text: string, explicitTitle: string, metaTitle: string): string {
   if (explicitTitle.trim()) return explicitTitle.trim().slice(0, 160);
   if (kind === "book") return source.slice(0, 140);
-  if (kind === "article") {
+  if (kind === "article" || kind === "pdf") {
     const first = text.split("\n").map((s) => s.trim()).find(Boolean);
     if (first) return first.slice(0, 140);
   }
@@ -353,7 +360,10 @@ async function saveToReadwise(
     if (!articleMode) { writeFileSync(htmlFile, finalHtml, "utf8"); htmlArg = htmlFile; }
     const tagsCsv = tags.map((t) => t.replace(/,/g, " ").trim()).filter(Boolean).join(",");
     if (highlights.length) { writeFileSync(hlFile, JSON.stringify(highlights), "utf8"); hlArg = hlFile; }
-    const r = await runJson(READWISE_SAVE, [title || "Resumen", "", docUrl, "article", htmlArg, tagsCsv, hlArg], 60_000);
+    // Reader documenta "pdf" como categoría propia (distinta de "article") en /api/v3/save/;
+    // el resto de los kinds mantiene el literal "article" de siempre (comportamiento sin cambios).
+    const category = kind === "pdf" ? "pdf" : "article";
+    const r = await runJson(READWISE_SAVE, [title || "Resumen", "", docUrl, category, htmlArg, tagsCsv, hlArg], 60_000);
     return { url: typeof r.url === "string" ? r.url : undefined, highlights: typeof r.highlights === "number" ? r.highlights : 0 };
   } catch {
     return null;
@@ -368,16 +378,19 @@ async function saveToReadwise(
 // Readwise va el texto completo de proposal.highlights).
 // Para artículos se ofrece además "📄 Guardar artículo" (Reader baja el original con los tags).
 function buildCardKeyboard(kind: Kind): unknown {
-  const saveRow = kind === "article"
+  // PDF se trata igual que artículo: Reader también puede guardar el PDF completo desde su URL real.
+  const isArticleLike = kind === "article" || kind === "pdf";
+  const fullLabel = kind === "pdf" ? "📄 Guardar PDF completo" : "📄 Guardar artículo";
+  const saveRow = isArticleLike
     ? [
         { text: "✅ Guardar resumen", callback_data: "j:resu:save" },
-        { text: "📄 Guardar artículo", callback_data: "j:resu:savefull" },
+        { text: fullLabel, callback_data: "j:resu:savefull" },
       ]
     : [
         { text: "✅ Guardar", callback_data: "j:resu:save" },
         { text: "🏷️ Agregar tag", callback_data: "j:resu:tag" },
       ];
-  const secondRow = kind === "article"
+  const secondRow = isArticleLike
     ? [
         { text: "🏷️ Agregar tag", callback_data: "j:resu:tag" },
         { text: "✏️ Editar", callback_data: "j:resu:edit" },
@@ -386,7 +399,7 @@ function buildCardKeyboard(kind: Kind): unknown {
         { text: "✏️ Editar", callback_data: "j:resu:edit" },
         { text: "⏭️ Saltar", callback_data: "j:resu:skip" },
       ];
-  const lastRow = kind === "article"
+  const lastRow = isArticleLike
     ? [
         { text: "⏭️ Saltar", callback_data: "j:resu:skip" },
         { text: "⏹️ Parar", callback_data: "j:resu:stop" },
@@ -475,6 +488,7 @@ const AUTHOR_EMOJI: Record<Kind, string> = {
   podcast: "🎬",
   article: "📰",
   book: "📰",
+  pdf: "📰",
 };
 
 // Arma las 1-2 líneas de título + autor/canal a anteponer al TL;DR del resumen entregado.
@@ -590,6 +604,40 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     text = r.transcript;
     if (typeof r.title === "string" && r.title.trim()) docTitle = r.title.trim();
     if (typeof r.channel === "string" && r.channel.trim()) docAuthor = r.channel.trim();
+    await setAnchor("💭 Resumiendo...", progressKb);
+  } else if (kind === "pdf") {
+    await setAnchor("📄 Leyendo el PDF...", progressKb);
+    const dl = await fetchPdfBuffer(args.source);
+    if (!dl.ok || !dl.buf) {
+      await setAnchor(`❌ No pude leer el PDF (${dl.error ?? "error desconocido"}).`);
+      return;
+    }
+    const extracted = await extractPdfFromBuffer(dl.buf);
+    if (extracted.ok && extracted.text) {
+      text = extracted.text.length > MAX_PDF_CHARS
+        ? `${extracted.text.slice(0, MAX_PDF_CHARS)}\n\n[... truncado a ${MAX_PDF_CHARS} chars ...]`
+        : extracted.text;
+    } else {
+      // Sin capa de texto (probablemente escaneado) → mismo fallback de OCR por visión que
+      // processDocument() usa para PDFs adjuntos por Telegram (analyzePdf necesita un archivo local).
+      await setAnchor("🔍 PDF escaneado — leyendo con IA...", progressKb);
+      const tmpPath = join(tmpdir(), `jano-pdf-url-${process.pid}-${Date.now()}.pdf`);
+      try {
+        writeFileSync(tmpPath, dl.buf);
+        const ocr = await analyzePdf({ imagePath: tmpPath, task: "ocr" });
+        const ocrText = ocr.text?.trim();
+        if (!ocrText) {
+          await setAnchor(`❌ No pude leer el PDF (${extracted.error ?? "sin texto, ni con OCR"}).`);
+          return;
+        }
+        text = ocrText;
+      } catch (e) {
+        await setAnchor(`❌ No pude leer el PDF (${e instanceof Error ? e.message : String(e)}).`);
+        return;
+      } finally {
+        try { unlinkSync(tmpPath); } catch { /* noop */ }
+      }
+    }
     await setAnchor("💭 Resumiendo...", progressKb);
   } else {
     await setAnchor("📚 Resumiendo el libro desde mi conocimiento...");
@@ -719,7 +767,7 @@ export function resumirContenido(
     }).catch(() => {});
   });
 
-  const kindEs = { article: "artículo", video: "video", podcast: "podcast", book: "libro" }[kind];
+  const kindEs = { article: "artículo", video: "video", podcast: "podcast", book: "libro", pdf: "PDF" }[kind];
   return {
     status: "started",
     message:
