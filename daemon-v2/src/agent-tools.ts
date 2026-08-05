@@ -3,7 +3,8 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { getOutlookEvents } from "./tools/outlook.js";
 import { manageLearning } from "./tools/learnings.js";
@@ -100,8 +101,9 @@ import {
   getVacacionDetail,
 } from "./tools/schedule-cal.js";
 import { fetchNotionAttachments } from "./tools/notion-files.js";
-import { enviarDocumentoLocal, enviarFotoLocal } from "./tools/telegram-files.js";
-import { analyzePhoto } from "./tools/vision.js";
+import { enviarDocumentoLocal, enviarFotoLocal, resolveAllowedLocalFile } from "./tools/telegram-files.js";
+import { extractPdfFromBuffer, necesitaOcr } from "./tools/pdf-extract.js";
+import { analyzePhoto, analyzePdf, notaOcrParcial } from "./tools/vision.js";
 import { parseDesignCritique, writeDesignRef } from "./tools/design-refs.js";
 import { captureDesignScreenshot } from "./tools/design-capture.js";
 import { sendPhoto, sendDocument, sendChatAction } from "@cos/shared";
@@ -117,6 +119,25 @@ import {
 
 const READ_ONLY = { annotations: { readOnlyHint: true } };
 
+// Tope del TEXTO que sale por un tool result. NO son los 50 K de processDocument:
+// aquellos entran por el prompt, mientras que esto pasa por asText/JSON.stringify,
+// que es justo el camino del "SDK persisted-output loop" (>~25 KB → el SDK
+// persiste el resultado a disco y el modelo reintenta la tool, quemando turnos —
+// ver CLAUDE.md). Se usa el mismo 20 K que consultarJson y leerBacklog.
+// El margen importa: el umbral es en BYTES, y 20 K chars de español con acentos
+// pasados por JSON.stringify pesan bastante más que 20 KB.
+const MAX_PDF_CHARS_TOOL = 20_000;
+
+/** Recorta el texto para el tool result y avisa EXPLÍCITAMENTE si hubo recorte. */
+function truncarPdf(text: string): { text: string; chars: number; truncado: boolean } {
+  if (text.length <= MAX_PDF_CHARS_TOOL) return { text, chars: text.length, truncado: false };
+  return {
+    text: `${text.slice(0, MAX_PDF_CHARS_TOOL)}\n\n[... truncado a ${MAX_PDF_CHARS_TOOL} chars ...]`,
+    chars: text.length,
+    truncado: true,
+  };
+}
+
 function asText(result: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
 }
@@ -124,6 +145,8 @@ function asText(result: unknown) {
 export interface ToolDeps {
   botToken: string;
   getCurrentChatId: () => number;
+  /** Path del último PDF adjuntado en el chat actual (lo resuelve el daemon, no el modelo). */
+  getLastPdfPath?: () => string | undefined;
   gmapsApiKey?: string;
   homePin?: string;
   kv: CfKv;
@@ -371,6 +394,48 @@ export function buildSdkTools(deps: ToolDeps) {
           return asText({ status: "send_failed", error: String(err) });
         }
       },
+    ),
+    tool(
+      "leerPdfLocal",
+      [
+        "Relee el ÚLTIMO PDF que Cal adjuntó en este chat — usala cuando te adjuntaron un PDF y el texto NO te llegó en el mensaje, o llegó cortado/ilegible.",
+        "NO recibe argumentos: el archivo lo resuelve el daemon, vos no pasás ningún path.",
+        "Intenta la capa de texto y, si es un escaneo, hace OCR con visión automáticamente. Devuelve { ok, text, fuente: 'texto'|'ocr', chars, truncado }.",
+        "Si truncado es true, leíste solo una parte: decíselo a Cal en vez de afirmar que ese es todo el contenido.",
+        "Si devuelve ok:false, explicá en UNA frase que no se pudo leer y ofrecé que te mande una foto de la parte que le interesa — no reintentes.",
+      ].join(" "),
+      {},
+      async () => {
+        const pdfPath = deps.getLastPdfPath?.();
+        if (!pdfPath) {
+          return asText({ ok: false, error: "No hay ningún PDF adjunto reciente en este chat." });
+        }
+        // Defensa en profundidad: el path lo pone el daemon (no el modelo), pero se
+        // revalida igual con el mismo guard que enviarDocumentoLocal/enviarFotoLocal
+        // — tmpdir() + realpath ANTES de comparar.
+        const resolved = await resolveAllowedLocalFile(pdfPath, /\.pdf$/i);
+        if (!resolved) {
+          return asText({ ok: false, error: "El PDF adjunto ya no está disponible." });
+        }
+        try {
+          const buf = await readFile(resolved);
+          const extracted = await extractPdfFromBuffer(new Uint8Array(buf));
+          const texto = extracted.ok ? extracted.text?.trim() || null : null;
+          if (!necesitaOcr(texto)) return asText({ ok: true, fuente: "texto", ...truncarPdf(texto!) });
+
+          const res = await analyzePdf({ imagePath: resolved, task: "ocr" });
+          const ocr = res.text?.trim() ? res.text.trim() + notaOcrParcial(res.pagesOcr) : null;
+          // Mejor de los dos, igual que processDocument: si el OCR sale más pobre
+          // que la capa de texto, no tirar lo que ya se tenía.
+          const usarOcr = (ocr?.length ?? 0) >= (texto?.length ?? 0);
+          const mejor = usarOcr ? ocr : texto;
+          if (!mejor) return asText({ ok: false, error: "El PDF no tiene texto legible, ni siquiera con OCR." });
+          return asText({ ok: true, fuente: usarOcr ? "ocr" : "texto", ...truncarPdf(mejor) });
+        } catch (err) {
+          return asText({ ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+      READ_ONLY,
     ),
     tool(
       "enviarDocumentoLocal",

@@ -11,6 +11,30 @@ export interface PdfExtractResult {
   error?: string;
 }
 
+// Piso de caracteres REALES (sin contar whitespace) para dar por buena la capa de
+// texto de un PDF. Por debajo se asume escaneado y se cae al OCR por visión.
+//
+// BUG REAL 2026-08-04: el fallback a OCR vivía detrás de un `if (!text)` — o sea
+// solo se disparaba con texto exactamente vacío. Un PDF escaneado casi nunca da
+// 0 chars: pdf-parse saca un artefacto mínimo (número de página, marca del
+// generador). El comprobante que adjuntó Cal devolvió 12 caracteres, y como 12 es
+// truthy el OCR nunca corrió: esos 12 chars llegaron al modelo como si fueran el
+// documento entero, y Jano tuvo que pedirle una foto.
+//
+// 100 es holgado: una página con texto real lo supera por mucho. El costo del
+// falso positivo (un PDF legítimamente cortísimo) es una llamada de visión de
+// más, no un error — y el caller se queda con el mejor de los dos textos.
+export const MIN_PDF_TEXT_CHARS = 100;
+
+/** ¿La capa de texto es tan pobre que conviene intentar OCR sobre las imágenes? */
+export function necesitaOcr(text: string | null | undefined): boolean {
+  if (!text) return true;
+  // Se cuenta el texto SIN whitespace: un escaneo puede traer cientos de saltos
+  // de línea y casi ninguna letra, y el largo crudo pasaría el umbral sin
+  // contenido real.
+  return text.replace(/\s+/g, "").length < MIN_PDF_TEXT_CHARS;
+}
+
 export async function extractPdfFromBuffer(buf: Uint8Array): Promise<PdfExtractResult> {
   try {
     const parsed = await new PDFParse({ data: buf }).getText();

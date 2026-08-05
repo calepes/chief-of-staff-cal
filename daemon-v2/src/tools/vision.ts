@@ -14,6 +14,8 @@ export interface AnalyzePhotoOpts {
 
 export interface PhotoAnalysis {
   text: string;
+  /** Solo lo setea analyzePdf: páginas realmente OCR-eadas (ver OCR_MAX_PAGES). */
+  pagesOcr?: number;
   rawTokens: { input: number; output: number };
 }
 
@@ -45,10 +47,15 @@ function getApiKey(): string {
   return key;
 }
 
-// Converts a PDF to images (up to 3 pages) and analyzes with vision.
+// Tope de páginas que se convierten a imagen para el OCR. Es un límite de costo
+// (cada página son ~1024 tokens de visión), NO del documento: un PDF más largo se
+// lee PARCIAL. El caller tiene que avisar de ese recorte — ver `pagesOcr` abajo.
+export const OCR_MAX_PAGES = 5;
+
+// Converts a PDF to images (up to OCR_MAX_PAGES pages) and analyzes with vision.
 export async function analyzePdf(opts: AnalyzePhotoOpts): Promise<PhotoAnalysis> {
   const prefix = `/tmp/jano_pdf_${Date.now()}`;
-  await execFileAsync("pdftoppm", ["-jpeg", "-r", "150", "-f", "1", "-l", "3", opts.imagePath, prefix]);
+  await execFileAsync("pdftoppm", ["-jpeg", "-r", "150", "-f", "1", "-l", String(OCR_MAX_PAGES), opts.imagePath, prefix]);
 
   const prefixBase = basename(prefix);
   const pageFiles = (await readdir("/tmp"))
@@ -67,11 +74,22 @@ export async function analyzePdf(opts: AnalyzePhotoOpts): Promise<PhotoAnalysis>
 
   return {
     text: results.length === 1 ? results[0].text : results.map((r, i) => `[Página ${i + 1}]\n${r.text}`).join("\n\n"),
+    // Cuántas páginas se leyeron de verdad. Si llegó al tope, el documento puede
+    // tener más y lo devuelto es PARCIAL — el caller debe decirlo, si no presenta
+    // 3 páginas como si fueran el documento entero.
+    pagesOcr: pageFiles.length,
     rawTokens: {
       input: results.reduce((s, r) => s + r.rawTokens.input, 0),
       output: results.reduce((s, r) => s + r.rawTokens.output, 0),
     },
   };
+}
+
+/** Nota de recorte para anexar al texto OCR-eado, o "" si se leyó todo. */
+export function notaOcrParcial(pagesOcr: number | undefined): string {
+  return pagesOcr && pagesOcr >= OCR_MAX_PAGES
+    ? `\n\n[... OCR limitado a las primeras ${OCR_MAX_PAGES} páginas — si el documento tiene más, ese contenido NO está acá ...]`
+    : "";
 }
 
 export async function analyzePhoto(opts: AnalyzePhotoOpts): Promise<PhotoAnalysis> {

@@ -7,7 +7,7 @@ import { sanitizeForTelegram } from "../format.js";
 import type { CfKv } from "../cf-kv.js";
 import { fetchAsUser } from "./fetch-as-user.js";
 import { addDomainAndSync } from "./cookie-jar.js";
-import { extractPdfFromBuffer, fetchPdfBuffer } from "./pdf-extract.js";
+import { extractPdfFromBuffer, fetchPdfBuffer, necesitaOcr } from "./pdf-extract.js";
 import { analyzePdf } from "./vision.js";
 
 // Resumidor universal para Jano. Reutiliza los MISMOS scripts standalone que el
@@ -613,7 +613,10 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
       return;
     }
     const extracted = await extractPdfFromBuffer(dl.buf);
-    if (extracted.ok && extracted.text) {
+    // `!necesitaOcr(...)` y NO solo `extracted.text`: un PDF escaneado devuelve un
+    // residuo mínimo pero truthy (ver pdf-extract.ts), que sin este chequeo se
+    // resumía como si fuera el documento.
+    if (extracted.ok && extracted.text && !necesitaOcr(extracted.text)) {
       text = extracted.text.length > MAX_PDF_CHARS
         ? `${extracted.text.slice(0, MAX_PDF_CHARS)}\n\n[... truncado a ${MAX_PDF_CHARS} chars ...]`
         : extracted.text;

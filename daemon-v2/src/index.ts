@@ -49,9 +49,9 @@ import {
 import { TaskStore } from "./proactive/task-store.js";
 import { isTaskCallback, handleTaskCallback, applyTaskInput, parseTaskCallback } from "./proactive/task-callbacks.js";
 import { downloadTelegramFile } from "./tools/telegram-files.js";
-import { extractPdfFromBuffer } from "./tools/pdf-extract.js";
+import { extractPdfFromBuffer, necesitaOcr } from "./tools/pdf-extract.js";
 import { transcribeAudio } from "./tools/whisper.js";
-import { analyzePhoto, analyzePdf } from "./tools/vision.js";
+import { analyzePhoto, analyzePdf, notaOcrParcial } from "./tools/vision.js";
 import { buildMainMenu, handleMenuCallback } from "./menu.js";
 
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
@@ -204,9 +204,24 @@ const taskStore = new TaskStore(kv);
 // Safe porque el daemon procesa mensajes serialmente (1 worker en queue).
 let currentChatId = 0;
 
+// Path del ÚLTIMO PDF que Cal adjuntó en cada chat, para que `leerPdfLocal` pueda
+// releerlo si la extracción automática salió pobre.
+//
+// El path NO es un argumento del modelo a propósito: aceptarlo abriría la lectura
+// a cualquier *.pdf del tmpdir del usuario (Safari, Mail, Preview, adjuntos
+// anteriores), y Jano ingiere contenido no confiable de rutina — mismo molde de
+// vector que se cerró en guardarReferenciaDiseno. Resolviéndolo acá, la superficie
+// es exactamente un archivo: el que Cal mandó.
+//
+// NO se limpia al inicio del turno: el caso normal es releerlo en el mismo turno,
+// pero Cal también puede pedirlo un turno después ("fijate de nuevo en el PDF").
+// El archivo sobrevive porque processDocument no lo borra (ver "Keep file alive").
+const lastPdfByChat = new Map<number, string>();
+
 const sdkTools = buildSdkTools({
   botToken: env.COS_TELEGRAM_BOT_TOKEN,
   getCurrentChatId: () => currentChatId,
+  getLastPdfPath: () => lastPdfByChat.get(currentChatId),
   gmapsApiKey: env.GOOGLE_MAPS_API_KEY || undefined,
   homePin: env.HOME_PIN || undefined,
   kv,
@@ -550,15 +565,32 @@ async function processDocument(
         // pdf-parse failed — fall through to vision
       }
 
-      if (!text) {
-        // Image-based PDF (scanned) → convert pages to images and OCR with vision
+      if (necesitaOcr(text)) {
+        // Image-based PDF (scanned) → convert pages to images and OCR with vision.
+        // OJO: la condición es `necesitaOcr`, NO `!text`. Un PDF escaneado casi
+        // nunca devuelve 0 chars — devuelve un artefacto mínimo (12 chars en el
+        // caso real que originó esto), y con `!text` el OCR nunca se disparaba.
         onStatus?.("🔍 PDF escaneado — leyendo con IA...");
         const result = await analyzePdf({ imagePath: file.path, caption, task: "ocr" });
-        text = result.text?.trim() || null;
-        log({ msg: "pdf_vision_ocr", chars: text?.length ?? 0 });
+        // El OCR cubre hasta OCR_MAX_PAGES páginas: si el PDF tiene más, lo leído
+        // es PARCIAL y hay que decirlo, o el modelo presenta esas páginas como si
+        // fueran el documento entero.
+        const ocr = result.text?.trim() ? result.text.trim() + notaOcrParcial(result.pagesOcr) : null;
+        log({
+          msg: "pdf_vision_ocr",
+          chars: ocr?.length ?? 0,
+          textoPrevio: text?.length ?? 0,
+          pagesOcr: result.pagesOcr ?? 0,
+        });
+        // Quedarse con el MEJOR de los dos: si el OCR falla o sale más pobre que
+        // la capa de texto, no tirar lo que ya se tenía.
+        text = (ocr?.length ?? 0) >= (text?.length ?? 0) ? ocr : text;
       } else {
+        // necesitaOcr(text) === false implica text no vacío, pero TS no lo infiere
+        // desde un predicado común — se fija acá en una const para no castear.
+        const conTexto = text as string;
         const MAX = 50_000;
-        if (text.length > MAX) text = text.slice(0, MAX) + "\n\n[... truncado a 50.000 chars ...]";
+        text = conTexto.length > MAX ? conTexto.slice(0, MAX) + "\n\n[... truncado a 50.000 chars ...]" : conTexto;
         log({ msg: "pdf_text_extracted", chars: text.length });
       }
 
@@ -1359,6 +1391,9 @@ async function processMessage(
         return;
       }
       if (docResult.localPath) photoLocalPath = docResult.localPath;
+      // Registrar el PDF para que `leerPdfLocal` pueda releerlo sin que el modelo
+      // tenga que pasar (ni conocer) un path.
+      if (isPdf && docResult.localPath) lastPdfByChat.set(chatId, docResult.localPath);
       const label = document.file_name ?? "documento";
       const docText = docResult.text;
       text = caption
