@@ -9,6 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@cal/telegram": "file:../../shared-telegram"
+  },
   "devDependencies": {
     "vitest": "^2.1.0"
   }
