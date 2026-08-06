@@ -19,17 +19,20 @@ describe("compareLabel", () => {
 });
 
 describe("renderKpiCardLendingImage", () => {
-  it("devuelve un PNG válido con los 3 KPIs y sus incrementos", async () => {
+  it("devuelve un PNG válido con los 4 KPIs y sus incrementos", async () => {
     const png = await renderKpiCardLendingImage({
-      vistos: 12129,
-      vistosDelta: 245,
-      vistosCompareFecha: "2026-07-23",
-      desembolso: 85,
-      desembolsoDelta: 7,
-      desembolsoCompareFecha: "2026-07-23",
       derivados: 435,
       derivadosDelta: -12,
-      derivadosCompareFecha: "2026-07-23",
+      derivadosCompareFecha: "2026-07-25",
+      agencia: 120,
+      agenciaDelta: 8,
+      agenciaCompareFecha: "2026-07-25",
+      enProcesoAgencia: 42,
+      enProcesoAgenciaDelta: 3,
+      enProcesoAgenciaCompareFecha: "2026-07-25",
+      desembolso: 85,
+      desembolsoDelta: 7,
+      desembolsoCompareFecha: "2026-07-25",
       fecha: "2026-07-26",
     });
 
@@ -37,17 +40,20 @@ describe("renderKpiCardLendingImage", () => {
     expect(png.subarray(0, 8)).toEqual(PNG_MAGIC);
   });
 
-  it("no revienta si los incrementos vienen null (primer registro — nunca hubo dato previo)", async () => {
+  it("no revienta si los incrementos vienen null (sin registro D-1 real)", async () => {
     const png = await renderKpiCardLendingImage({
-      vistos: 12129,
-      vistosDelta: null,
-      vistosCompareFecha: null,
-      desembolso: 85,
-      desembolsoDelta: null,
-      desembolsoCompareFecha: null,
       derivados: 435,
       derivadosDelta: null,
       derivadosCompareFecha: null,
+      agencia: 120,
+      agenciaDelta: null,
+      agenciaCompareFecha: null,
+      enProcesoAgencia: 42,
+      enProcesoAgenciaDelta: null,
+      enProcesoAgenciaCompareFecha: null,
+      desembolso: 85,
+      desembolsoDelta: null,
+      desembolsoCompareFecha: null,
       fecha: "2026-07-26",
     });
 
@@ -57,15 +63,18 @@ describe("renderKpiCardLendingImage", () => {
 
   it("no deja las esquinas transparentes (mismo fix que kpi-card-image.ts)", async () => {
     const png = await renderKpiCardLendingImage({
-      vistos: 12129,
-      vistosDelta: 245,
-      vistosCompareFecha: "2026-07-23",
-      desembolso: 85,
-      desembolsoDelta: 7,
-      desembolsoCompareFecha: "2026-07-23",
       derivados: 435,
       derivadosDelta: -12,
-      derivadosCompareFecha: "2026-07-23",
+      derivadosCompareFecha: "2026-07-25",
+      agencia: 120,
+      agenciaDelta: 8,
+      agenciaCompareFecha: "2026-07-25",
+      enProcesoAgencia: 42,
+      enProcesoAgenciaDelta: 3,
+      enProcesoAgenciaCompareFecha: "2026-07-25",
+      desembolso: 85,
+      desembolsoDelta: 7,
+      desembolsoCompareFecha: "2026-07-25",
       fecha: "2026-07-26",
     });
 

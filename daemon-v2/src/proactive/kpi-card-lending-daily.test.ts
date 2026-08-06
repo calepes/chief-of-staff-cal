@@ -32,53 +32,83 @@ function row(overrides: Partial<LendingHistoryRow>): LendingHistoryRow {
     desembolso: null,
     derivados: null,
     vistos: null,
+    agencia: null,
+    enProcesoAgencia: null,
     incrementoDesembolso: null,
     incrementoDerivados: null,
     incrementoVistos: null,
+    incrementoAgencia: null,
+    incrementoEnProcesoAgencia: null,
     ...overrides,
   };
 }
 
+// Los incrementos ya vienen PRECOMPUTADOS (D-1 estricto, calculados por fillLendingDerivedFields()
+// — fetchLendingCardKpis ya no los recalcula, solo los expone).
 const HISTORY: LendingHistoryRow[] = [
-  row({ fecha: "2026-07-21", vistos: 8504, derivados: 318, desembolso: 68 }),
-  row({ fecha: "2026-07-22", vistos: 9522, derivados: 348, desembolso: 72 }),
-  row({ fecha: "2026-07-23", vistos: 9522, derivados: 384, desembolso: 78 }),
-  // Hueco real: no hay reporte 24/25 jul.
-  row({ fecha: "2026-07-26", vistos: 12129, derivados: 435, desembolso: 85 }),
+  row({ fecha: "2026-07-21", derivados: 318, agencia: 100, enProcesoAgencia: 30, desembolso: 68 }),
+  row({
+    fecha: "2026-07-22",
+    derivados: 348,
+    agencia: 110,
+    enProcesoAgencia: 38,
+    desembolso: 72,
+    incrementoDerivados: 30,
+    incrementoAgencia: 10,
+    incrementoEnProcesoAgencia: 8,
+    incrementoDesembolso: 4,
+  }),
+  row({
+    fecha: "2026-07-23",
+    derivados: 384,
+    agencia: 120,
+    enProcesoAgencia: 42,
+    desembolso: 78,
+    incrementoDerivados: 36,
+    incrementoAgencia: 10,
+    incrementoEnProcesoAgencia: 4,
+    incrementoDesembolso: 6,
+  }),
+  // Hueco real: no hay reporte 24/25 jul — el 26 no tiene D-1 real, todos los incrementos vienen null.
+  row({ fecha: "2026-07-26", derivados: 435, agencia: 130, enProcesoAgencia: 45, desembolso: 85 }),
 ];
 
 describe("fetchLendingCardKpis", () => {
-  it("usa la fila más reciente y compara contra D-1 cuando existe", async () => {
-    vi.mocked(fetchLendingHistory).mockResolvedValue(HISTORY.slice(0, 3)); // hasta 07-23, sin hueco
+  it("usa la fila más reciente y expone los incrementos D-1 precomputados", async () => {
+    vi.mocked(fetchLendingHistory).mockResolvedValue(HISTORY.slice(0, 3)); // hasta 07-23
 
     const kpis = await fetchLendingCardKpis("fake-token");
 
     expect(kpis.fecha).toBe("2026-07-23");
-    expect(kpis.vistosDelta).toBe(0); // 9522 - 9522
-    expect(kpis.vistosCompareFecha).toBe("2026-07-22");
-    expect(kpis.derivadosDelta).toBe(36); // 384 - 348
-    expect(kpis.desembolsoDelta).toBe(6); // 78 - 72
+    expect(kpis.derivadosDelta).toBe(36);
+    expect(kpis.derivadosCompareFecha).toBe("2026-07-22");
+    expect(kpis.agenciaDelta).toBe(10);
+    expect(kpis.agenciaCompareFecha).toBe("2026-07-22");
+    expect(kpis.enProcesoAgenciaDelta).toBe(4);
+    expect(kpis.desembolsoDelta).toBe(6);
   });
 
-  it("con hueco de reporte, compara contra el último dato disponible (no D-1 estricto) y lo marca", async () => {
+  it("con hueco de reporte (sin D-1 real), todos los deltas vienen null", async () => {
     vi.mocked(fetchLendingHistory).mockResolvedValue(HISTORY); // incluye el hueco 24-25 jul
 
     const kpis = await fetchLendingCardKpis("fake-token");
 
     expect(kpis.fecha).toBe("2026-07-26");
-    expect(kpis.derivadosDelta).toBe(51); // 435 - 384 (contra 07-23, no un D-1 inexistente)
-    expect(kpis.derivadosCompareFecha).toBe("2026-07-23");
-    expect(kpis.desembolsoDelta).toBe(7); // 85 - 78
-    expect(kpis.desembolsoCompareFecha).toBe("2026-07-23");
+    expect(kpis.derivadosDelta).toBeNull();
+    expect(kpis.derivadosCompareFecha).toBeNull();
+    expect(kpis.agenciaDelta).toBeNull();
+    expect(kpis.enProcesoAgenciaDelta).toBeNull();
+    expect(kpis.desembolsoDelta).toBeNull();
+    expect(kpis.desembolsoCompareFecha).toBeNull();
   });
 
-  it("primer registro del histórico: delta null porque no hay NINGÚN dato previo", async () => {
+  it("primer registro del histórico: delta null porque no hay incremento precomputado", async () => {
     vi.mocked(fetchLendingHistory).mockResolvedValue([HISTORY[0]]);
 
     const kpis = await fetchLendingCardKpis("fake-token");
 
-    expect(kpis.vistosDelta).toBeNull();
-    expect(kpis.vistosCompareFecha).toBeNull();
+    expect(kpis.derivadosDelta).toBeNull();
+    expect(kpis.derivadosCompareFecha).toBeNull();
   });
 
   it("lanza si no hay ninguna fila", async () => {
@@ -86,19 +116,34 @@ describe("fetchLendingCardKpis", () => {
     await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("0 resultados");
   });
 
-  it("lanza si Ofertas Vistas viene null en la fila objetivo", async () => {
-    vi.mocked(fetchLendingHistory).mockResolvedValue([row({ fecha: "2026-07-26", derivados: 435, desembolso: 85, vistos: null })]);
-    await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("Ofertas Vistas");
+  it("lanza si Derivados viene null en la fila objetivo", async () => {
+    vi.mocked(fetchLendingHistory).mockResolvedValue([row({ fecha: "2026-07-26", agencia: 130, enProcesoAgencia: 45, desembolso: 85, derivados: null })]);
+    await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("Derivados");
   });
 
-  it("con fecha, busca esa fila puntual y compara igual contra su dato previo más reciente", async () => {
+  it("lanza si Agencia viene null en la fila objetivo", async () => {
+    vi.mocked(fetchLendingHistory).mockResolvedValue([row({ fecha: "2026-07-26", derivados: 435, enProcesoAgencia: 45, desembolso: 85, agencia: null })]);
+    await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("Agencia");
+  });
+
+  it("lanza si En Proceso (Agencia) viene null en la fila objetivo", async () => {
+    vi.mocked(fetchLendingHistory).mockResolvedValue([row({ fecha: "2026-07-26", derivados: 435, agencia: 130, desembolso: 85, enProcesoAgencia: null })]);
+    await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("En Proceso (Agencia)");
+  });
+
+  it("lanza si Desembolso viene null en la fila objetivo", async () => {
+    vi.mocked(fetchLendingHistory).mockResolvedValue([row({ fecha: "2026-07-26", derivados: 435, agencia: 130, enProcesoAgencia: 45, desembolso: null })]);
+    await expect(fetchLendingCardKpis("fake-token")).rejects.toThrow("Desembolso");
+  });
+
+  it("con fecha, busca esa fila puntual y expone su incremento D-1 precomputado", async () => {
     vi.mocked(fetchLendingHistory).mockResolvedValue(HISTORY);
 
     const kpis = await fetchLendingCardKpis("fake-token", fetch, "2026-07-22");
 
     expect(kpis.fecha).toBe("2026-07-22");
-    expect(kpis.vistosDelta).toBe(1018); // 9522 - 8504
-    expect(kpis.vistosCompareFecha).toBe("2026-07-21");
+    expect(kpis.derivadosDelta).toBe(30);
+    expect(kpis.derivadosCompareFecha).toBe("2026-07-21");
   });
 
   it("con fecha que no existe en el histórico, lanza error explícito mencionando la fecha", async () => {

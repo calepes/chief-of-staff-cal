@@ -36,10 +36,10 @@ const space = { xs: 8, sm: 16, md: 24, lg: 48, xl: 64, xxl: 96 } as const;
 const font = {
   labelPx: 26,
   labelLineHeight: 32,
-  // Más angosto que kpi-card-image.ts (190/110): 3 columnas en vez de 2, y "Vistos" puede llegar
-  // a 6 cifras — necesita más margen para achicarse sin desbordar la columna.
-  valueMaxPx: 160,
-  valueMinPx: 70,
+  // Más angosto que kpi-card-image.ts (190/110): 4 columnas en vez de 2 — necesita más margen
+  // para achicarse sin desbordar la columna.
+  valueMaxPx: 96,
+  valueMinPx: 42,
   delta: "bold 34px sans-serif",
   deltaUnit: "26px sans-serif",
   caption: "26px sans-serif",
@@ -54,17 +54,21 @@ const card = {
 } as const;
 
 export interface LendingCardKpis {
-  vistos: number;
-  /** Incremento (resta simple, no %) vs. el registro anterior más reciente CON dato para este
-   * campo — no necesariamente D-1 exacto (los huecos de reporte, ej. 24-25 jul, son reales y
-   * frecuentes). `null` solo si no existe NINGÚN registro previo con dato (primer registro). */
-  vistosDelta: number | null;
-  /** Fecha ISO del registro contra el que se comparó `vistosDelta` — permite mostrar "vs. 23 jul"
-   * en vez de "día" cuando la comparación no es realmente contra el día calendario anterior. */
-  vistosCompareFecha: string | null;
   derivados: number;
+  /** Incremento (resta simple, no %) vs. el registro D-1 ESTRICTO (día calendario inmediato
+   * anterior) — viene directo del campo "Incremento X (D-1)" ya calculado en Notion por
+   * fillLendingDerivedFields(). `null` si no hay registro D-1 real (primer registro o hueco de
+   * reporte) — a diferencia del diseño anterior, acá NO se busca el último dato disponible. */
   derivadosDelta: number | null;
+  /** Fecha ISO del registro contra el que se comparó `derivadosDelta` — con D-1 estricto siempre
+   * es literalmente el día calendario anterior cuando `derivadosDelta` no es null. */
   derivadosCompareFecha: string | null;
+  agencia: number;
+  agenciaDelta: number | null;
+  agenciaCompareFecha: string | null;
+  enProcesoAgencia: number;
+  enProcesoAgenciaDelta: number | null;
+  enProcesoAgenciaCompareFecha: string | null;
   desembolso: number;
   desembolsoDelta: number | null;
   desembolsoCompareFecha: string | null;
@@ -114,27 +118,31 @@ export async function renderKpiCardLendingImage(kpis: LendingCardKpis): Promise<
   const blockHeight = 460;
   const blockTop = zoneTop + (zoneBottom - zoneTop - blockHeight) / 2;
 
-  // 3 columnas en orden de funnel (Vistos → Derivados Agencia → Desembolsos) — a diferencia de
-  // kpi-card-image.ts (2 columnas), acá van 2 gaps/divisores en vez de 1.
-  const colGap = space.lg;
-  const colWidth = (card.size - card.padding * 2 - colGap * 2) / 3;
+  // 4 columnas en orden de funnel (Derivados Agencia → Agencia → En Proceso → Desembolso) — a
+  // diferencia de kpi-card-image.ts (2 columnas), acá van 3 gaps/divisores en vez de 1. Gap más
+  // angosto que las 3 columnas originales (space.md en vez de space.lg) para que las 4 entren
+  // sin ahogar el padding lateral.
+  const colGap = space.md;
+  const colWidth = (card.size - card.padding * 2 - colGap * 3) / 4;
   const col1X = card.padding;
   const col2X = col1X + colWidth + colGap;
   const col3X = col2X + colWidth + colGap;
+  const col4X = col3X + colWidth + colGap;
 
-  const vistosText = formatValue(kpis.vistos);
   const derivadosText = formatValue(kpis.derivados);
+  const agenciaText = formatValue(kpis.agencia);
+  const enProcesoText = formatValue(kpis.enProcesoAgencia);
   const desembolsoText = formatValue(kpis.desembolso);
   const sharedValuePx = Math.min(
-    fitFontSize(ctx, vistosText, colWidth, font.valueMaxPx, font.valueMinPx),
     fitFontSize(ctx, derivadosText, colWidth, font.valueMaxPx, font.valueMinPx),
+    fitFontSize(ctx, agenciaText, colWidth, font.valueMaxPx, font.valueMinPx),
+    fitFontSize(ctx, enProcesoText, colWidth, font.valueMaxPx, font.valueMinPx),
     fitFontSize(ctx, desembolsoText, colWidth, font.valueMaxPx, font.valueMinPx),
   );
 
-  drawColumn(ctx, col1X, blockTop, "Ofertas Vistas", vistosText, sharedValuePx, kpis.vistosDelta, compareLabel(kpis.fecha, kpis.vistosCompareFecha), colWidth);
   drawColumn(
     ctx,
-    col2X,
+    col1X,
     blockTop,
     "Derivados Agencia",
     derivadosText,
@@ -143,11 +151,23 @@ export async function renderKpiCardLendingImage(kpis: LendingCardKpis): Promise<
     compareLabel(kpis.fecha, kpis.derivadosCompareFecha),
     colWidth,
   );
+  drawColumn(ctx, col2X, blockTop, "Agencia", agenciaText, sharedValuePx, kpis.agenciaDelta, compareLabel(kpis.fecha, kpis.agenciaCompareFecha), colWidth);
   drawColumn(
     ctx,
     col3X,
     blockTop,
-    "Desembolsos",
+    "En Proceso",
+    enProcesoText,
+    sharedValuePx,
+    kpis.enProcesoAgenciaDelta,
+    compareLabel(kpis.fecha, kpis.enProcesoAgenciaCompareFecha),
+    colWidth,
+  );
+  drawColumn(
+    ctx,
+    col4X,
+    blockTop,
+    "Desembolso",
     desembolsoText,
     sharedValuePx,
     kpis.desembolsoDelta,
@@ -157,7 +177,7 @@ export async function renderKpiCardLendingImage(kpis: LendingCardKpis): Promise<
 
   ctx.strokeStyle = semantic.colorBorder;
   ctx.lineWidth = 2;
-  for (const dividerX of [col1X + colWidth + colGap / 2, col2X + colWidth + colGap / 2]) {
+  for (const dividerX of [col1X + colWidth + colGap / 2, col2X + colWidth + colGap / 2, col3X + colWidth + colGap / 2]) {
     ctx.beginPath();
     ctx.moveTo(dividerX, blockTop);
     ctx.lineTo(dividerX, blockTop + blockHeight - 60);

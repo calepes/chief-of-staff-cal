@@ -8,23 +8,10 @@ import { renderKpiCardLendingImage } from "./kpi-card-lending-image.js";
 import { fetchLendingHistory, type LendingHistoryRow } from "./kpi-lending-notion.js";
 import { enviarFotoLocal } from "../tools/telegram-files.js";
 
-interface Comparison {
-  delta: number;
-  compareFecha: string;
-}
-
-/** Busca, yendo hacia atrás desde `index`, el primer registro anterior que SÍ tenga dato para
- * `field` — no exige que sea D-1 exacto. Los huecos de reporte (ej. Yape no mandó nada el 24-25
- * de julio) son reales y frecuentes; comparar contra "el último dato real" es más útil para la
- * tarjeta que devolver `null` solo porque el día calendario inmediato anterior no tiene fila. */
-function findComparison(rows: LendingHistoryRow[], index: number, field: "vistos" | "derivados" | "desembolso"): Comparison | null {
-  const current = rows[index][field];
-  if (current == null) return null;
-  for (let i = index - 1; i >= 0; i--) {
-    const prior = rows[i][field];
-    if (prior != null) return { delta: current - prior, compareFecha: rows[i].fecha };
-  }
-  return null;
+function isoDaysBefore(fecha: string, days: number): string {
+  const d = new Date(`${fecha}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
 export async function fetchLendingCardKpis(
@@ -44,24 +31,31 @@ export async function fetchLendingCardKpis(
   }
   const row = rows[index];
 
-  if (row.vistos == null) throw new Error("Propiedad Ofertas Vistas viene null en la fila más reciente");
-  if (row.desembolso == null) throw new Error("Propiedad Desembolso viene null en la fila más reciente");
   if (row.derivados == null) throw new Error("Propiedad Derivados viene null en la fila más reciente");
+  if (row.agencia == null) throw new Error("Propiedad Agencia viene null en la fila más reciente");
+  if (row.enProcesoAgencia == null) throw new Error("Propiedad En Proceso (Agencia) viene null en la fila más reciente");
+  if (row.desembolso == null) throw new Error("Propiedad Desembolso viene null en la fila más reciente");
 
-  const vistosCmp = findComparison(rows, index, "vistos");
-  const derivadosCmp = findComparison(rows, index, "derivados");
-  const desembolsoCmp = findComparison(rows, index, "desembolso");
+  // D-1 estricto: los incrementos ya vienen precomputados en Notion (fillLendingDerivedFields()
+  // exige el registro del día calendario inmediato anterior, no "el último dato disponible" —
+  // a diferencia del diseño previo de esta función, acá no se recalcula nada, solo se expone lo
+  // que ya está en la DB). Si el incremento es null (hueco de reporte o primer registro),
+  // compareFecha también va null — no tiene sentido mostrar "vs. día" sin un delta real.
+  const compareFecha = isoDaysBefore(row.fecha, 1);
 
   return {
-    vistos: row.vistos,
-    vistosDelta: vistosCmp?.delta ?? null,
-    vistosCompareFecha: vistosCmp?.compareFecha ?? null,
     derivados: row.derivados,
-    derivadosDelta: derivadosCmp?.delta ?? null,
-    derivadosCompareFecha: derivadosCmp?.compareFecha ?? null,
+    derivadosDelta: row.incrementoDerivados,
+    derivadosCompareFecha: row.incrementoDerivados != null ? compareFecha : null,
+    agencia: row.agencia,
+    agenciaDelta: row.incrementoAgencia,
+    agenciaCompareFecha: row.incrementoAgencia != null ? compareFecha : null,
+    enProcesoAgencia: row.enProcesoAgencia,
+    enProcesoAgenciaDelta: row.incrementoEnProcesoAgencia,
+    enProcesoAgenciaCompareFecha: row.incrementoEnProcesoAgencia != null ? compareFecha : null,
     desembolso: row.desembolso,
-    desembolsoDelta: desembolsoCmp?.delta ?? null,
-    desembolsoCompareFecha: desembolsoCmp?.compareFecha ?? null,
+    desembolsoDelta: row.incrementoDesembolso,
+    desembolsoCompareFecha: row.incrementoDesembolso != null ? compareFecha : null,
     fecha: row.fecha,
   };
 }

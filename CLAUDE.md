@@ -42,6 +42,13 @@ cd worker-v2 && npx wrangler deploy
 ```
 El watchdog re-setea el webhook solo cada 1 min. Re-set manual de webhook + debug de contexto en CF KV: ver `docs/ARCHITECTURE.md`.
 
+**Iterar visualmente una card/imagen sin pasar por Telegram:** script one-off en el scratchpad que
+importa las funciones de fetch+render directo desde `daemon-v2/dist/` (ya compilado) y manda el PNG
+con `SendUserFile` — mucho más rápido que disparar el flujo real de Telegram en cada ajuste de
+diseño. Ojo con las comillas en valores de `apps.env` (`GMAIL_OAUTH_REFRESH_TOKEN_LEPESQUEUR` viene
+con `"..."` literales) — parsear el `.env` a mano sin `dotenv` exige stripearlas o el valor queda
+corrupto.
+
 ## Índice de tools + MCPs
 Implementación y detalle en código (ver "dónde vive qué"). Inventario:
 - **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo) · **mapaBacklogs/leerBacklog/proponerItemBacklog** (leer y escribir los `BACKLOG.md` de los proyectos de Cal — ver sección "Backlogs de proyectos" abajo) · **guardarReferenciaDiseno** (capturar y guardar referencias visuales de diseño en `Personal/Referencias de Diseño/` — ver sección "Referencias de Diseño" abajo).
@@ -538,6 +545,25 @@ Hay dos mecanismos de proactividad independientes:
     - **Tarjeta PNG (2026-07-27), mismo patrón que la de KPIs diarios.** `kpi-card-lending-image.ts` (render, tokens duplicados de `kpi-card-image.ts`) + `kpi-card-lending-daily.ts` (fetch de la fila más reciente/por fecha + envío) — 3 columnas en orden de funnel (Vistos → Derivados Agencia → Desembolsos), incremento vs. **día anterior** como resta simple (no %, a diferencia de la tarjeta de TRX/DAU que muestra %WoW). Se agregó `Incremento Vistos (D-1)` a la DB (mismo patrón D-1 que Desembolso/Derivados) y se backfilleó para los 4 registros existentes. Se dispara sola desde `processLendingMessage()` apenas ingesta con éxito (dedup propio `state.lendingCardSent`, independiente de `state.cardSent` de la tarjeta de KPIs diarios — mismo patrón, arrays separados por dominio). On-demand: tool `mcp__cos-tools__generarKpiCardLending({ fechas? })` (`system-prompt.ts` sección "Tarjeta de KPIs de Yape Lending").
     - **Ancho de columna más angosto que la tarjeta de KPIs diarios** (`valueMaxPx`/`valueMinPx` bajados de 190/110 a 160/70) — 3 columnas en vez de 2, y "Vistos" puede llegar a 6 cifras con separador de miles ("12,129"), mucho más ancho que "85"/"435" — sin bajar el piso de fuente, ese valor desbordaría la columna.
     - **Renombre (2026-07-27, pedido de Cal):** "Vistos"/"No Vistos" → **"Ofertas Vistas"/"Ofertas No Vistas"** en la DB Notion (rename de propiedad vía `ntn api PATCH /v1/databases/{id}` con `{"properties":{"Vistos":{"name":"Ofertas Vistas"}}}` — preserva el `id` de la propiedad y los datos existentes, no es un borrado+alta), en la card, y en el reporte de Telegram; `Incremento Vistos (D-1)` → `Incremento Ofertas Vistas (D-1)`. El heading de la card pasó de "Funnel Lending · Riesgos" a **"Funnel Piloto Lending Híbrido"**. Los identificadores internos en TS (`vistos`, `noVistos`, `incrementoVistos` en `LendingFunnelFields`/`LendingHistoryRow`) NO se tocaron — solo cambiaron los strings de propiedad Notion y los textos visibles (card/Telegram); es deliberado, evita un refactor grande sin beneficio (el nombre interno no es user-facing).
+    - **Card rediseñada a 4 columnas (2026-08-05), delta D-1 estricto en vez de "último dato
+      disponible":** pedido de Cal — `Derivados Agencia → Agencia → En Proceso (Agencia) →
+      Desembolso` (sacó `Ofertas Vistas`). 2 propiedades Notion nuevas (`Incremento Agencia (D-1)`,
+      `Incremento En Proceso (Agencia) (D-1)`), mismo patrón D-1 estricto que las 3 existentes.
+      `kpi-card-lending-daily.ts` dejó de recalcular su propio delta "contra el último dato
+      disponible" (diseño original, documentado arriba) — ahora solo EXPONE los `Incremento X (D-1)`
+      ya calculados en Notion; sin D-1 real el delta sale en blanco (antes toleraba huecos de
+      reporte comparando contra el registro previo más reciente).
+    - **Bug real encontrado el mismo día — derivados D-1 quedaban stale tras un reenvío del
+      reporte con números corregidos:** `fillLendingDerivedFields()` saltaba cualquier
+      `Incremento X (D-1)` que ya tuviera valor, pero el CRUDO del que depende sí cambia en un
+      reenvío (`upsertLendingRow` lo pisa sin condición). Visto en vivo: 2 mails de Lending para el
+      4/ago, el 2do corrigió `Desembolso` 133→147 pero el incremento quedó pegado en 0 en vez de 14.
+      **Fix:** con `onlyFechas` (ingesta puntual o reproceso explícito vía
+      `reprocesarKpisDerivadosYape`) ahora FUERZA el recálculo aunque ya exista un valor; sin
+      `onlyFechas` (modo "reprocesar todo el histórico") sigue sin tocar lo ya calculado, para no
+      barrer toda la DB en cada tick del cron. **Mismo patrón `getExisting != null → skip` existe
+      en `fillDerivedFields()` de `kpi-ingest-notion.ts` (KPIs diarios) — no auditado todavía,
+      podría tener el mismo bug latente si algún día se resuelve reenviar el CSV/PDF corregido.**
 
   - **Reconciliación como fallback de un campo ilegible (2026-07-28) — no solo validación, también reparación acotada.** El 2026-07-27 falló el reporte (`kpi_ingest_lending_parse_failed`, "noContactado: no pude leer el valor tras la label"): Power BI renderizó "NO CONTACTADO" abreviado como `"1K"` en vez del número completo ("1.179") — probablemente por ancho de tarjeta ese día, no una regresión del parser (los otros 14 campos parsearon normal). Como el resto del funnel ya reconciliaba, el valor era deducible sin ambigüedad: `Contactado(1.179)+NoContactado=MeInteresa(2.358)` → 1.179. **Fix:** `deriveMissingField()` en `kpi-ingest-lending-pdf.ts` — si falta EXACTAMENTE UN campo de los 15 y aparece en alguna de las 6 ecuaciones de `FUNNEL_EQUATIONS` (refactorizadas de 6 llamadas `checkSum()` inline a una tabla compartida entre `reconcileLendingFunnel()` y esta función) con todos los demás términos ya conocidos, lo completa por aritmética simple; nunca si faltan 2+, nunca si el resultado da negativo. `parseAndValidateLendingReport()` lo intenta ANTES de rechazar el reporte, y siempre re-verifica con `reconcileLendingFunnel()` que el valor derivado cierre — nunca confía ciegamente en la resta. Se loguea explícito como `kpi_ingest_lending_field_derived` (campo, valor, ecuación) para que quede claro que ese número vino de reconciliación, no de una lectura literal del PDF. Backfill puntual del 2026-07-27 hecho a mano (mismo camino que `upsertLendingRow`/`clearLendingFailNote`/`fillLendingDerivedFields`) — confirmado en Notion (`No Contactado: 1179`, sin nota de fallo). Reviewed por `daemon-health-reviewer`: sin bloqueantes.
 
