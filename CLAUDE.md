@@ -122,10 +122,9 @@ compartidas: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md` y me
   validado a mano contra el `dist/` compilado.
 - **`convertNewlinesToBr` (el fix de `\n`→`<br>` de Rich Messages) se hereda automático** de la
   librería — no hizo falta tocar nada del lado de Jano para eso (mismo mecanismo que Vesta/Pecunia).
-- **Gap conocido, heredado de la librería, no cerrado acá:** `PRESERVE_BLOCK_RE` (en
-  `shared-telegram/src/telegram.ts`) protege `pre|code|ul|ol|table|blockquote` de la conversión de
-  `\n`, pero NO `details`/`summary` — mismo gap documentado en `Vesta/CLAUDE.md`, pendiente de
-  cerrar en la librería compartida (no específico de ningún bot).
+- **Gap de `PRESERVE_BLOCK_RE` — RESUELTO 2026-08-06 en la librería compartida** (commit `c2e4d58`
+  de `shared-telegram`, no específico de Jano): `details` agregado al regex, 2 tests de regresión.
+  Aplica solo en el próximo restart del daemon (dependencia `file:` con symlink, ya recogido acá).
 - **Crons proactivos activos migrados a Rich Messages también (2026-08-06, mismo día, sesión
   aparte):** el reply del modelo (arriba) no cubre a los 6 crons activos — construyen su HTML en
   código, sin pasar por `runAgent()`, así que la migración de arriba no les tocaba nada. Cal vio en
