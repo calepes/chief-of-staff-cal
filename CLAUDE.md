@@ -74,6 +74,62 @@ Cartelera + compra de entradas de los 3 cines de Santa Cruz (**Cinemark** Ventur
 - **Compra real end-to-end VALIDADA** (2026-07-26, Cal la corrió hasta el QR de pago y el código de retiro). Multicine y Cine Center siguen sin compra automatizada (Multicine se frena en un reCAPTCHA v2 del checkout; Cine Center tiene el modo invitado bugueado).
 - **Al mandar el mapa de asientos, mandá TAMBIÉN la lista `butacasLibres`** que devuelve `iniciarCompraCine` (agrupada por fila, ej. `Fila B: B1-B4, B6-B9`). El screenshot NO trae los números de butaca impresos, así que sin esa lista Cal adivina el código y pide asientos que no existen. En salas premier las butacas vienen de a pares pero **cada mitad es independiente**: para 2 personas juntas hay que pedir las dos (`['A1','A2']`). Detalle técnico del parser (dos renderizados según tipo de sala) en `mcp-servers/CLAUDE.md`, fila `cine` — no duplicar acá.
 
+## Telegram Rich Messages (@cal/telegram) — migrado y activado 2026-08-06
+
+Jano fue el 3er (y último) bot migrado a la librería compartida `@cal/telegram`
+(`Personal/Agents/shared-telegram/`, repo propio en `github.com/calepes/shared-telegram`) —
+Vesta y Pecunia ya estaban migrados desde el 2026-08-05. Detalle completo del contexto/decisiones
+compartidas: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md` y memoria
+`project_telegram_rich_messages_shared_lib`.
+
+- **Migración de la librería (mecánica, casi gratis):** `shared-v2/src/telegram.ts` (169 líneas
+  propias) → re-export NOMBRADO de `@cal/telegram` (NO `export *` — `shared-v2/src/types.ts` tiene
+  su propio `TelegramUpdate`, más rico, que chocaría). `shared-v2/package.json` con
+  `"@cal/telegram": "file:../../shared-telegram"`. Cero call sites de `daemon-v2`/`worker-v2`
+  necesitaron cambiar de firma — 799/800 tests sin tocar (1 falla preexistente sin relación,
+  `SDK_SESSIONS_DIR`). Único hallazgo aparte, no relacionado y no tocado: `worker-v2/src/index.ts:27`
+  tiene un error de tipos preexistente con Hono + status `204`. Plan:
+  `docs/superpowers/plans/2026-08-05-jano-cal-telegram-migration.md`.
+- **Rich Messages activado el mismo día, sesión separada** (mismo patrón que Vesta/Pecunia:
+  "migrar la librería" y "activar Rich Messages" van en dos tandas). `system-prompt.ts` gana una
+  sección nueva "## Rich Messages (formato enriquecido)" con la política **"diseño activo, no
+  reactivo"** (headings/listas/tablas son la herramienta por defecto cuando el contenido tiene esa
+  forma, no un lujo ocasional) — mismo texto base que Vesta, adaptado a la voz de Jano. La regla
+  preexistente de "dato repetitivo denso" (agrupar en vez de `·` corrido) ahora prefiere `<table>`
+  real en vez del agrupamiento por línea. El bloque SCQA/STORYLINE de PPT (sección "wizard de
+  slides") se dejó explícitamente con `<pre>` — es contenido para copiar tal cual, no dato a
+  formatear.
+- **`daemon-v2/src/index.ts` — el único call site del reply libre del modelo** (a diferencia de
+  Vesta, que tiene 3: normal/menu_action/callback legacy — Jano solo llama `runAgent()` una vez)
+  pasa a `editRichMessage` con fallback de 3 niveles (rich → HTML clásico con chunking de 4096 →
+  texto plano vía `stripHtmlTags`), logueando `rich_message_failed`/`html_parse_failed` en cada
+  nivel. El chunking (`chunkText`, límite 4096) solo corre DENTRO del fallback — Rich Messages
+  soporta 32.768 chars, así que el caso común (bajo ese límite) no trocea nada. Mismo tratamiento
+  en la rama de fallback de TTS (cuando ElevenLabs falla y se manda como texto). Los 3 crons
+  proactivos que llaman `runAgent()` (`flight-checkin`, `foco-check`, `fuel-alert`) están
+  **desactivados** (ver "Automatización — dos capas" más abajo) — no se tocaron, quedan con
+  `sendMessage`/`editMessage` clásico si algún día se reactivan.
+- **`stripHtmlTags` nueva en `index.ts`** (Jano no tenía una — Vesta/Pecunia sí): copia del
+  hardening que se encontró primero en Vesta (2026-08-05) — inserta `\n`/`•`/` · ` en los bordes de
+  bloque (`h1`-`h6`, `tr`, `li`, `details`/`summary`, `table`/`ul`/`ol`) antes de despojar el resto
+  de las tags, para que un texto plano de emergencia (Rich Messages Y HTML clásico fallaron los
+  dos) no quede pegado e ilegible (ej. una fila de tabla como "Formato2D14:00...").
+- **`format.ts` → `convertMarkdownTables` — mismo bonus fix que Pecunia:** el safety net de
+  Markdown (por si el modelo genera `| col | col |` pese a la instrucción) pasó de emitir `<pre>`
+  con columnas alineadas a mano a emitir `<table>` real. Como las celdas dejan de estar dentro de
+  un `<pre>`, el pase de bold que corre después (`**texto**` → `<b>texto</b>`) ahora SÍ convierte
+  contenido dentro de una celda — antes quedaba literal. Sin test propio (no existía antes);
+  validado a mano contra el `dist/` compilado.
+- **`convertNewlinesToBr` (el fix de `\n`→`<br>` de Rich Messages) se hereda automático** de la
+  librería — no hizo falta tocar nada del lado de Jano para eso (mismo mecanismo que Vesta/Pecunia).
+- **Gap conocido, heredado de la librería, no cerrado acá:** `PRESERVE_BLOCK_RE` (en
+  `shared-telegram/src/telegram.ts`) protege `pre|code|ul|ol|table|blockquote` de la conversión de
+  `\n`, pero NO `details`/`summary` — mismo gap documentado en `Vesta/CLAUDE.md`, pendiente de
+  cerrar en la librería compartida (no específico de ningún bot).
+- Daemon reiniciado en producción con confirmación explícita de Cal, arranque limpio verificado en
+  logs, prueba real por Telegram confirmada ("respondió como antes" en el primer restart de la
+  migración de librería; formato enriquecido a validar con uso real tras activarse).
+
 ## .env / secrets — carga en runtime
 Fuente: `daemon-v2/src/index.ts`.
 1. **dotenv first-wins:** `~/.cos-agent/.env` PRIMERO → `~/.claude/secrets/apps.env`. No-override → el del agente pisa al compartido.

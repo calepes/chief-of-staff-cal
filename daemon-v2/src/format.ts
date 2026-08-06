@@ -48,19 +48,11 @@ function convertMarkdownTables(text: string): string {
 
     if (headers.length === 0) return match;
 
-    const colWidths = headers.map((h, i) => {
-      const dataMax = rows.reduce((mx, r) => Math.max(mx, (r[i] ?? '').length), 0);
-      return Math.max(h.length, dataMax, 3);
-    });
-
-    const pad = (s: string, w: number) => s + ' '.repeat(Math.max(0, w - s.length));
-
-    const headerRow = headers.map((h, i) => pad(h, colWidths[i])).join('  ');
-    const separator = colWidths.map(w => '─'.repeat(w)).join('  ');
-    const dataRows = rows.map(r =>
-      headers.map((_, i) => pad(r[i] ?? '', colWidths[i])).join('  ')
+    const headerCells = headers.map(h => `<th>${h}</th>`).join('');
+    const dataRows = rows.map(
+      r => `<tr>${headers.map((_, i) => `<td>${r[i] ?? ''}</td>`).join('')}</tr>`,
     );
 
-    return `\n<pre>${[headerRow, separator, ...dataRows].join('\n')}</pre>\n`;
+    return `\n<table><tr>${headerCells}</tr>${dataRows.join('')}</table>\n`;
   });
 }

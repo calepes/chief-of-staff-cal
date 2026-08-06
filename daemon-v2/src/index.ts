@@ -16,7 +16,7 @@ import { CfKv, tryAcquireLock, releaseLock } from "./cf-kv.js";
 import { ConversationState } from "./state.js";
 import { clearSessionId, loadSessionId, saveSessionId } from "./session-store.js";
 import { defaultEffort, effortForMessage } from "./effort.js";
-import { sendMessage, editMessage, editMessageReplyMarkup, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
+import { sendMessage, editMessage, editRichMessage, editMessageReplyMarkup, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
@@ -158,6 +158,29 @@ function chunkText(text: string, maxLen = TG_MAX): string[] {
     rem = rem.slice(cut).trimStart();
   }
   return chunks.filter(Boolean);
+}
+
+// Fallback cuando Rich Messages Y el HTML clásico fallan los dos (rechazo de Telegram, tag mal
+// formada, etc.) — sin esto, reenviar el texto tal cual deja tags <b>/<i>/<table>/etc. crudas
+// visibles para Cal en vez de texto plano legible. Las tags de Rich Messages (h1-h6/ul/ol/table/
+// details/summary) no las soporta el HTML clásico ni el texto plano — insertamos saltos de
+// línea/separadores en los bordes de bloque ANTES de despojar el resto, para que el resultado
+// siga siendo legible (ej. una fila de tabla no queda pegada como "FormatoHorario2D14:00").
+function stripHtmlTags(html: string): string {
+  const withBreaks = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(h1|h2|h3|h4|h5|h6|p|div|tr|li|details|summary)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<\/(td|th)>/gi, " · ")
+    .replace(/<\/?(table|ul|ol)[^>]*>/gi, "\n");
+  return withBreaks
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**
@@ -1490,17 +1513,22 @@ async function processMessage(
           log({ msg: "tts_sent", chatId, replyLen: reply.length, chunks: oggs.length });
         } catch (ttsErr) {
           log({ msg: "tts_error", chatId, err: String(ttsErr) });
-          const textChunks = chunkText(reply);
-          for (let i = 0; i < textChunks.length; i++) {
-            const chunk = textChunks[i];
-            if (i === 0) {
-              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML").catch(() =>
-                editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null),
-              );
-            } else {
-              await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk, parseMode: "HTML" }).catch(() =>
-                sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk }).catch(() => {}),
-              );
+          try {
+            await editRichMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply);
+          } catch (richErr) {
+            log({ msg: "rich_message_failed", chatId, err: String(richErr) });
+            const textChunks = chunkText(reply);
+            for (let i = 0; i < textChunks.length; i++) {
+              const chunk = textChunks[i];
+              if (i === 0) {
+                await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML").catch(() =>
+                  editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, stripHtmlTags(chunk), null),
+                );
+              } else {
+                await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk, parseMode: "HTML" }).catch(() =>
+                  sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: stripHtmlTags(chunk) }).catch(() => {}),
+                );
+              }
             }
           }
         }
@@ -1508,25 +1536,30 @@ async function processMessage(
         // LLM devolvió vacío — las tools ya manejaron el output (showMeetingCards, buildApprovalFlow, etc.)
         await deleteMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId).catch(() => {});
       } else {
-        const chunks = chunkText(reply);
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          if (i === 0) {
-            try {
-              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML", clearMarkup);
-            } catch (parseErr) {
-              log({ msg: "html_parse_failed", err: String(parseErr) });
-              // Fallback: reintentar sin HTML; si el mensaje tampoco se puede editar (p.ej. tiene
-              // reply keyboard o fue borrado), entregar como mensaje nuevo en vez de romper el turno.
-              await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, null, clearMarkup).catch(() =>
-                sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk }).catch(() => {}),
-              );
-            }
-          } else {
-            try {
-              await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk, parseMode: "HTML" });
-            } catch {
-              await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk }).catch(() => {});
+        try {
+          await editRichMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, reply, clearMarkup);
+        } catch (richErr) {
+          log({ msg: "rich_message_failed", chatId, err: String(richErr) });
+          const chunks = chunkText(reply);
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            if (i === 0) {
+              try {
+                await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, chunk, "HTML", clearMarkup);
+              } catch (parseErr) {
+                log({ msg: "html_parse_failed", err: String(parseErr) });
+                // Fallback: reintentar sin HTML; si el mensaje tampoco se puede editar (p.ej. tiene
+                // reply keyboard o fue borrado), entregar como mensaje nuevo en vez de romper el turno.
+                await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, stripHtmlTags(chunk), null, clearMarkup).catch(() =>
+                  sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: stripHtmlTags(chunk) }).catch(() => {}),
+                );
+              }
+            } else {
+              try {
+                await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: chunk, parseMode: "HTML" });
+              } catch {
+                await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, { chatId, text: stripHtmlTags(chunk) }).catch(() => {});
+              }
             }
           }
         }
