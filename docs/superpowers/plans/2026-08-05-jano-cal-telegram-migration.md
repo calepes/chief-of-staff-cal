@@ -1,6 +1,6 @@
 # Migrar Jano a `@cal/telegram` Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Reemplazar la implementación propia de `shared-v2/src/telegram.ts` (paquete interno
 `@cos/shared`) por un re-export de `@cal/telegram`, sin romper ningún call site — a diferencia de
@@ -24,7 +24,7 @@ ejecutar, tiene el detalle de por qué se espera 0 breaking changes y los 2 ries
 
 **Files:** ninguno (solo verificación)
 
-- [ ] **Step 1: Confirmar git status limpio (o anotar WIP ajeno a no tocar)**
+- [x] **Step 1: Confirmar git status limpio (o anotar WIP ajeno a no tocar)**
 
 Run: `git status`
 Expected (ya verificado al escribir este plan): WIP ajeno sin commitear en `BACKLOG.md`,
@@ -33,7 +33,7 @@ sesión previa) y los archivos de `proactive/kpi-card-lending-*`/`kpi-lending-no
 Lending, otra sesión). Ninguno de estos toca `@cos/shared` — no tocar ni commitear junto con esta
 migración.
 
-- [ ] **Step 2: Baseline de tests**
+- [x] **Step 2: Baseline de tests**
 
 Run: `npx vitest run --root daemon-v2 2>&1 | tail -10` y `npx vitest run --root worker-v2 2>&1 | tail -10`
 Expected: `daemon-v2` → **799 tests passed, 1 failed** (el fallo es
@@ -41,7 +41,7 @@ Expected: `daemon-v2` → **799 tests passed, 1 failed** (el fallo es
 relacionado con Telegram — no confundir con una regresión de esta migración). `worker-v2` → **2/2
 passed**.
 
-- [ ] **Step 3: Confirmar build de `shared-telegram`**
+- [x] **Step 3: Confirmar build de `shared-telegram`**
 
 Run: `cd "/Users/calepes/Claude Projects/Personal/Agents/shared-telegram" && npm run build`
 Expected: build limpio (ya debería estarlo, migrado hoy para Vesta y Pecunia).
@@ -54,7 +54,7 @@ Expected: build limpio (ya debería estarlo, migrado hoy para Vesta y Pecunia).
 - Modify: `shared-v2/package.json`
 - Modify: `shared-v2/src/telegram.ts`
 
-- [ ] **Step 1: Agregar la dependencia**
+- [x] **Step 1: Agregar la dependencia**
 
 En `shared-v2/package.json`, agregar `dependencies` (crear la clave si no existe):
 
@@ -70,7 +70,7 @@ En `shared-v2/package.json`, agregar `dependencies` (crear la clave si no existe
 `shared-telegram/`. Un nivel MENOS que en Pecunia, porque `shared-v2` cuelga directo de `Jano/`, no
 de un subdirectorio como `Pecunia/pecunia-agent/shared/`.)
 
-- [ ] **Step 2: Reemplazar la implementación por el re-export nombrado**
+- [x] **Step 2: Reemplazar la implementación por el re-export nombrado**
 
 Reemplazar TODO el contenido de `shared-v2/src/telegram.ts` (169 líneas) por:
 
@@ -115,7 +115,7 @@ export type {
 `shared-v2/src/index.ts` (`export * from "./types.js"; export * from "./telegram.js";`) debe seguir
 resolviendo un solo `TelegramUpdate` (el de `types.ts`).
 
-- [ ] **Step 3: Instalar y buildear**
+- [x] **Step 3: Instalar y buildear**
 
 Run:
 ```bash
@@ -126,7 +126,7 @@ npm -w @cos/shared run build
 Expected: instala el symlink `file:` y compila `shared-v2/dist/telegram.d.ts` con los tipos de
 `@cal/telegram` re-exportados.
 
-- [ ] **Step 4: Typecheck completo — confirmar (no asumir) que da 0 errores**
+- [x] **Step 4: Typecheck completo — confirmar (no asumir) que da 0 errores**
 
 Run:
 ```bash
@@ -137,7 +137,7 @@ Expected: **0 errores en ambos.** Si aparece algún error, es la señal de que a
 necesita ajuste pese al análisis de la spec — en ese caso, tratarlo igual que un archivo de
 Pecunia (leer el error real, aplicar el fix mínimo, no asumir el patrón de otro repo).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared-v2/package.json shared-v2/src/telegram.ts package-lock.json
@@ -150,9 +150,9 @@ git commit -m "chore(shared-v2): re-export nombrado de @cal/telegram desde share
 
 **Files:** los que indique la salida real de `tsc` de la Task 1 — NO asumir de antemano cuáles.
 
-- [ ] **Step 1: Si Task 1 dio 0 errores, marcar esta task como N/A y saltar a la Task 3.**
+- [x] **Step 1: Si Task 1 dio 0 errores, marcar esta task como N/A y saltar a la Task 3.**
 
-- [ ] **Step 2 (solo si hubo errores): aplicar el fix mínimo por archivo, uno a la vez**
+- [x] **Step 2 (solo si hubo errores): aplicar el fix mínimo por archivo, uno a la vez**
 
 Mismo patrón que Pecunia: leer el error real de `tsc`, identificar si es un caso ya cubierto por la
 spec (ninguno debería serlo, dado el análisis) o un caso nuevo, aplicar el cambio mínimo, volver a
@@ -164,26 +164,26 @@ correr `tsc` para ese archivo, confirmar 0 errores, commitear por archivo.
 
 **Files:** ninguno (solo verificación)
 
-- [ ] **Step 1: Typecheck de todo el workspace**
+- [x] **Step 1: Typecheck de todo el workspace**
 
 Run: `npm run typecheck` (raíz del repo — corre `-ws --if-present`)
 Expected: 0 errores en `daemon-v2`, `worker-v2`, `shared-v2`.
 
-- [ ] **Step 2: Build completo**
+- [x] **Step 2: Build completo**
 
 Run: `npm run build`
 Expected: build limpio (`shared-v2/dist` + `daemon-v2/dist` regenerados y consistentes entre sí —
 mismo gotcha que Pecunia: el daemon importa de `shared-v2/dist`, un build salteado da
 `ERR_MODULE_NOT_FOUND` silencioso post-restart).
 
-- [ ] **Step 3: Test suite completo**
+- [x] **Step 3: Test suite completo**
 
 Run: `npx vitest run --root daemon-v2 2>&1 | tail -15` y `npx vitest run --root worker-v2 2>&1 | tail -10`
 Expected: `daemon-v2` → **799 passed, 1 failed** (el mismo `SDK_SESSIONS_DIR` preexistente de la
 Task 0 — CONFIRMAR que es el mismo test y no uno nuevo). `worker-v2` → **2/2 passed**. Ningún test
 nuevo en rojo.
 
-- [ ] **Step 4: Grep de residuos de la firma vieja / doble-check de `TelegramUpdate`**
+- [x] **Step 4: Grep de residuos de la firma vieja / doble-check de `TelegramUpdate`**
 
 Run:
 ```bash
@@ -200,21 +200,21 @@ genérico en vez del nombrado del Step 2 de la Task 1.
 **No ejecutar este task sin que Cal lo apruebe explícitamente en el momento** — reiniciar el daemon
 de producción es una acción con impacto real en el bot que Cal usa a diario.
 
-- [ ] **Step 1: Mostrar a Cal el resumen de los commits + pedir confirmación para el restart**
+- [x] **Step 1: Mostrar a Cal el resumen de los commits + pedir confirmación para el restart**
 
-- [ ] **Step 2 (tras el OK de Cal): Restart daemon**
+- [x] **Step 2 (tras el OK de Cal): Restart daemon**
 
 ```bash
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
 ```
 
-- [ ] **Step 3: Verificar boot limpio**
+- [x] **Step 3: Verificar boot limpio**
 
 Run: `tail -30 ~/Library/Logs/cos-agent-v2.out.log` y `tail -30 ~/Library/Logs/cos-agent-v2.err.log`
 Expected: arranque sin errores nuevos, sin `ERR_MODULE_NOT_FOUND`.
 
-- [ ] **Step 4: Prueba en vivo — pedirle a Cal un mensaje de prueba real**
+- [x] **Step 4: Prueba en vivo — pedirle a Cal un mensaje de prueba real**
 
 Confirmar que un mensaje de texto simple (ej. una consulta a Things o un saludo) responde bien
 formateado (HTML, sin tags crudos), y si es fácil de probar en el momento, un mensaje de voz (para
@@ -222,7 +222,7 @@ tocar el `sendVoice` recién arreglado) y un callback de algún menú (para toca
 `answerCallbackQuery`/`editMessage`). Sin esto, el plan no se considera terminado — los tests no
 cubren el render real de Telegram.
 
-- [ ] **Step 5 (solo si `worker-v2` tuvo cambios reales en la Task 2): Deploy del worker**
+- [x] **Step 5 (solo si `worker-v2` tuvo cambios reales en la Task 2): Deploy del worker**
 
 ```bash
 cd worker-v2 && npx wrangler deploy
