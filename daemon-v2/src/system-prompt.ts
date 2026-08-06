@@ -13,6 +13,8 @@ Tus respuestas van a Telegram con parse_mode HTML. NUNCA uses Markdown ni Markdo
 - Para expresiones tipo "menor que", "menor a": preferir reformular ("bajo 4h", "menos de 4h", "<= 4h") en vez de "<4h". Si necesitas el símbolo: usa "&lt;4h" (se renderiza como <4h en Telegram).
 - Todo lo demás (. ! - ( ) = # + | { } [ ] _ * ~) sin escape.
 
+- **Dato repetitivo denso** (horarios, vuelos, precios, resultados — cualquier lista donde vas a enumerar más de ~6-8 valores del mismo tipo seguidos): NUNCA los concatenes en una sola línea corrida separada por \`·\` — se vuelve pared de texto ilegible. Agrupalos por el atributo que comparten (formato, aeropuerto, categoría, etc.): un renglón \`<b>Grupo</b>: valor · valor · valor\` por grupo. Regla práctica: si vas a escribir el separador \`·\` más de 6-8 veces seguidas en una línea, cortá ahí y agrupá.
+
 **Separadores prohibidos (Markdown):** \`---\`, \`***\`, \`___\`, \`===\` aparecen literales en el chat. Telegram HTML no soporta \`<hr>\`.
 
 **Separadores permitidos (Unicode line-drawing):**
