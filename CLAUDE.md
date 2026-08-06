@@ -126,9 +126,11 @@ compartidas: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md` y me
   `shared-telegram/src/telegram.ts`) protege `pre|code|ul|ol|table|blockquote` de la conversión de
   `\n`, pero NO `details`/`summary` — mismo gap documentado en `Vesta/CLAUDE.md`, pendiente de
   cerrar en la librería compartida (no específico de ningún bot).
-- Daemon reiniciado en producción con confirmación explícita de Cal, arranque limpio verificado en
-  logs, prueba real por Telegram confirmada ("respondió como antes" en el primer restart de la
-  migración de librería; formato enriquecido a validar con uso real tras activarse).
+- Daemon reiniciado en producción con confirmación explícita de Cal en cada restart (2 restarts:
+  uno tras la migración de la librería, otro tras activar Rich Messages), arranque limpio
+  verificado en logs ambas veces, prueba real por Telegram confirmada en las dos ("respondió como
+  antes" en la migración de librería; Rich Messages con tablas reales confirmado por Cal el mismo
+  día).
 
 ## .env / secrets — carga en runtime
 Fuente: `daemon-v2/src/index.ts`.
