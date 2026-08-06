@@ -1,5 +1,5 @@
 import type { CfKv } from "../cf-kv.js";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 
 const STATUS_URL = "https://health.carlos-cb4.workers.dev/status";
 const TIMEOUT_MS = 8000;
@@ -50,15 +50,10 @@ export async function checkHealthSync(opts: HealthSyncCheckOpts): Promise<void> 
 
       let sent = false;
       try {
-        await sendMessage(botToken, { chatId, text, parseMode: "HTML" });
+        await sendCronMessage(botToken, { chatId, text });
         sent = true;
-      } catch {
-        try {
-          await sendMessage(botToken, { chatId, text });
-          sent = true;
-        } catch (err) {
-          console.log(JSON.stringify({ ts: Date.now(), msg: "health_sync_alert_send_failed", err: String(err) }));
-        }
+      } catch (err) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "health_sync_alert_send_failed", err: String(err) }));
       }
 
       // Solo marcar "ya avisado" si el mensaje realmente salió — si Telegram falló,

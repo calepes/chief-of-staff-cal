@@ -249,18 +249,18 @@ describe("formatPdfSuccessReport", () => {
 
     expect(text).toContain("Seguimiento Diario");
     expect(text).toContain("📅 <b>2026-07-22</b> (actualizado)");
-    expect(text).toContain("👥 Afiliaciones diarias: <b>4,977</b>");
-    expect(text).toContain("▲ +0.4% día · ▲ +7.1% sem.");
-    expect(text).toContain("🔁 TRX: <b>3,759,966</b>");
-    expect(text).toContain("▲ +0.8% día · ▼ -10.3% sem.");
-    expect(text).toContain("🔁 TRX Promedio 7d: <b>3,909,550</b>");
-    expect(text).toContain("📊 Activos DAU: <b>1,150,676</b>");
-    expect(text).toContain("▲ +0.1% día · ▼ -3.3% sem.");
+    // Tabla real (Rich Messages), no líneas sueltas — datos comparables métrica × día/semana.
+    expect(text).toContain("<table>");
+    expect(text).toContain("<th>Métrica</th><th>Valor</th><th>Día</th><th>Sem.</th>");
+    expect(text).toContain("<tr><td>👥 Afiliaciones diarias</td><td><b>4,977</b></td><td>▲ +0.4%</td><td>▲ +7.1%</td></tr>");
+    expect(text).toContain("<tr><td>🔁 TRX</td><td><b>3,759,966</b></td><td>▲ +0.8%</td><td>▼ -10.3%</td></tr>");
+    expect(text).toContain("<tr><td>🔁 TRX Promedio 7d</td><td><b>3,909,550</b></td><td>—</td><td>—</td></tr>");
+    expect(text).toContain("<tr><td>📊 Activos DAU</td><td><b>1,150,676</b></td><td>▲ +0.1%</td><td>▼ -3.3%</td></tr>");
     // Sin derivados pendientes la sección entera se omite (antes imprimía "• nada pendiente").
     expect(text).not.toContain("Derivados");
   });
 
-  it("omite líneas de campos que vinieron null (PDF parcial)", () => {
+  it("omite filas de campos que vinieron null (PDF parcial)", () => {
     const text = formatPdfSuccessReport(
       "2026-07-22",
       emptyPdfKpis({ trx: 100 }),
@@ -268,12 +268,12 @@ describe("formatPdfSuccessReport", () => {
       { completados: [], noCalculables: [] },
     );
 
-    expect(text).toContain("🔁 TRX: <b>100</b>");
+    expect(text).toContain("<tr><td>🔁 TRX</td><td><b>100</b></td><td>—</td><td>—</td></tr>");
     expect(text).not.toContain("Afiliaciones diarias");
     expect(text).not.toContain("Activos DAU");
   });
 
-  it("no muestra sufijo de tendencia si no hay % disponible", () => {
+  it("muestra — en vez de tendencia si no hay % disponible", () => {
     const text = formatPdfSuccessReport(
       "2026-07-22",
       emptyPdfKpis({ afiliados7d: 4844 }),
@@ -281,9 +281,19 @@ describe("formatPdfSuccessReport", () => {
       { completados: [], noCalculables: [] },
     );
 
-    expect(text).toContain("👥 Afiliados 7d: <b>4,844</b>");
-    expect(text).not.toContain("día");
-    expect(text).not.toContain("sem.");
+    expect(text).toContain("<tr><td>👥 Afiliados 7d</td><td><b>4,844</b></td><td>—</td><td>—</td></tr>");
+  });
+
+  it("no manda tabla si ningún campo vino (todo null)", () => {
+    const text = formatPdfSuccessReport(
+      "2026-07-22",
+      emptyPdfKpis({}),
+      { fecha: "2026-07-22", created: true, fieldsWritten: [] },
+      { completados: [], noCalculables: [] },
+    );
+
+    expect(text).not.toContain("<table>");
+    expect(text).toContain("sin campos");
   });
 });
 
@@ -319,7 +329,7 @@ vi.mock("./kpi-lending-notion.js", async (importOriginal) => {
     fillLendingDerivedFields: vi.fn(),
   };
 });
-vi.mock("@cos/shared", () => ({ sendMessage: vi.fn(async () => ({ message_id: 1 })) }));
+vi.mock("./rich-send.js", () => ({ sendCronMessage: vi.fn(async () => ({ message_id: 1 })) }));
 vi.mock("./kpi-card-daily.js", () => ({ checkKpiCardDaily: vi.fn() }));
 vi.mock("./kpi-card-lending-daily.js", () => ({ checkKpiCardLending: vi.fn() }));
 
@@ -337,7 +347,7 @@ import {
 } from "./kpi-ingest-gmail.js";
 import { upsertKpiRow, fillDerivedFields, markPdfReportFailed, clearPdfFailNote } from "./kpi-ingest-notion.js";
 import { upsertLendingRow, markLendingReportFailed, clearLendingFailNote, fillLendingDerivedFields } from "./kpi-lending-notion.js";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import { checkKpiCardDaily } from "./kpi-card-daily.js";
 import { checkKpiCardLending } from "./kpi-card-lending-daily.js";
 import { checkKpiIngest } from "./kpi-ingest-check.js";
@@ -396,7 +406,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     expect(upsertKpiRow).toHaveBeenCalledWith("n", "2026-07-20", expect.objectContaining({ Saldo: 100 }));
     // Solo la fecha recién tocada — no recalcula todo el histórico en cada corrida.
     expect(fillDerivedFields).toHaveBeenCalledWith("n", ["2026-07-20"]);
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
     expect(state.pending.m1).toBeUndefined();
@@ -451,8 +461,8 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
 
     await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("sin ningún CSV");
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
@@ -474,7 +484,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
 
     await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
   });
 
   it("no rompe el poll completo si falla la búsqueda en Gmail", async () => {
@@ -560,7 +570,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
     expect(archiveAndMarkRead).toHaveBeenCalledWith("m1", "atok");
     // La tarjeta se dispara sola apenas el PDF escribe con éxito — ya no espera el cron de 10:00.
     expect(checkKpiCardDaily).toHaveBeenCalledWith({ botToken: "t", chatId: 1, notionToken: "n", fecha: "2026-07-22" });
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
     expect(state.cardSent).toEqual(["2026-07-22"]);
@@ -621,7 +631,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       pdfTextExtractor: async () => REAL_PDF_TEXT,
     });
 
-    expect(sendMessage).toHaveBeenCalledTimes(1); // el reporte de ingesta sí salió
+    expect(sendCronMessage).toHaveBeenCalledTimes(1); // el reporte de ingesta sí salió
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
     expect(state.cardSent).toEqual([]); // no se marca si tiró excepción — queda para reintentar
@@ -650,7 +660,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
     expect(upsertKpiRow).not.toHaveBeenCalled();
     expect(markPdfReportFailed).toHaveBeenCalledWith("n", "2026-07-22");
     expect(archiveAndMarkRead).not.toHaveBeenCalled();
-    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("fallido");
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1"); // no se reintenta este mismo mail — el reintento llega como OTRO mail
@@ -668,7 +678,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
 
     await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
 
-    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("sin ningún PDF");
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
@@ -697,7 +707,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       pdfTextExtractor: async () => REAL_PDF_TEXT,
     });
 
-    expect(sendMessage).toHaveBeenCalledTimes(1); // el reporte de éxito sí sale
+    expect(sendCronMessage).toHaveBeenCalledTimes(1); // el reporte de éxito sí sale
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
   });
@@ -763,7 +773,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
     expect(upsertKpiRow).toHaveBeenCalledTimes(2);
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toEqual(expect.arrayContaining(["csvMsg", "pdfMsg"]));
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendCronMessage).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -812,7 +822,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
     expect(fillLendingDerivedFields).toHaveBeenCalledWith("n", ["2026-07-26"]);
     expect(markLendingReportFailed).not.toHaveBeenCalled();
     expect(checkKpiCardLending).toHaveBeenCalledWith({ botToken: "t", chatId: 1, notionToken: "n", fecha: "2026-07-26" });
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
     expect(state.lendingCardSent).toEqual(["2026-07-26"]);
@@ -881,7 +891,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
       pdfTextExtractor: async () => REAL_LENDING_PDF_TEXT,
     });
 
-    expect(sendMessage).toHaveBeenCalledTimes(1); // el reporte de ingesta sí salió
+    expect(sendCronMessage).toHaveBeenCalledTimes(1); // el reporte de ingesta sí salió
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
     expect(state.lendingCardSent).toEqual([]); // no se marca si tiró excepción — queda para reintentar
@@ -899,8 +909,8 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
 
     await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("sin ningún PDF");
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
@@ -926,8 +936,8 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
     expect(upsertLendingRow).not.toHaveBeenCalled();
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).not.toContain("m1");
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("cierre de la jornada");
   });
 
@@ -959,8 +969,8 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
 
     expect(upsertLendingRow).not.toHaveBeenCalled();
     expect(markLendingReportFailed).toHaveBeenCalledWith("n", "2026-07-26", expect.any(String));
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("reporte fallido");
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
@@ -982,6 +992,6 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
 
     await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
   });
 });

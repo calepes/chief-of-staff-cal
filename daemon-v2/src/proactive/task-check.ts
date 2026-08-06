@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import { nowInLaPaz } from "../journal-capture.js";
 import {
   gmailAccessToken,
@@ -326,12 +326,7 @@ async function proposeCard(
   const card = renderProposal(proposal, { pendientes, proposalId });
 
   try {
-    await sendMessage(opts.botToken, {
-      chatId: opts.chatId,
-      text: card.text,
-      parseMode: "HTML",
-      replyMarkup: card.keyboard,
-    });
+    await sendCronMessage(opts.botToken, { chatId: opts.chatId, text: card.text, replyMarkup: card.keyboard });
   } catch (err) {
     // El ítem queda en la cola (con su propuesta ya sintetizada anotada) y se reintenta en el
     // próximo tick. Se corta acá, sin seguir con el resto de la cola: si Telegram no responde,
@@ -704,7 +699,7 @@ async function notifyError(id: string, err: unknown, opts: CheckTaskEmailsOpts):
 
 async function sendReport(botToken: string, chatId: number, text: string): Promise<void> {
   try {
-    await sendMessage(botToken, { chatId, text, parseMode: "HTML" });
+    await sendCronMessage(botToken, { chatId, text });
   } catch (err) {
     console.error(JSON.stringify({ ts: Date.now(), msg: "task_report_send_failed", err: String(err) }));
   }

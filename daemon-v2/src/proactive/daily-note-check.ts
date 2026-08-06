@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import { gmailAccessToken, searchDailyNoteEmails, getGmailMessage, type GmailCreds } from "./kpi-ingest-gmail.js";
 import { hasDnTag, stripDnTag, htmlToMarkdown, createDailyNotePage } from "./daily-note-ingest.js";
 import { nowInLaPaz } from "../journal-capture.js";
@@ -151,7 +151,7 @@ function markProcessed(state: DailyNoteState, id: string): void {
 
 async function sendReport(botToken: string, chatId: number, text: string): Promise<void> {
   try {
-    await sendMessage(botToken, { chatId, text, parseMode: "HTML" });
+    await sendCronMessage(botToken, { chatId, text });
   } catch (err) {
     console.error(JSON.stringify({ ts: Date.now(), msg: "daily_note_report_send_failed", err: String(err) }));
   }

@@ -1,7 +1,7 @@
 // proactive/journal-sweep.ts — barrido dominical de entradas `Sin revisar`.
 // Tercera excepción a la arquitectura reactiva de Jano (decisión de Cal, 2026-07-27).
 
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import type { CfKv } from "../cf-kv.js";
 import { renderSweepSelector } from "../journal-card.js";
 import { nowInLaPaz } from "../journal-capture.js";
@@ -39,12 +39,7 @@ export async function checkJournalSweep(opts: SweepOpts): Promise<void> {
     }
 
     const card = renderSweepSelector(pendientes);
-    await sendMessage(botToken, {
-      chatId,
-      text: card.text,
-      parseMode: "HTML",
-      replyMarkup: card.keyboard,
-    });
+    await sendCronMessage(botToken, { chatId, text: card.text, replyMarkup: card.keyboard });
     await kv.set(dedupKey, true, DEDUP_TTL_SEC);
     log({ msg: "journal_sweep_sent", pendientes: pendientes.length });
   } catch (err) {

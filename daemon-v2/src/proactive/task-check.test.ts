@@ -21,7 +21,7 @@ vi.mock("./task-notion.js", async (importOriginal) => {
     uploadAttachmentToNotion: vi.fn(async () => "upload-1"),
   };
 });
-vi.mock("@cos/shared", () => ({ sendMessage: vi.fn(async () => ({ message_id: 1 })) }));
+vi.mock("./rich-send.js", () => ({ sendCronMessage: vi.fn(async () => ({ message_id: 1 })) }));
 
 import {
   searchTaskEmails,
@@ -31,7 +31,7 @@ import {
 } from "./kpi-ingest-gmail.js";
 import { extractTaskFields } from "./task-extract.js";
 import { createTaskPage, appendTaskFollowup, notifyMissingDate, uploadAttachmentToNotion } from "./task-notion.js";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import {
   advanceTaskQueue,
   checkTaskEmails,
@@ -126,9 +126,9 @@ describe("checkTaskEmails — propuesta, no creación", () => {
 
     expect(createTaskPage).not.toHaveBeenCalled();
     expect(archiveAndMarkRead).not.toHaveBeenCalled();
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
 
-    const [, msg] = vi.mocked(sendMessage).mock.calls[0] as any;
+    const [, msg] = vi.mocked(sendCronMessage).mock.calls[0] as any;
     expect(msg.text).toContain("Tarea propuesta");
     expect(msg.text).toContain("Revisar contrato con proveedor");
     expect(msg.replyMarkup.inline_keyboard[0][0].text).toBe("✅ Crear tarea");
@@ -147,12 +147,12 @@ describe("checkTaskEmails — propuesta, no creación", () => {
 
     await checkTaskEmails(opts());
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
     const state = readTaskCheckState(statePath);
     expect(state.active?.item.messageId).toBe("m1");
     expect(state.queue.map((q) => q.messageId)).toEqual(["m2", "m3"]);
 
-    const [, msg] = vi.mocked(sendMessage).mock.calls[0] as any;
+    const [, msg] = vi.mocked(sendCronMessage).mock.calls[0] as any;
     expect(msg.text).toContain("Quedan 2 en la cola");
   });
 
@@ -162,12 +162,12 @@ describe("checkTaskEmails — propuesta, no creación", () => {
       mail({ id, threadId: `thread-${id}` }) as any,
     );
     await checkTaskEmails(opts());
-    vi.mocked(sendMessage).mockClear();
+    vi.mocked(sendCronMessage).mockClear();
 
     vi.mocked(searchTaskEmails).mockResolvedValue([{ id: "m1" }, { id: "m2" }] as any);
     await checkTaskEmails(opts());
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
     expect(readTaskCheckState(statePath).queue.map((q) => q.messageId)).toEqual(["m2"]);
   });
 
@@ -195,7 +195,7 @@ describe("checkTaskEmails — propuesta, no creación", () => {
 
     const p = [...store.proposals.values()][0]!;
     expect(p.sinAccionClara).toBe(true);
-    const [, msg] = vi.mocked(sendMessage).mock.calls[0] as any;
+    const [, msg] = vi.mocked(sendCronMessage).mock.calls[0] as any;
     expect(msg.text).toContain("no deja una acción concreta");
   });
 
@@ -228,12 +228,12 @@ describe("dedup por hilo", () => {
     vi.mocked(searchTaskEmails).mockResolvedValue([{ id: "m1" }] as any);
     vi.mocked(getGmailMessage).mockImplementation(async (id: string) => mail({ id }) as any);
     await checkTaskEmails(opts());
-    vi.mocked(sendMessage).mockClear();
+    vi.mocked(sendCronMessage).mockClear();
 
     vi.mocked(searchTaskEmails).mockResolvedValue([{ id: "m1" }, { id: "m2" }] as any);
     await checkTaskEmails(opts());
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
     const state = readTaskCheckState(statePath);
     expect(state.queue).toHaveLength(0);
     expect(state.active!.item.followupIds).toEqual(["m2"]);
@@ -249,7 +249,7 @@ describe("robustez del intake", () => {
 
     await checkTaskEmails(opts());
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
     expect(store.proposals.size).toBe(0);
     expect(readTaskCheckState(statePath).processed).toContain("m1");
   });
@@ -278,7 +278,7 @@ describe("robustez del intake", () => {
 
     await checkTaskEmails(opts());
 
-    const textos = vi.mocked(sendMessage).mock.calls.map((c) => (c[1] as any).text);
+    const textos = vi.mocked(sendCronMessage).mock.calls.map((c) => (c[1] as any).text);
     expect(textos[0]).toContain("No pude preparar una tarea");
     expect(textos[1]).toContain("Tarea propuesta");
     const state = readTaskCheckState(statePath);
@@ -291,7 +291,7 @@ describe("robustez del intake", () => {
     // del envío, un blip de red dejaba la cola trabada 7 días (el TTL del KV) sin ningún aviso.
     vi.mocked(searchTaskEmails).mockResolvedValue([{ id: "m1" }] as any);
     vi.mocked(getGmailMessage).mockImplementation(async (id: string) => mail({ id }) as any);
-    vi.mocked(sendMessage).mockRejectedValueOnce(new Error("connection reset"));
+    vi.mocked(sendCronMessage).mockRejectedValueOnce(new Error("connection reset"));
 
     await checkTaskEmails(opts());
 
@@ -312,13 +312,13 @@ describe("robustez del intake", () => {
     // mientras durara el corte.
     vi.mocked(searchTaskEmails).mockResolvedValue([{ id: "m1" }] as any);
     vi.mocked(getGmailMessage).mockImplementation(async (id: string) => mail({ id }) as any);
-    vi.mocked(sendMessage).mockRejectedValueOnce(new Error("connection reset"));
+    vi.mocked(sendCronMessage).mockRejectedValueOnce(new Error("connection reset"));
 
     await checkTaskEmails(opts());
     expect(extractTaskFields).toHaveBeenCalledTimes(1);
     expect(readTaskCheckState(statePath).queue[0]!.proposalId).toBeDefined();
 
-    vi.mocked(sendMessage).mockRejectedValueOnce(new Error("connection reset"));
+    vi.mocked(sendCronMessage).mockRejectedValueOnce(new Error("connection reset"));
     await checkTaskEmails(opts());
     expect(extractTaskFields).toHaveBeenCalledTimes(1); // no volvió a llamar al modelo
 
@@ -330,7 +330,7 @@ describe("robustez del intake", () => {
   it("no rompe el poll completo si falla la búsqueda en Gmail", async () => {
     vi.mocked(searchTaskEmails).mockRejectedValue(new Error("gmail 500"));
     await expect(checkTaskEmails(opts())).resolves.toBeUndefined();
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
   });
 
   it("evita corridas superpuestas", async () => {
@@ -351,7 +351,7 @@ describe("avance de la cola", () => {
       mail({ id, threadId: `thread-${id}`, subject: `(Tarea) asunto ${id}` }) as any,
     );
     await checkTaskEmails(opts());
-    vi.mocked(sendMessage).mockClear();
+    vi.mocked(sendCronMessage).mockClear();
   }
 
   it("advanceTaskQueue propone el siguiente de la cola", async () => {
@@ -361,18 +361,18 @@ describe("avance de la cola", () => {
     const state = readTaskCheckState(statePath);
     expect(state.active?.item.messageId).toBe("m2");
     expect(state.queue).toHaveLength(0);
-    expect((vi.mocked(sendMessage).mock.calls[0]![1] as any).text).toContain("asunto m2");
+    expect((vi.mocked(sendCronMessage).mock.calls[0]![1] as any).text).toContain("asunto m2");
   });
 
   it("con la cola vacía, advanceTaskQueue no manda nada", async () => {
     vi.mocked(searchTaskEmails).mockResolvedValue([{ id: "m1" }] as any);
     vi.mocked(getGmailMessage).mockImplementation(async (id: string) => mail({ id }) as any);
     await checkTaskEmails(opts());
-    vi.mocked(sendMessage).mockClear();
+    vi.mocked(sendCronMessage).mockClear();
 
     await advanceTaskQueue(opts());
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
     expect(readTaskCheckState(statePath).active).toBeNull();
   });
 
@@ -383,11 +383,11 @@ describe("avance de la cola", () => {
     await conCola();
     const vieja = readTaskCheckState(statePath).active!.proposalId;
     await advanceTaskQueue(opts()); // el cron ya avanzó: ahora la activa es m2
-    vi.mocked(sendMessage).mockClear();
+    vi.mocked(sendCronMessage).mockClear();
 
     await advanceTaskQueue(opts(), vieja); // llega tarde el del callback
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
     expect(readTaskCheckState(statePath).active?.item.messageId).toBe("m2");
   });
 

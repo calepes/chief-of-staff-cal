@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import {
   gmailAccessToken,
   searchSelfServiceEmails,
@@ -207,11 +207,15 @@ function formatPct(n: number): string {
   return `${arrow} ${sign}${(n * 100).toFixed(1)}%`;
 }
 
-function trendSuffix(vsAyer: number | null, vsSemana: number | null): string {
-  const parts: string[] = [];
-  if (vsAyer != null) parts.push(`${formatPct(vsAyer)} día`);
-  if (vsSemana != null) parts.push(`${formatPct(vsSemana)} sem.`);
-  return parts.length ? `  <i>${parts.join(" · ")}</i>` : "";
+function pctCell(n: number | null): string {
+  return n != null ? formatPct(n) : "—";
+}
+
+// Una fila de la tabla de KPIs — `null` si el valor no vino en el PDF (PDF parcial), para que
+// el caller la filtre sin dejar una fila vacía en la tabla.
+function kpiRow(emoji: string, label: string, value: number | null, vsAyer: number | null, vsSemana: number | null): string | null {
+  if (value == null) return null;
+  return `<tr><td>${emoji} ${escapeHtml(label)}</td><td><b>${formatMiles(value)}</b></td><td>${pctCell(vsAyer)}</td><td>${pctCell(vsSemana)}</td></tr>`;
 }
 
 export function formatPdfSuccessReport(
@@ -226,20 +230,18 @@ export function formatPdfSuccessReport(
     "",
   ];
 
-  if (pdfKpis.afiliacionesDiarias != null) {
-    lines.push(`👥 Afiliaciones diarias: <b>${formatMiles(pdfKpis.afiliacionesDiarias)}</b>${trendSuffix(pdfKpis.afiliacionesVsAyer, pdfKpis.afiliacionesVsSemana)}`);
-  }
-  if (pdfKpis.afiliados7d != null) {
-    lines.push(`👥 Afiliados 7d: <b>${formatMiles(pdfKpis.afiliados7d)}</b>`);
-  }
-  if (pdfKpis.trx != null) {
-    lines.push(`🔁 TRX: <b>${formatMiles(pdfKpis.trx)}</b>${trendSuffix(pdfKpis.trxVsAyer, pdfKpis.trxVsSemana)}`);
-  }
-  if (pdfKpis.trxPromedio7d != null) {
-    lines.push(`🔁 TRX Promedio 7d: <b>${formatMiles(pdfKpis.trxPromedio7d)}</b>`);
-  }
-  if (pdfKpis.activosDau != null) {
-    lines.push(`📊 Activos DAU: <b>${formatMiles(pdfKpis.activosDau)}</b>${trendSuffix(pdfKpis.dauVsAyer, pdfKpis.dauVsSemana)}`);
+  // Tabla real (Rich Messages) — datos comparables en 2 ejes (métrica × día/semana), el caso
+  // exacto que la política "diseño activo" del prompt pide como tabla en vez de líneas sueltas.
+  const rows = [
+    kpiRow("👥", "Afiliaciones diarias", pdfKpis.afiliacionesDiarias, pdfKpis.afiliacionesVsAyer, pdfKpis.afiliacionesVsSemana),
+    kpiRow("👥", "Afiliados 7d", pdfKpis.afiliados7d, null, null),
+    kpiRow("🔁", "TRX", pdfKpis.trx, pdfKpis.trxVsAyer, pdfKpis.trxVsSemana),
+    kpiRow("🔁", "TRX Promedio 7d", pdfKpis.trxPromedio7d, null, null),
+    kpiRow("📊", "Activos DAU", pdfKpis.activosDau, pdfKpis.dauVsAyer, pdfKpis.dauVsSemana),
+  ].filter((r): r is string => r != null);
+
+  if (rows.length) {
+    lines.push(`<table><tr><th>Métrica</th><th>Valor</th><th>Día</th><th>Sem.</th></tr>${rows.join("")}</table>`);
   }
   if (!result.fieldsWritten.length) lines.push("sin campos");
 
@@ -659,9 +661,20 @@ function paginateReport(text: string, limit = 4000): string[] {
 }
 
 async function sendReport(botToken: string, chatId: number, text: string): Promise<void> {
+  // Rich Messages soporta 32.768 chars (vs. 4.096 del HTML clásico) — con MAX_REPORT_LINES=25
+  // el texto rara vez se acerca al límite clásico, así que paginar antes de intentar Rich
+  // Messages cortaría de más en el caso común. Paginar solo importa si sendCronMessage cae al
+  // fallback HTML clásico, así que se intenta primero el texto completo de una.
+  try {
+    await sendCronMessage(botToken, { chatId, text });
+    return;
+  } catch {
+    // sendCronMessage ya logueó el fallo de Rich Messages — si igual falló el fallback HTML,
+    // puede ser por longitud (>4096) en vez de un problema de red: reintentar paginado.
+  }
   for (const chunk of paginateReport(text)) {
     try {
-      await sendMessage(botToken, { chatId, text: chunk, parseMode: "HTML" });
+      await sendCronMessage(botToken, { chatId, text: chunk });
     } catch (err) {
       console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_report_send_failed", err: String(err) }));
       return;

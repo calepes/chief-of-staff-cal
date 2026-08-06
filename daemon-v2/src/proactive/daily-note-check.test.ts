@@ -12,11 +12,11 @@ vi.mock("./daily-note-ingest.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, createDailyNotePage: vi.fn() };
 });
-vi.mock("@cos/shared", () => ({ sendMessage: vi.fn(async () => ({ message_id: 1 })) }));
+vi.mock("./rich-send.js", () => ({ sendCronMessage: vi.fn(async () => ({ message_id: 1 })) }));
 
 import { gmailAccessToken, searchDailyNoteEmails, getGmailMessage } from "./kpi-ingest-gmail.js";
 import { createDailyNotePage } from "./daily-note-ingest.js";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import { checkDailyNotes } from "./daily-note-check.js";
 
 const gmailCreds = { clientId: "c", clientSecret: "s", refreshToken: "r" };
@@ -53,7 +53,7 @@ describe("checkDailyNotes", () => {
       fecha: "2026-07-27",
       bodyMarkdown: "Buenas tardes equipo Yape.",
     });
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
   });
@@ -138,8 +138,8 @@ describe("checkDailyNotes", () => {
     expect(createDailyNotePage).not.toHaveBeenCalled();
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).not.toContain("m1");
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(sendMessage).mock.calls[0]?.[1] as { text: string };
+    expect(sendCronMessage).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("cuerpo de texto legible");
   });
 
@@ -156,7 +156,7 @@ describe("checkDailyNotes", () => {
     await checkDailyNotes({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
 
     expect(createDailyNotePage).not.toHaveBeenCalled();
-    expect(sendMessage).not.toHaveBeenCalled(); // no es un fallo transitorio — nunca va a cambiar en un retry
+    expect(sendCronMessage).not.toHaveBeenCalled(); // no es un fallo transitorio — nunca va a cambiar en un retry
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     expect(state.processed).toContain("m1");
   });
@@ -169,7 +169,7 @@ describe("checkDailyNotes", () => {
 
     await checkDailyNotes({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendCronMessage).not.toHaveBeenCalled();
   });
 
   it("no rompe el poll completo si falla la búsqueda en Gmail", async () => {

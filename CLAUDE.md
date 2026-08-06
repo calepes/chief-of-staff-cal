@@ -126,6 +126,35 @@ compartidas: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md` y me
   `shared-telegram/src/telegram.ts`) protege `pre|code|ul|ol|table|blockquote` de la conversión de
   `\n`, pero NO `details`/`summary` — mismo gap documentado en `Vesta/CLAUDE.md`, pendiente de
   cerrar en la librería compartida (no específico de ningún bot).
+- **Crons proactivos activos migrados a Rich Messages también (2026-08-06, mismo día, sesión
+  aparte):** el reply del modelo (arriba) no cubre a los 6 crons activos — construyen su HTML en
+  código, sin pasar por `runAgent()`, así que la migración de arriba no les tocaba nada. Cal vio en
+  vivo que el reporte del cron de KPIs salía en HTML clásico (no tablas) y pidió parejo.
+  `proactive/rich-send.ts` (nuevo) centraliza el patrón: `sendCronMessage()` intenta
+  `sendRichMessage` y cae a `sendMessage`/HTML clásico si falla — **sin** nivel de texto plano
+  (a diferencia del reply del modelo): el HTML acá lo arma el propio código del cron, no el LLM,
+  así que un fallo doble es un problema real de Telegram/red, no de HTML mal formado. Los 6 crons
+  activos (`health-sync-check`, `journal-sweep`, `learning-reflect`, `daily-note-check`,
+  `task-check` ×2 call sites, `kpi-ingest-check`) pasaron de `sendMessage` directo a
+  `sendCronMessage`. Los 3 crons desactivados (`flight-checkin`/`foco-check`/`fuel-alert`) NO se
+  tocaron — igual que el reply del modelo, quedan con `sendMessage` clásico si se reactivan algún
+  día.
+  - **`kpi-ingest-check.ts` → `formatPdfSuccessReport` reescrito a `<table>` real** (el caso
+    concreto que Cal vio): las 5 métricas del PDF (Afiliaciones diarias, Afiliados 7d, TRX, TRX
+    Promedio 7d, Activos DAU) con sus columnas Día/Sem. de tendencia pasan de líneas sueltas con
+    `trendSuffix()` a una tabla `Métrica | Valor | Día | Sem.` — dato comparable en 2 ejes, el caso
+    exacto de la política "diseño activo". `trendSuffix()` se eliminó (sin más call sites).
+    `sendReport()` intenta el texto completo por `sendCronMessage` de una (Rich Messages soporta
+    32.768 chars, el reporte con `MAX_REPORT_LINES=25` rara vez se acerca) y solo pagina a 4000
+    chars si ese intento entero falla (paginar antes cortaría de más el caso común). Los demás
+    reportes (CSV, Lending, errores) quedaron como líneas de texto — no son claramente tabulares
+    (Lending ya comunica el funnel con flechas `→`, convertirlo a tabla perdería esa semántica).
+  - Tests: `proactive/rich-send.test.ts` nuevo (4 casos: rich ok, replyMarkup, fallback a HTML,
+    propagación si fallan los dos niveles). `kpi-ingest-check.test.ts`/`daily-note-check.test.ts`/
+    `task-check.test.ts` — mocks de `@cos/shared`/`sendMessage` migrados a `./rich-send.js`/
+    `sendCronMessage` (mismo boundary que ahora usa el código real); assertions de
+    `formatPdfSuccessReport` reescritas para la tabla. 804/805 tests (mismo preexistente sin
+    relación), typecheck y build limpios.
 - Daemon reiniciado en producción con confirmación explícita de Cal en cada restart (2 restarts:
   uno tras la migración de la librería, otro tras activar Rich Messages), arranque limpio
   verificado en logs ambas veces, prueba real por Telegram confirmada en las dos ("respondió como

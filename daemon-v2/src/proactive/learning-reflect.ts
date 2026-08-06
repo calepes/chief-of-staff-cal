@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import cron from "node-cron";
-import { sendMessage } from "@cos/shared";
+import { sendCronMessage } from "./rich-send.js";
 import type { CfKv } from "../cf-kv.js";
 import { nowInLaPaz } from "../journal-capture.js";
 import { BATCH_MAX_VISIBLES, renderBatch, type Card } from "../learning-card.js";
@@ -164,7 +164,7 @@ export async function checkLearningReflect(opts: ScheduleOpts): Promise<void> {
           descartados: 0,
         }),
       send: async (card) => {
-        await sendMessage(botToken, { chatId, text: card.text, parseMode: "HTML", replyMarkup: card.keyboard });
+        await sendCronMessage(botToken, { chatId, text: card.text, replyMarkup: card.keyboard });
       },
       log,
     };
