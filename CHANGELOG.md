@@ -371,6 +371,20 @@ solo lectura, modelo Fable) — ver `HANDOFF.md` para el detalle completo y los 
 - **Fix:** agregada `discardWarm(warmPromise)` (usa `WarmQuery.close()`, documentado en el SDK exactamente para este caso: "Close the subprocess without sending a prompt") en los 4 `return` — todos verificados por `daemon-health-reviewer` como anteriores al `await warmPromise` real (línea ~825), así que nunca interrumpen un turno en curso.
 - **Gap preexistente encontrado de paso, sin resolver:** el `try` externo de `processMessage` no tiene `catch` propio — una excepción real (no un `return`) lanzada antes de `await warmPromise` (ej. `state.load` o un `editMessage`/`sendMessage` sin `.catch()` en las ramas de voz/foto/documento) escapa sin capturar, deja el `warm` sin cerrar, Y deja a Cal con el placeholder "⏳ Procesando..." colgado sin mensaje de error (el daemon no crashea, el loop principal la atrapa más arriba, pero Cal nunca se entera). Documentado en el comentario de `discardWarm` (`index.ts`); no implementado — fuera del scope pedido.
 
+## 2026-07-06
+
+### Fix — Fuga de mensaje de diagnóstico interno del SDK a Telegram
+
+- **Bug:** `agent.ts` extraía `finalText` de cualquier evento `{type:"result", subtype:"success"}` sin filtrar, asumiendo que "success" implica respuesta válida. En un turno real (Cal comparando stats FIFA de Suiza y Colombia), el modelo pasó el `fixtureId` de `getFixtures` (API-Football) como `matchId` a `getFifaMatchStats` (que espera el `matchId` interno de FIFA, sistema de IDs distinto) → 2 tool calls fallidos + reintentos → 8 tool calls en un turno sobre la sesión `warm` (que no resetea contexto entre turnos, `cacheReadInputTokens` 273K→540K→942K) → el SDK entró en auto-compact repetido y abortó devolviendo su propio texto de diagnóstico ("Autocompact is thrashing...") marcado `success`. El daemon lo reenvió tal cual a Cal.
+- **Fix (2 partes):** `agent.ts` — `SDK_DIAGNOSTIC_PATTERNS` detecta el texto antes de devolver `reply`, lo reemplaza por un mensaje entendible + log `sdk_diagnostic_leak`. `system-prompt.ts` — documentada la sección "FIFA avanzadas" (antes inexistente), aclarando pasar siempre `teamA`/`teamB` y nunca `matchId` adivinado desde `getFixtures`.
+- **Pendiente (decisión de Cal, fuera de scope):** la sesión `warm` sigue sin reseteo periódico entre turnos.
+
+### Fix — Recurrencia del mismo día: causa raíz distinta
+
+- **Bug:** el filtro de arriba funcionó (Cal recibió el fallback), pero el thrashing volvió a las pocas horas con "dame todas las stats FIFA de los partidos jugados de Suiza y Colombia": `getFixtures` (`worldcup` MCP) solo filtraba por `date`, no por equipo, así que el modelo adivinó rival+fecha de memoria 7 veces, falló 3, y ante cada fallo reintentó la misma búsqueda con variantes de ortografía (Uzbekistan/Uzbekistán, DR Congo/Congo DR/...) — 17 tool calls en 7 min.
+- **Fix (2 partes):** `worldcup` MCP — `getFixtures` acepta `team?` y filtra client-side sobre la respuesta cacheada; sin partidos → error explícito. `system-prompt.ts` — instruye usar `getFixtures({team})` primero antes de `getFifaMatchStats` en loop, prohíbe reintentar la misma búsqueda con variantes de ortografía tras un fallo.
+- **Lección:** el filtro de la fuga (fix anterior) es una red de seguridad, no una cura — cada thrashing puede tener causa raíz distinta mientras la sesión `warm` no tenga reseteo. (Tercera recurrencia + causa raíz estructural: ver entrada 2026-07-14 "Causa raíz estructural del autocompact thrashing".)
+
 ## 2026-07-03
 
 ### Feature — Resumidor: selector de cola antes de procesar + título/autor en el resumen
