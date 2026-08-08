@@ -30,8 +30,11 @@ export interface BacklogItem {
 export interface CompactBacklog {
   key: string;
   label: string;
+  /** Conteo REAL de pendientes, sin truncar — puede ser mayor que items.length. */
   total: number;
   items: BacklogItem[];
+  /** true si items.length < total (se recortó por MAX_ITEMS). */
+  truncated: boolean;
 }
 
 /** Resultado de intentar tildar un ítem. */
@@ -47,4 +50,8 @@ export interface BacklogProposal {
   key: string;
   /** Texto del ítem a agregar, o texto que localiza el ítem a tildar. */
   text: string;
+  /** Path del backlog destino al momento de crear la propuesta — informativo/auditoría.
+   *  NUNCA reemplaza resolveBacklogPath() al escribir: ese sigue siendo el único camino
+   *  validado (realpath + allowlist) para tocar el archivo. */
+  path: string;
 }

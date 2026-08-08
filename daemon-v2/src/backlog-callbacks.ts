@@ -115,7 +115,17 @@ export async function handleBacklogCallback(
   }
 
   if (action === "destpick") {
-    await deps.store.updateProposal(chatId, shortId, { ...prop, key: extra });
+    let newPath: string;
+    try {
+      newPath = resolveBacklogPath(extra, deps.root);
+    } catch (e) {
+      deps.log({ msg: "backlog_resolve_failed", key: extra, err: String(e) });
+      await deps.editCard(chatId, messageId, `⚠️ ${e instanceof Error ? e.message : String(e)}`, {
+        inline_keyboard: [],
+      });
+      return;
+    }
+    await deps.store.updateProposal(chatId, shortId, { ...prop, key: extra, path: newPath });
     const label = labelFor(extra, deps.root);
     const card =
       prop.kind === "add"
@@ -139,6 +149,13 @@ export async function handleBacklogCallback(
       inline_keyboard: [],
     });
     return;
+  }
+  // path resuelto arriba es la única fuente confiable para escribir (realpath + allowlist,
+  // revalidados en cada save). prop.path es solo el snapshot guardado al crear la propuesta —
+  // si difieren, el árbol cambió entre proponer y confirmar (ventana de hasta 1h de TTL); se
+  // loguea para poder auditarlo, nunca se usa para saltarse la revalidación.
+  if (prop.path !== path) {
+    deps.log({ msg: "backlog_path_mismatch", key: prop.key, proposedPath: prop.path, resolvedPath: path });
   }
 
   const label = labelFor(prop.key, deps.root);

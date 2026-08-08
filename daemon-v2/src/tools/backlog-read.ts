@@ -12,6 +12,9 @@ const DONE_RE = /^\s*-\s\[[xX]\]/;
 const SECTION_RE = /^###\s+(.*)$/;
 /** Tope por ítem. Suficiente para reconocerlo y decidir, sin arrastrar párrafos enteros. */
 const MAX_ITEM_CHARS = 200;
+/** Tope de cantidad de ítems devueltos. Mismo criterio que MAX_ITEM_CHARS — un backlog con
+ *  decenas de pendientes no necesita venir completo para que el modelo lo pueda discutir. */
+const MAX_ITEMS = 40;
 
 function readLines(path: string): string[] {
   try {
@@ -45,9 +48,13 @@ export function readBacklogCompact(path: string, key: string, label: string): Co
     });
   }
 
-  return { key, label, total: items.length, items };
+  const total = items.length;
+  const sliced = items.slice(0, MAX_ITEMS);
+  return { key, label, total, items: sliced, truncated: sliced.length < total };
 }
 
 export function buildBacklogMap(entries: BacklogEntry[]): BacklogMapRow[] {
-  return entries.map((e) => ({ ...e, pending: countPending(e.path) }));
+  return entries
+    .map((e) => ({ ...e, pending: countPending(e.path) }))
+    .filter((r) => r.pending > 0);
 }

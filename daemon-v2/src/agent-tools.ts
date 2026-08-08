@@ -936,7 +936,7 @@ export function buildSdkTools(deps: ToolDeps) {
           const chatId = deps.getCurrentChatId();
           const store = new BacklogStore(deps.kv);
           const kind = accion === "agregar" ? "add" : "done";
-          const shortId = await store.createProposal(chatId, { kind, key: proyecto, text: texto });
+          const shortId = await store.createProposal(chatId, { kind, key: proyecto, text: texto, path: entry.path });
           const card =
             kind === "add"
               ? renderAddProposal(entry.label, texto, shortId)

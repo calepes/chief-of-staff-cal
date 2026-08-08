@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isBacklogCallback, handleBacklogCallback } from "./backlog-callbacks.js";
@@ -90,7 +90,7 @@ describe("handleBacklogCallback", () => {
   it("bklg:save escribe el ítem y confirma", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea nueva" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea nueva", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
 
@@ -103,7 +103,7 @@ describe("handleBacklogCallback", () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
     const before = readFileSync(JANO, "utf8");
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea nueva" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea nueva", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:drop:${id}`);
 
@@ -117,19 +117,38 @@ describe("handleBacklogCallback", () => {
     clearBacklogCache();
     const store = new BacklogStore(fakeKv());
     const { deps } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:destpick:${id}:vesta`);
 
-    expect((await store.getProposal(1, id))?.key).toBe("vesta");
+    const updated = await store.getProposal(1, id);
+    expect(updated?.key).toBe("vesta");
+    // realpathSync porque resolveBacklogPath resuelve symlinks (en macOS tmpdir() es
+    // /var/folders/... pero el realpath es /private/var/folders/...).
+    expect(updated?.path).toBe(realpathSync(join(ROOT, "Personal/Agents/Vesta/BACKLOG.md")));
     expect(readFileSync(JANO, "utf8")).not.toContain("Idea");
+  });
+
+  it("bklg:destpick con una clave que no resuelve avisa con ⚠️ y no toca la propuesta", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits, logs } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:destpick:${id}:noexiste`);
+
+    expect(edits.at(-1)?.text).toContain("⚠️");
+    expect(edits.at(-1)?.text).toContain("No reconozco el backlog");
+    expect(edits.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
+    // La propuesta queda intacta (destino viejo), no se pisa con el nuevo key roto.
+    expect((await store.getProposal(1, id))?.key).toBe("jano");
+    expect(logs.some((l) => l.msg === "backlog_resolve_failed" && l.key === "noexiste")).toBe(true);
   });
 
   it("bklg:destother quita el teclado y lista las claves, sin escribir", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
     const before = readFileSync(JANO, "utf8");
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:destother:${id}`);
 
@@ -143,7 +162,7 @@ describe("handleBacklogCallback", () => {
   it("todo cierre de tarjeta manda el teclado vacío explícito, nunca undefined", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
 
@@ -161,7 +180,7 @@ describe("handleBacklogCallback", () => {
     writeFileSync(JANO, "## Pendientes\n\n### V\n- [ ] Ítem viejo\n- [ ] Otro ítem viejo\n");
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "done", key: "jano", text: "ítem viejo" });
+    const id = await store.createProposal(1, { kind: "done", key: "jano", text: "ítem viejo", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
 
@@ -173,7 +192,7 @@ describe("handleBacklogCallback", () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
     const before = readFileSync(JANO, "utf8");
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea con errata" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea con errata", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:edit:${id}`);
 
@@ -186,7 +205,7 @@ describe("handleBacklogCallback", () => {
   it("bklg:destother muestra el texto del ítem, no solo la lista de proyectos (W5)", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea del destother" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea del destother", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:destother:${id}`);
 
@@ -196,7 +215,7 @@ describe("handleBacklogCallback", () => {
   it("una acción desconocida no rompe y deja rastro en el log (W5)", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits, logs } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:algoRaro:${id}`);
 
@@ -207,7 +226,7 @@ describe("handleBacklogCallback", () => {
   it("W2 — un fallo al agregar el ítem (appendBacklogItem) edita la tarjeta con ⚠️ en vez de quedar en silencio", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits, logs } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea nueva" });
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea nueva", path: JANO });
     vi.mocked(backlogWrite.appendBacklogItem).mockImplementationOnce(() => {
       throw new Error("EACCES: permission denied, open '/some/absolute/path/BACKLOG.md.tmp-1'");
     });
@@ -226,7 +245,7 @@ describe("handleBacklogCallback", () => {
   it("W2 — un fallo al tildar (markBacklogDone) edita la tarjeta con ⚠️ en vez de quedar en silencio", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits, logs } = fakeDeps(store);
-    const id = await store.createProposal(1, { kind: "done", key: "jano", text: "ítem viejo" });
+    const id = await store.createProposal(1, { kind: "done", key: "jano", text: "ítem viejo", path: JANO });
     vi.mocked(backlogWrite.markBacklogDone).mockImplementationOnce(() => {
       throw new Error("ENOSPC: no space left on device, write");
     });

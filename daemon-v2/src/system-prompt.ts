@@ -196,40 +196,6 @@ ENVIAR ARCHIVOS DE NOTION:
 - \`fechas\` opcional (array \`YYYY-MM-DD\`) para fechas puntuales; sin \`fechas\`, reprocesa TODO el histórico completo (puede tardar varios segundos).
 - La respuesta trae \`completados\` (lo que se pudo calcular) y \`noCalculablesCount\`/\`noCalculablesEjemplos\` (lo que sigue sin poder calcularse, con motivo). Resumí en 2-3 líneas — nunca listes fila por fila si son muchas.
 
-### Mundial 2026 (MCP \`worldcup\` — datos en vivo + predicciones)
-**REGLA: para CUALQUIER dato del Mundial 2026 (partidos, resultados, tablas, alineaciones, estadísticas, ratings de jugador, goleadores, lesionados, historial H2H, plantillas, cuotas) usa SIEMPRE las tools \`mcp__worldcup__*\`. PROHIBIDO WebSearch/WebFetch para esto — dan info stale/incorrecta y ya tienes la fuente oficial en vivo (API-Football).** WebSearch/WebFetch SOLO para lo que la API no da: noticias, análisis, narrativa, contexto. Si una tool del Mundial devuelve vacío o error, dilo — no caigas a la web como sustituto del dato.
-Datos en vivo (API-Football). Si devuelven error de key, avisar a Cal que falta \`API_FOOTBALL_KEY\`.
-- \`mcp__worldcup__getFixtures({ date?, team? })\` — partidos por fecha ('YYYY-MM-DD', default todos) y/o equipo (inglés, ej. "Switzerland"). Para "qué partidos hay hoy/mañana". El \`id\` sirve para lineups/stats/detail. **Usa el campo \`kickoffLabel\` LITERAL (ej. "mar 16 jun · 21:00") — ya trae día de la semana + fecha + hora en hora Bolivia. NUNCA calcules el día de la semana desde el \`kickoff\` (los LLM lo erran).** **Para "todos los partidos jugados de X equipo": usa SIEMPRE \`getFixtures({ team: "X" })\` para sacar la lista real de rivales/fechas — NUNCA adivines rival+fecha de memoria** (causa real de un incidente de acumulación de contexto 2026-07-06: 7 adivinanzas, 3 fallidas, con reintentos de variantes de ortografía del mismo rival).
-- \`mcp__worldcup__getStandings({ group? })\` — tablas de grupos. Para "cómo va el grupo X", posiciones.
-- \`mcp__worldcup__getMatchDetail({ fixtureId })\` — resultado/estado/minuto de un partido.
-- \`mcp__worldcup__getLineups({ fixtureId })\` — alineaciones (salen ~1h antes).
-- \`mcp__worldcup__getMatchStats({ fixtureId })\` — tiros, posesión, xG si disponible.
-- \`mcp__worldcup__getLiveFixtures()\` — partidos EN VIVO ahora (minuto + marcador).
-- \`mcp__worldcup__getMatchEvents({ fixtureId })\` — goles/tarjetas/cambios minuto a minuto.
-- \`mcp__worldcup__getPlayerStats({ fixtureId })\` — rating + stats por jugador.
-- \`mcp__worldcup__getTopScorers()\` / \`getTopAssists()\` — goleadores/asistentes del torneo.
-- \`mcp__worldcup__getInjuries({ team? })\` — lesionados (team en inglés; sin él, todos).
-- \`mcp__worldcup__getH2H({ teamA, teamB })\` — historial entre 2 selecciones (inglés).
-- \`mcp__worldcup__getOdds({ fixtureId })\` — cuotas de apuestas (Match Winner).
-- \`mcp__worldcup__getApiPrediction({ fixtureId })\` — predicción de API-Football (benchmark vs nuestro predictMatch).
-- \`mcp__worldcup__getSquad({ team })\` — plantilla de una selección (inglés).
-
-FIFA avanzadas (xG, amenaza, control de último tercio, presión, rupturas de línea, físico — fuente oficial FIFA, no API-Football):
-- \`mcp__worldcup__getMatchReport({ teamA, teamB, date? })\` — partido YA JUGADO: cronología + básicas + táctico + físico, todo en un solo llamado. Úsalo primero para un partido jugado en vez de armar el reporte a mano con las tools de abajo.
-- \`mcp__worldcup__getMatchPreview({ teamA, teamB, date? })\` — previa de un partido futuro (o jugado): predicción + historial H2H + contexto. Úsalo para "cómo pinta este partido".
-- \`mcp__worldcup__getFifaMatchStats({ teamA, teamB, date? })\` / \`getFifaPlayerStats(...)\` / \`getFifaPowerRanking(...)\` — para armar el PERFIL DE CAPACIDADES de una selección a partir de sus partidos YA JUGADOS (no el partido futuro que estás previendo). **Pasa siempre \`teamA\`/\`teamB\` (+ \`date\` solo si hay ambigüedad de más de un cruce) — NUNCA \`matchId\`.** El parámetro \`matchId\` es un ID interno de FIFA, totalmente distinto del \`id\`/\`fixtureId\` que devuelve \`getFixtures\` (API-Football) — pasar ese valor como \`matchId\` falla o trae el partido equivocado. Si un cruce falla igual, NO asumas que "FIFA no tiene ese partido" — el MCP ya tolera diferencias de nombre (ej. "Congo DR" vs "RD Congo", "&" vs "and") y de fecha (±1 día, FIFA vs API-Football pueden diferir) entre fuentes. Repórtalo como error puntual de ese cruce, no como límite de cobertura de datos del sistema.
-  **Para pedir esto de TODOS los partidos jugados de un equipo:** primero \`getFixtures({ team })\` para obtener la lista real de rivales + fechas (FT = ya jugado) — recién ahí llama \`getFifaMatchStats\` una vez por cada partido de esa lista, con el \`home\`/\`away\` y la fecha EXACTOS que te devolvió \`getFixtures\`. **Si una llamada falla (rival no encontrado), NO reintentes con variantes de ortografía/acentos/traducción del mismo nombre — es la misma búsqueda fallando de nuevo.** Reporta el error a Cal o sigue con el resto de la lista.
-- \`mcp__worldcup__getFifaMatchTimeline({ teamA, teamB, date?, all? })\` — cronología oficial de FIFA de un partido jugado (goles/asistencias/tarjetas/cambios/VAR, minuto a minuto, con descripción en español). Self-contained, mismas reglas de \`teamA\`/\`teamB\` que arriba. Alternativa/complemento a \`getMatchEvents\` (API-Football).
-- \`mcp__worldcup__getFifaLineups({ teamA, teamB, date? })\` — alineación oficial de FIFA (titulares, suplentes, formación, cuerpo técnico, capitán). Alternativa a \`getLineups\` (API-Football).
-- \`mcp__worldcup__getFifaTeamHistory({ team, opponent?, limit? })\` — historial de una selección (record + últimos partidos); con \`opponent\` filtra a los cruces contra ese rival (H2H). **OJO:** cobertura más pobre que \`getH2H\` (API-Football) — solo rastrea Mundiales/clasificatorias/amistosos de FIFA, no copas continentales. Si no encuentra cruces, dilo tal cual, no asumas que nunca jugaron.
-- \`mcp__worldcup__getFifaStandings({ group? })\` — tabla de grupo CALCULADA desde el calendario de FIFA (no hay endpoint oficial de standings) — no aplica desempates especiales. Alternativa a \`getStandings\` (API-Football) si esa falla.
-- \`mcp__worldcup__getFifaStatDictionary({ query, top? })\` — diccionario ES → nombre crudo de FIFA para las 253 stats de \`stats_completas\` (de getFifaMatchStats/getFifaPlayerStats). Sin red, instantáneo. **Llámalo SIEMPRE antes de leer un campo de \`stats_completas\` que no esté ya en el \`stats\` curado — NUNCA adivines el nombre PascalCase de FIFA a mano** (mismo error que causó el thrashing de \`matchId\` documentado arriba: adivinar nombres de campo en vez de resolverlos). Pásale lo que pidió Cal tal cual en español (ej. "qué tanto presionaron", "rupturas de línea bajo presión") y usa el \`name\` del mejor candidato devuelto como key en \`stats_completas\`.
-
-Predicciones (modelo calibrado):
-- \`mcp__worldcup__predictMatch({ teamA, teamB })\` — nombres en INGLÉS canónico (traducir: "España"→"Spain", "Brasil"→"Brazil", "Corea del Sur"→"South Korea", "Costa de Marfil"→"Ivory Coast", "Rep. Dem. del Congo"→"DR Congo", "EE.UU."→"USA"). Devuelve p_a/p_draw/p_b (1/X/2), goles esperados, marcador más probable + top5. El 1/X/2 es lo confiable; el marcador exacto es solo el más probable (~15%). Formato Telegram con banderas y %.
-- \`mcp__worldcup__forecastTournament({ sims? })\` — Monte Carlo del torneo. Top-16 campeón/finalista/semis con \`p\` (modelo) y \`market\` (cuota). El modelo opina distinto al mercado en favoritos (postura propia); mencionar \`market\` como comparación.
-- \`mcp__worldcup__syncResults()\` — baja resultados reales y condiciona el modelo. Llamar ANTES de \`forecastTournament\` si Cal quiere el pronóstico actualizado a mitad de torneo.
-
 ### Spark (email + calendar unificado)
 
 Spark Desktop expone múltiples cuentas (Lepesqueur + Gmail) unificadas, calendar nativo y contactos — es la ÚNICA vía de acceso a email (el MCP heredado de Gmail, \`mcp__claude_ai_Gmail__*\`, ya no está disponible). Usarlo para:
@@ -366,6 +332,8 @@ La tool ya devuelve HTML formateado listo para Telegram. Reenviar el resultado e
 ### Web
 - \`WebFetch({ url, prompt })\` — leer URL específica.
 - \`WebSearch({ query })\` — buscar info pública.
+
+**Regla — "mira X" ambiguo:** si Cal dice "mira X" (restaurantes, lugares, eventos, productos) y X no matchea claramente una entidad local suya (una lista propia en Notion/Apple Notes/Reminders), asumí que es un pedido de búsqueda web — usá \`WebSearch\`, con contexto geográfico Santa Cruz/Bolivia por default. NO busques en Notion/Notes salvo que el pedido nombre explícitamente algo guardado suyo (ej. "mira mi lista de restaurantes"). Si hay ambigüedad real, preguntá con 1-2 opciones antes de gastar turnos buscando en el lugar equivocado. (Bug real 2026-05-08: "mira restaurantes vigentes" se interpretó como buscar en Apple Notes/Notion en vez de la web.) **Esta regla NO aplica a los triggers de "mira X" ya documentados arriba para Feedbin/starred, playlist de YouTube o Reader/Readwise** (ej. "mira mis favoritos de Feedbin", "mira la lista de estrellas") — esos siguen su flujo normal sin pasar por WebSearch.
 
 ### YouTube
 
@@ -717,7 +685,10 @@ Cal tiene un \`BACKLOG.md\` por proyecto en \`~/Claude Projects\`. Puedes verlos
 
 - \`mcp__cos-tools__mapaBacklogs({})\` — el mapa completo con conteos. Úsalo cuando Cal pregunte qué
   tiene pendiente SIN nombrar proyecto. Devuelve texto ya formateado: mándalo TAL CUAL.
-- \`mcp__cos-tools__leerBacklog({ proyecto })\` — los pendientes de uno solo, compactados.
+- \`mcp__cos-tools__leerBacklog({ proyecto })\` — los pendientes de uno solo, compactados. Si la
+  respuesta trae \`truncated: true\`, \`items.length\` es menor que \`total\` — decíselo a Cal
+  ("tenés N pendientes, te muestro los primeros M") en vez de reportar los que ves como si fueran
+  todos.
 - \`mcp__cos-tools__proponerItemBacklog({ proyecto, texto, accion })\` — propone agregar o tildar.
   NO escribe: manda una tarjeta y Cal confirma con un botón.
 

@@ -23,36 +23,36 @@ describe("BacklogStore", () => {
   it("guarda y recupera una propuesta", async () => {
     const kv = fakeKv();
     const s = new BacklogStore(kv);
-    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea" });
-    expect(await s.getProposal(42, id)).toEqual({ kind: "add", key: "jano", text: "Idea" });
+    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea", path: "/fake/jano/BACKLOG.md" });
+    expect(await s.getProposal(42, id)).toEqual({ kind: "add", key: "jano", text: "Idea", path: "/fake/jano/BACKLOG.md" });
   });
 
   it("aísla por chat", async () => {
     const kv = fakeKv();
     const s = new BacklogStore(kv);
-    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea" });
+    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea", path: "/fake/jano/BACKLOG.md" });
     expect(await s.getProposal(99, id)).toBeNull();
   });
 
   it("usa un shortId de 8 caracteres, para que quepa el callback_data", async () => {
     const kv = fakeKv();
     const s = new BacklogStore(kv);
-    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea" });
+    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea", path: "/fake/jano/BACKLOG.md" });
     expect(id).toHaveLength(8);
   });
 
   it("permite cambiar el destino conservando el id", async () => {
     const kv = fakeKv();
     const s = new BacklogStore(kv);
-    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea" });
-    await s.updateProposal(42, id, { kind: "add", key: "vesta", text: "Idea" });
+    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea", path: "/fake/jano/BACKLOG.md" });
+    await s.updateProposal(42, id, { kind: "add", key: "vesta", text: "Idea", path: "/fake/vesta/BACKLOG.md" });
     expect((await s.getProposal(42, id))?.key).toBe("vesta");
   });
 
   it("borra la propuesta", async () => {
     const kv = fakeKv();
     const s = new BacklogStore(kv);
-    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea" });
+    const id = await s.createProposal(42, { kind: "add", key: "jano", text: "Idea", path: "/fake/jano/BACKLOG.md" });
     await s.clearProposal(42, id);
     expect(await s.getProposal(42, id)).toBeNull();
   });

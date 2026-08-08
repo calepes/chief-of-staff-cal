@@ -36,6 +36,7 @@ import { scheduleLearningReflect, LEARNINGS_PATH } from "./proactive/learning-re
 import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
+import { checkHealthGoals } from "./proactive/health-goals-check.js";
 import { checkKpiIngest } from "./proactive/kpi-ingest-check.js";
 import { checkDailyNotes } from "./proactive/daily-note-check.js";
 import {
@@ -80,7 +81,6 @@ const env = {
   GMAIL_OAUTH_CLIENT_SECRET: process.env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "",
   GMAIL_OAUTH_REFRESH_TOKEN: process.env.GMAIL_OAUTH_REFRESH_TOKEN_LEPESQUEUR ?? "",
   SERPAPI_KEY: process.env.SERPAPI_KEY ?? "",
-  API_FOOTBALL_KEY: process.env.API_FOOTBALL_KEY ?? "",
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
   READWISE_TOKEN: process.env.READWISE_TOKEN ?? "",
   KUBERA_AUTH_TOKEN: process.env.KUBERA_AUTH_TOKEN ?? "",
@@ -299,8 +299,6 @@ const SPARK_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/spark/dist/index.js";
 const ACHORADAZOS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/achoradazos/dist/index.js";
-const WORLDCUP_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/worldcup/dist/index.js";
 const BOA_CHECKIN_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/boa-checkin/dist/index.js";
 
@@ -413,12 +411,6 @@ const BASE_OPTIONS: Options = {
       command: NODE_BIN,
       args: [ACHORADAZOS_DIST],
       env: { AIRTABLE_TOKEN: env.AIRTABLE_TOKEN },
-    },
-    "worldcup": {
-      type: "stdio",
-      command: NODE_BIN,
-      args: [WORLDCUP_DIST],
-      env: { API_FOOTBALL_KEY: env.API_FOOTBALL_KEY },
     },
     // Cartelera (BFF Cinemark + scraping Multicine/Cine Center) y compra de entradas.
     // Proceso HTTP persistente (launchd com.cal.cine-mcp-jano, puerto 8791) — NO se
@@ -1700,6 +1692,40 @@ function scheduleHealthSyncCheck(): void {
   log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
 }
 
+/**
+ * Chequeo proactivo de las 9 metas de "Metas Salud" (2026-08-08, pedido de Cal) — mecánico, sin
+ * LLM. Antes de comparar contra las metas valida que Health Auto Export haya sincronizado
+ * recientemente (health-goals-check.ts, isSyncFresh) — si no, avisa a Cal a hacer sync en vez de
+ * evaluar con data vieja/incompleta y arriesgar un falso "no caminaste nada". Solo manda mensaje
+ * si algo quedó por debajo del target (mismo criterio "reportar la excepción" que los reportes de
+ * KPIs) — silencio si vas bien.
+ */
+function scheduleHealthGoalsMidday(): void {
+  cron.schedule("30 12 * * *", () => {
+    void checkHealthGoals({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      notionToken: env.NOTION_TOKEN,
+      healthApiKey: env.HEALTH_API_KEY,
+      slot: "midday",
+    }).catch((err) => log({ msg: "health_goals_midday_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "health_goals_midday_scheduled", interval: "daily 12:30" });
+}
+
+function scheduleHealthGoalsDaily(): void {
+  cron.schedule("0 21 * * *", () => {
+    void checkHealthGoals({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      notionToken: env.NOTION_TOKEN,
+      healthApiKey: env.HEALTH_API_KEY,
+      slot: "daily",
+    }).catch((err) => log({ msg: "health_goals_daily_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "health_goals_daily_scheduled", interval: "daily 21:00" });
+}
+
 function scheduleKpiIngestCheck(): void {
   cron.schedule("*/15 6-23 * * *", () => {
     void checkKpiIngest({
@@ -1823,6 +1849,8 @@ async function loop(): Promise<void> {
   // Corte de sync de Apple Health (2026-07-16, pedido de Cal) — reabre la proactividad puntualmente
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
+  scheduleHealthGoalsMidday();
+  scheduleHealthGoalsDaily();
   scheduleJournalSweep();
   scheduleLearningReflectLocal();
   // Tarjeta diaria de KPIs Yape (TRX + Activos DAU) — YA NO tiene cron propio (era 10:00 fijo,

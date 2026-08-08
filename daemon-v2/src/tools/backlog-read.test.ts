@@ -55,6 +55,7 @@ describe("readBacklogCompact", () => {
     expect(c.items[0].section).toBe("Sección A");
     expect(c.items[2].section).toBe("Sección B");
     expect(c.items.some((i) => i.text.includes("Ítem ya hecho"))).toBe(false);
+    expect(c.truncated).toBe(false);
   });
 
   it("trunca los ítems largos para no disparar el persisted-output loop", () => {
@@ -67,15 +68,24 @@ describe("readBacklogCompact", () => {
     const c = readBacklogCompact(join(ROOT, "Personal/Agents/Jano/BACKLOG.md"), "jano", "Jano");
     expect(JSON.stringify(c).length).toBeLessThan(25_000);
   });
+
+  it("trunca la cantidad de ítems a MAX_ITEMS, sin recortar el total real", () => {
+    const many = "## Pendientes\n\n### Muchos\n" + Array.from({ length: 55 }, (_, i) => `- [ ] Ítem ${i}`).join("\n") + "\n";
+    write("Personal/Agents/Muchos/BACKLOG.md", many);
+    const c = readBacklogCompact(join(ROOT, "Personal/Agents/Muchos/BACKLOG.md"), "muchos", "Muchos");
+    expect(c.total).toBe(55);
+    expect(c.items).toHaveLength(40);
+    expect(c.items[0].text).toBe("Ítem 0");
+    expect(c.truncated).toBe(true);
+  });
 });
 
 describe("buildBacklogMap", () => {
-  it("agrupa y cuenta, incluyendo los que están en cero", () => {
+  it("agrupa y cuenta, filtrando los que están en cero", () => {
     const rows = buildBacklogMap(discoverBacklogs(ROOT));
     const byKey = new Map(rows.map((r) => [r.key, r]));
     expect(byKey.get("jano")?.pending).toBe(3);
     expect(byKey.get("vesta")?.pending).toBe(1);
-    expect(byKey.get("readwise")?.pending).toBe(0);
-    expect(byKey.get("readwise")?.group).toBe("Apps");
+    expect(byKey.has("readwise")).toBe(false);
   });
 });
