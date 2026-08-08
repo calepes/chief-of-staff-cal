@@ -23,9 +23,9 @@ Reorganizado por tema (antes agrupado por fecha/sesión de origen — ver anotac
 #### Pulido de las tools de backlog (2026-07-28)
 > Diferidos a propósito del `daemon-health-review` del 2026-07-28 (ninguno bloqueante; el feature
 > quedó con 539 tests en verde). Reconsiderar cuando haya uso real.
-- [ ] **Tope de ítems en `readBacklogCompact`** — hoy trunca a 200 chars por ítem pero no limita la cantidad. `inversiones-agente` ya va en 100 ítems / 9.4 KB, y el techo teórico con ítems al máximo ronda los 25 KB, que es justo el umbral del persisted-output loop del SDK. Fix: "primeros N + «y M más»".
-- [ ] **Filtrar del mapa los proyectos con 0 pendientes** — o mandarlos a un `<i>… y 2 sin pendientes</i>` al final. Hoy se listan igual (decisión original: "que un proyecto esté limpio es información"), pero con 17 backlogs la tarjeta se alarga.
-- [ ] **Guardar el `path` además de la `key` en la propuesta** — la propuesta vive 1 h en KV y el cache de descubrimiento dura 10 min; si el árbol cambia en el medio, `pickFreeKey` podría reasignar la clave y el ítem terminaría en otro proyecto que el que decía la tarjeta. Probabilidad baja. Fix: guardar el path resuelto y comparar al confirmar.
+- [x] **Tope de ítems en `readBacklogCompact`** — ✅ HECHO 2026-08-08: `MAX_ITEMS=40`, con `total` real sin recortar y flag `truncated` para que el modelo avise a Cal si hay más de los que ve. Test de regresión + instrucción en `system-prompt.ts`.
+- [x] **Filtrar del mapa los proyectos con 0 pendientes** — ✅ HECHO 2026-08-08: `buildBacklogMap` filtra `pending>0` (aplica también al picker de destino, decisión explícita de Cal). Los escapes (`destother`, error de `proponerItemBacklog`) siguen listando todas las claves sin filtrar.
+- [x] **Guardar el `path` además de la `key` en la propuesta** — ✅ HECHO 2026-08-08: `BacklogProposal.path`, poblado al crear/al cambiar destino (`destpick` recalcula con `resolveBacklogPath`). Informativo/auditoría — `resolveBacklogPath` sigue siendo la única fuente para escribir, nunca se reemplaza.
 - [ ] **`↩️ Deshacer` tras guardar** — la tarjeta del Journal lo ofrece y la del backlog no. Para `add` es un `markBacklogDone` invertido; para `done`, trivial.
 
 ### KPI ingest Yape (doble pipeline CSV+PDF)
@@ -277,7 +277,6 @@ Referencia: artículos OpenClaw de Claire Vo, Federico Viticci (MacStories), gu�
 ### Otros pendientes / Futuro
 - [x] **Google Maps API — distancias y tiempos** (2026-05-02) → implementado: `searchPlace` (Places API New) + `travelTime` (Routes API v2 TRAFFIC_AWARE) en `tools/maps.ts`. `requestUserLocation` extendido para cualquier consulta de distancia/ruta/ETA.
 - [ ] **Aprendizaje de largo plazo (Paweł model)** (2026-05-01) → sistema de knowledge tiers en `~/.claude/learnings/jano/` (facts→hypotheses→rules). Al cerrar sesión, el summary compactado pasa por extracción de patrones. Dependencia: conversation memory operativa primero. Ver diseño en `~/.claude/docs/superpowers/specs/2026-05-01-conversation-memory-design.md`
-- [ ] **Evaluar VPS para correr Claude Code** (agregado 2026-04-21) → alternativa a Mac local + launchd para correr cos-agent y family-agent 24/7. Motivación: problemas recurrentes con health-checks + zombies MCP + dependencia de red local (SNI filtering tumba polling Telegram). Evaluar: costo mensual vs estabilidad, migración del fork del plugin + workers + ambientes, latencia desde/hacia Telegram, y si conviene VPS completo o solo ejecutores remotos. Referencias: spec de watchdog (`docs/references/2026-04-21-agent-launchd-fix.pdf`) — si el VPS resuelve el problema raíz, el rediseño de health-check se vuelve innecesario
 
 ---
 
