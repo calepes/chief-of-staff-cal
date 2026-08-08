@@ -34,7 +34,7 @@ import { LEARNINGS_PATH } from "./proactive/learning-reflect.js";
 import { nowInLaPaz } from "./journal-capture.js";
 import { discoverBacklogs, resolveBacklogPath } from "./tools/backlog-discovery.js";
 import { buildBacklogMap, readBacklogCompact } from "./tools/backlog-read.js";
-import { renderBacklogMap, renderAddProposal, renderDoneProposal } from "./backlog-card.js";
+import { renderBacklogMap, renderAddProposal, renderDoneProposal, renderDiscardProposal } from "./backlog-card.js";
 import { BacklogStore } from "./backlog-store.js";
 import { fetchAndSummarize } from "./tools/fetch-and-summarize.js";
 import { resumirContenido, guardarResumenReadwise, editarPropuestaResumen, revisarPlaylistResumir, revisarStarredResumir, saltarResumen, detenerResumidor, estadoResumidor } from "./tools/resumir.js";
@@ -915,15 +915,17 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "proponerItemBacklog",
-      "Propone AGREGAR un ítem al backlog de un proyecto, o MARCARLO como hecho. NO escribe: manda una tarjeta " +
-      "a Telegram con botones para que Cal confirme, y la escritura ocurre cuando él toca ✅. " +
-      "Usar cuando Cal dicte una idea, un pendiente o un 'anota esto' durante la charla, y cuando diga que ya terminó algo. " +
+      "Propone AGREGAR un ítem al backlog de un proyecto, MARCARLO como hecho, o DESCARTARLO (ya no aplica, " +
+      "no se va a hacer — distinto de hecho). NO escribe: manda una tarjeta a Telegram con botones para que Cal " +
+      "confirme, y la escritura ocurre cuando él toca ✅. " +
+      "Usar cuando Cal dicte una idea, un pendiente o un 'anota esto' durante la charla; cuando diga que ya " +
+      "terminó algo (accion='hecho'); o cuando diga que algo ya no aplica / no lo va a hacer (accion='descartar'). " +
       "Redacta el texto en una línea clara y accionable, en las palabras de Cal — no lo adornes ni lo alargues. " +
       "Después de llamar esta tool NO generes texto: la tarjeta es el único canal.",
       {
         proyecto: z.string().describe("Clave del backlog destino, ej. 'jano'. Ante la duda usa 'jano'; Cal puede cambiarlo con un botón."),
-        texto: z.string().min(3).describe("Para accion='agregar': el ítem a anotar. Para accion='hecho': texto que identifique el ítem existente."),
-        accion: z.enum(["agregar", "hecho"]).describe("'agregar' para un ítem nuevo, 'hecho' para tildar uno existente"),
+        texto: z.string().min(3).describe("Para accion='agregar': el ítem a anotar. Para accion='hecho'/'descartar': texto que identifique el ítem existente."),
+        accion: z.enum(["agregar", "hecho", "descartar"]).describe("'agregar' para un ítem nuevo, 'hecho' para tildar uno existente, 'descartar' para marcarlo como que no se va a hacer"),
       },
       async ({ proyecto, texto, accion }) => {
         try {
@@ -935,12 +937,14 @@ export function buildSdkTools(deps: ToolDeps) {
           }
           const chatId = deps.getCurrentChatId();
           const store = new BacklogStore(deps.kv);
-          const kind = accion === "agregar" ? "add" : "done";
+          const kind = accion === "agregar" ? "add" : accion === "hecho" ? "done" : "discard";
           const shortId = await store.createProposal(chatId, { kind, key: proyecto, text: texto, path: entry.path });
           const card =
             kind === "add"
               ? renderAddProposal(entry.label, texto, shortId)
-              : renderDoneProposal(entry.label, texto, shortId);
+              : kind === "done"
+                ? renderDoneProposal(entry.label, texto, shortId)
+                : renderDiscardProposal(entry.label, texto, shortId);
           await tgSend(deps.botToken, chatId, card.text, card.keyboard);
           return asText("Tarjeta enviada. No generes texto adicional.");
         } catch (e) {

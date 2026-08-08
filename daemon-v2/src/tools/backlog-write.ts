@@ -1,8 +1,8 @@
-// tools/backlog-write.ts — las dos únicas escrituras permitidas sobre un backlog.
+// tools/backlog-write.ts — las escrituras permitidas sobre un backlog: append, tildar como
+// hecho/descartado, y restaurar un snapshot (↩️ Deshacer).
 //
-// Append de ítems nuevos y tildado de existentes. NUNCA edición libre de líneas: el riesgo de que
-// el modelo reformatee o pierda contenido de un archivo de 287 líneas no vale la flexibilidad
-// (decisión de Cal en el spec).
+// NUNCA edición libre de líneas: el riesgo de que el modelo reformatee o pierda contenido de un
+// archivo de 287 líneas no vale la flexibilidad (decisión de Cal en el spec).
 //
 // Escritura atómica (temporal + rename) porque este daemon corre semanas seguidas y muere por
 // launchd sin aviso: un writeFileSync interrumpido dejaría el BACKLOG.md truncado.
@@ -70,10 +70,16 @@ export function appendBacklogItem(path: string, texto: string, fecha: string): v
 }
 
 /**
- * Tilda el único pendiente que contenga `needle`. Falla explícito con 0 o ≥2 coincidencias —
- * adivinar cuál tildar sería peor que no hacer nada.
+ * Encuentra el único pendiente que contenga `needle` y aplica `transform` a esa línea.
+ * Falla explícito con 0 o ≥2 coincidencias — adivinar cuál tocar sería peor que no hacer nada.
+ * `line` en el resultado es el texto ORIGINAL (antes de `transform`), para mostrarle a Cal el
+ * ítem limpio en la tarjeta sin importar qué marcas agregue la transformación.
  */
-export function markBacklogDone(path: string, needle: string): MarkResult {
+function markBacklogLine(
+  path: string,
+  needle: string,
+  transform: (originalLine: string) => string,
+): MarkResult {
   const lines = readFileSync(path, "utf8").split("\n");
   const target = needle.trim().toLowerCase();
   const hits: number[] = [];
@@ -93,8 +99,31 @@ export function markBacklogDone(path: string, needle: string): MarkResult {
   }
 
   const i = hits[0];
-  const original = lines[i];
-  lines[i] = original.replace(PENDING_RE, "$1[x]$2");
+  const cleanText = lines[i].replace(PENDING_RE, "$2").trim().slice(0, 120);
+  lines[i] = transform(lines[i]);
   writeAtomic(path, lines.join("\n"));
-  return { ok: true, line: lines[i].replace(/^(\s*-\s)\[[xX]\]\s?/, "").trim().slice(0, 120) };
+  return { ok: true, line: cleanText };
+}
+
+/** Tilda el pendiente como hecho: `[ ]` → `[x]`, sin tocar el texto. */
+export function markBacklogDone(path: string, needle: string): MarkResult {
+  return markBacklogLine(path, needle, (original) => original.replace(PENDING_RE, "$1[x]$2"));
+}
+
+/**
+ * Tilda el pendiente como DESCARTADO — distinto de hecho: tacha el texto y anota el motivo,
+ * para que no se lea como trabajo completado al pasar la vista por el archivo.
+ */
+export function markBacklogDiscarded(path: string, needle: string, fecha: string): MarkResult {
+  return markBacklogLine(path, needle, (original) => {
+    const m = PENDING_RE.exec(original);
+    if (!m) return original;
+    const [, prefix, body] = m;
+    return `${prefix}[x] ~~${body.trim()}~~ — ❌ descartado ${fecha}`;
+  });
+}
+
+/** Restaura un snapshot completo (↩️ Deshacer). Misma escritura atómica que las de arriba. */
+export function restoreBacklogSnapshot(path: string, content: string): void {
+  writeAtomic(path, content);
 }

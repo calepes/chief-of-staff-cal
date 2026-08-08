@@ -57,3 +57,33 @@ describe("BacklogStore", () => {
     expect(await s.getProposal(42, id)).toBeNull();
   });
 });
+
+describe("BacklogStore — undo (↩️ Deshacer)", () => {
+  it("guarda y recupera un snapshot, reusando el shortId de la propuesta", async () => {
+    const kv = fakeKv();
+    const s = new BacklogStore(kv);
+    await s.setUndo(42, "abc12345", { path: "/fake/jano/BACKLOG.md", content: "# Backlog\n" });
+    expect(await s.getUndo(42, "abc12345")).toEqual({ path: "/fake/jano/BACKLOG.md", content: "# Backlog\n" });
+  });
+
+  it("no hay snapshot para un shortId que nunca guardó undo", async () => {
+    const kv = fakeKv();
+    const s = new BacklogStore(kv);
+    expect(await s.getUndo(42, "noexiste")).toBeNull();
+  });
+
+  it("borra el snapshot", async () => {
+    const kv = fakeKv();
+    const s = new BacklogStore(kv);
+    await s.setUndo(42, "abc12345", { path: "/fake/jano/BACKLOG.md", content: "# Backlog\n" });
+    await s.clearUndo(42, "abc12345");
+    expect(await s.getUndo(42, "abc12345")).toBeNull();
+  });
+
+  it("aísla por chat", async () => {
+    const kv = fakeKv();
+    const s = new BacklogStore(kv);
+    await s.setUndo(42, "abc12345", { path: "/fake/jano/BACKLOG.md", content: "# Backlog\n" });
+    expect(await s.getUndo(99, "abc12345")).toBeNull();
+  });
+});

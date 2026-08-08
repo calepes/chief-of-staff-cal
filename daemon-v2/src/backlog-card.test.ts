@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderBacklogMap, renderAddProposal, renderDoneProposal, renderSaved, renderDiscarded, renderDestPicker } from "./backlog-card.js";
+import { renderBacklogMap, renderAddProposal, renderDoneProposal, renderDiscardProposal, renderSaved, renderDiscarded, renderDestPicker } from "./backlog-card.js";
 import type { BacklogMapRow } from "./backlog-types.js";
 
 const ROWS: BacklogMapRow[] = [
@@ -122,9 +122,32 @@ describe("layout del skill telegram-bot-ux: ningún botón de más de 15 chars c
   });
 });
 
+describe("renderDiscardProposal", () => {
+  it("muestra destino, texto y los botones confirmar/cancelar", () => {
+    const card = renderDiscardProposal("Jano", "Ítem viejo", "abc123");
+    expect(card.text).toContain("Ítem viejo");
+    expect(card.text).toContain("descartado");
+    const datas = card.keyboard.inline_keyboard.flat().map((b) => b.callback_data);
+    expect(datas).toEqual(["bklg:save:abc123", "bklg:drop:abc123"]);
+  });
+
+  it("usa 'Cancelar' en vez de 'Descartar' para no confundir con la acción misma", () => {
+    const kb = renderDiscardProposal("Jano", "Ítem viejo", "abc123").keyboard.inline_keyboard;
+    const texts = kb.flat().map((b) => b.text);
+    expect(texts).toContain("❌ Cancelar");
+    expect(texts).not.toContain("❌ Descartar");
+  });
+});
+
 describe("renderSaved / renderDiscarded", () => {
-  it("dejan el teclado vacío", () => {
-    expect(renderSaved("Jano", "Tool nueva", "add").keyboard.inline_keyboard).toEqual([]);
+  it("trae el botón ↩️ Deshacer con el shortId de la propuesta ya escrita", () => {
+    for (const kind of ["add", "done", "discard"] as const) {
+      const kb = renderSaved("Jano", "Tool nueva", kind, "abc123").keyboard.inline_keyboard;
+      expect(kb).toEqual([[{ text: "↩️ Deshacer", callback_data: "bklg:undo:abc123" }]]);
+    }
+  });
+
+  it("renderDiscarded (cancelar la PROPUESTA, no confirmar un descarte) deja el teclado vacío", () => {
     expect(renderDiscarded().keyboard.inline_keyboard).toEqual([]);
   });
 });

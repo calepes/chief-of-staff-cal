@@ -6,16 +6,23 @@
 // El módulo no toca la red directamente: recibe `editCard` como dependencia para poder testear
 // el flujo completo sin mockear fetch.
 
+import { readFileSync } from "node:fs";
 import {
   renderSaved,
   renderDiscarded,
   renderDestPicker,
   renderAddProposal,
   renderDoneProposal,
+  renderDiscardProposal,
 } from "./backlog-card.js";
 import { discoverBacklogs, resolveBacklogPath } from "./tools/backlog-discovery.js";
 import { buildBacklogMap } from "./tools/backlog-read.js";
-import { appendBacklogItem, markBacklogDone } from "./tools/backlog-write.js";
+import {
+  appendBacklogItem,
+  markBacklogDone,
+  markBacklogDiscarded,
+  restoreBacklogSnapshot,
+} from "./tools/backlog-write.js";
 import type { BacklogStore } from "./backlog-store.js";
 import type { MarkResult } from "./backlog-types.js";
 
@@ -53,6 +60,33 @@ export async function handleBacklogCallback(
   data: string,
 ): Promise<void> {
   const [, action, shortId, extra] = data.split(":");
+
+  // ↩️ Deshacer usa el shortId de una propuesta YA escrita y limpiada de KV — no busca `prop`,
+  // así que va antes del chequeo de "propuesta expirada" de abajo (ese es para el flujo de
+  // confirmación, no para deshacer algo que ya se confirmó).
+  if (action === "undo") {
+    const snapshot = await deps.store.getUndo(chatId, shortId);
+    if (!snapshot) {
+      await deps.editCard(chatId, messageId, "⌛ <b>La ventana para deshacer ya pasó.</b>", {
+        inline_keyboard: [],
+      });
+      return;
+    }
+    try {
+      restoreBacklogSnapshot(snapshot.path, snapshot.content);
+    } catch (e) {
+      deps.log({ msg: "backlog_undo_failed", err: String(e) });
+      await deps.editCard(chatId, messageId, WRITE_FAIL_MSG, { inline_keyboard: [] });
+      return;
+    }
+    await deps.store.clearUndo(chatId, shortId);
+    await deps.editCard(chatId, messageId, "↩️ <b>Deshecho</b> · el backlog volvió a como estaba.", {
+      inline_keyboard: [],
+    });
+    deps.log({ msg: "backlog_undone" });
+    return;
+  }
+
   const prop = await deps.store.getProposal(chatId, shortId);
 
   if (!prop) {
@@ -130,7 +164,9 @@ export async function handleBacklogCallback(
     const card =
       prop.kind === "add"
         ? renderAddProposal(label, prop.text, shortId)
-        : renderDoneProposal(label, prop.text, shortId);
+        : prop.kind === "done"
+          ? renderDoneProposal(label, prop.text, shortId)
+          : renderDiscardProposal(label, prop.text, shortId);
     await deps.editCard(chatId, messageId, card.text, card.keyboard);
     return;
   }
@@ -160,12 +196,22 @@ export async function handleBacklogCallback(
 
   const label = labelFor(prop.key, deps.root);
 
-  // Mismo patrón que el resolve de arriba: la escritura es el paso que más importa (es la
-  // única razón de ser de toda la tarjeta) y puede fallar por causas ajenas a la propuesta
-  // (ENOSPC, EACCES, volumen de solo lectura, el archivo se borró entre el realpath y acá).
-  // Sin este try/catch la excepción sube hasta el `.catch` genérico de index.ts y la tarjeta
-  // queda con los botones vivos — Cal ve exactamente lo mismo que antes de tocar ✅, sin ningún
-  // indicio de que su escritura no se guardó.
+  // Snapshot ANTES de escribir — es lo que restaura ↩️ Deshacer. Si ni siquiera se puede leer
+  // el archivo acá, tampoco se va a poder escribir abajo: cada rama de escritura ya tiene su
+  // propio try/catch que va a fallar con el mismo error y avisar a Cal, así que no hace falta
+  // uno extra acá — con "" alcanza como snapshot inútil-pero-inofensivo en ese caso límite.
+  let snapshot = "";
+  try {
+    snapshot = readFileSync(path, "utf8");
+  } catch {
+    /* el catch de la escritura de abajo va a fallar igual y avisar */
+  }
+
+  // Mismo patrón: la escritura es el paso que más importa (es la única razón de ser de toda la
+  // tarjeta) y puede fallar por causas ajenas a la propuesta (ENOSPC, EACCES, volumen de solo
+  // lectura, el archivo se borró entre el realpath y acá). Sin este try/catch la excepción sube
+  // hasta el `.catch` genérico de index.ts y la tarjeta queda con los botones vivos — Cal ve
+  // exactamente lo mismo que antes de tocar ✅, sin ningún indicio de que su escritura no se guardó.
   if (prop.kind === "add") {
     try {
       appendBacklogItem(path, prop.text, deps.today);
@@ -174,8 +220,9 @@ export async function handleBacklogCallback(
       await deps.editCard(chatId, messageId, WRITE_FAIL_MSG, { inline_keyboard: [] });
       return;
     }
+    await deps.store.setUndo(chatId, shortId, { path, content: snapshot });
     await deps.store.clearProposal(chatId, shortId);
-    const card = renderSaved(label, prop.text, "add");
+    const card = renderSaved(label, prop.text, "add", shortId);
     await deps.editCard(chatId, messageId, card.text, card.keyboard);
     deps.log({ msg: "backlog_item_added", key: prop.key });
     return;
@@ -183,17 +230,21 @@ export async function handleBacklogCallback(
 
   let res: MarkResult;
   try {
-    res = markBacklogDone(path, prop.text);
+    res =
+      prop.kind === "done"
+        ? markBacklogDone(path, prop.text)
+        : markBacklogDiscarded(path, prop.text, deps.today);
   } catch (e) {
-    deps.log({ msg: "backlog_write_failed", key: prop.key, kind: "done", err: String(e) });
+    deps.log({ msg: "backlog_write_failed", key: prop.key, kind: prop.kind, err: String(e) });
     await deps.editCard(chatId, messageId, WRITE_FAIL_MSG, { inline_keyboard: [] });
     return;
   }
   if (res.ok) {
+    await deps.store.setUndo(chatId, shortId, { path, content: snapshot });
     await deps.store.clearProposal(chatId, shortId);
-    const card = renderSaved(label, res.line, "done");
+    const card = renderSaved(label, res.line, prop.kind, shortId);
     await deps.editCard(chatId, messageId, card.text, card.keyboard);
-    deps.log({ msg: "backlog_item_done", key: prop.key });
+    deps.log({ msg: prop.kind === "done" ? "backlog_item_done" : "backlog_item_discarded", key: prop.key });
     return;
   }
 

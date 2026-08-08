@@ -159,12 +159,27 @@ describe("handleBacklogCallback", () => {
     expect(readFileSync(JANO, "utf8")).toBe(before);
   });
 
-  it("todo cierre de tarjeta manda el teclado vacío explícito, nunca undefined", async () => {
+  it("todo cierre de tarjeta manda un teclado explícito, nunca undefined", async () => {
     const store = new BacklogStore(fakeKv());
     const { deps, edits } = fakeDeps(store);
     const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
 
     await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
+
+    // bklg:save deja vivo el botón ↩️ Deshacer — sigue siendo un teclado EXPLÍCITO (no
+    // omitido), que es lo que este test protege: editMessageText preserva el teclado viejo
+    // si reply_markup se omite (gotcha documentado en la cabecera del archivo de test).
+    expect(edits.at(-1)?.keyboard).toEqual({
+      inline_keyboard: [[{ text: "↩️ Deshacer", callback_data: `bklg:undo:${id}` }]],
+    });
+  });
+
+  it("bklg:drop cierra con teclado vacío explícito (no ofrece Deshacer — no se escribió nada)", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:drop:${id}`);
 
     expect(edits.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
   });
@@ -256,5 +271,73 @@ describe("handleBacklogCallback", () => {
     expect(edits.at(-1)?.text).not.toContain("ENOSPC");
     expect(await store.getProposal(1, id)).not.toBeNull();
     expect(logs.some((l) => l.msg === "backlog_write_failed")).toBe(true);
+  });
+
+  it("bklg:save con accion='descartar' tacha el ítem en vez de tildarlo limpio", async () => {
+    writeFileSync(JANO, "# Backlog\n\n## Pendientes\n\n### Vieja\n- [ ] Ítem a descartar\n");
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "discard", key: "jano", text: "Ítem a descartar", path: JANO });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
+
+    const out = readFileSync(JANO, "utf8");
+    expect(out).toContain("- [x] ~~Ítem a descartar~~ — ❌ descartado 2026-07-28");
+    expect(edits.at(-1)?.text).toContain("descartado");
+    expect(await store.getProposal(1, id)).toBeNull();
+  });
+
+  it("↩️ Deshacer restaura el archivo tal como estaba antes del save (add)", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits } = fakeDeps(store);
+    const before = readFileSync(JANO, "utf8");
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea a deshacer", path: JANO });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
+    expect(readFileSync(JANO, "utf8")).toContain("Idea a deshacer");
+
+    await handleBacklogCallback(deps, 1, 11, `bklg:undo:${id}`);
+
+    expect(readFileSync(JANO, "utf8")).toBe(before);
+    expect(edits.at(-1)?.text).toContain("Deshecho");
+  });
+
+  it("↩️ Deshacer restaura un tildado (done) al estado sin tildar", async () => {
+    writeFileSync(JANO, "# Backlog\n\n## Pendientes\n\n### Vieja\n- [ ] Ítem a tildar\n");
+    const before = readFileSync(JANO, "utf8");
+    const store = new BacklogStore(fakeKv());
+    const { deps } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "done", key: "jano", text: "Ítem a tildar", path: JANO });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
+    expect(readFileSync(JANO, "utf8")).toContain("[x]");
+
+    await handleBacklogCallback(deps, 1, 11, `bklg:undo:${id}`);
+
+    expect(readFileSync(JANO, "utf8")).toBe(before);
+  });
+
+  it("↩️ Deshacer fuera de la ventana de 10 min avisa en vez de romper", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps, edits } = fakeDeps(store);
+
+    await handleBacklogCallback(deps, 1, 10, "bklg:undo:noexiste");
+
+    expect(edits.at(-1)?.text).toContain("ventana");
+    expect(edits.at(-1)?.keyboard).toEqual({ inline_keyboard: [] });
+  });
+
+  it("↩️ Deshacer no depende de que la propuesta siga viva (ya se limpió al guardar)", async () => {
+    const store = new BacklogStore(fakeKv());
+    const { deps } = fakeDeps(store);
+    const id = await store.createProposal(1, { kind: "add", key: "jano", text: "Idea", path: JANO });
+
+    await handleBacklogCallback(deps, 1, 10, `bklg:save:${id}`);
+    // La propuesta ya no existe en KV en este punto — igual el undo tiene que andar.
+    expect(await store.getProposal(1, id)).toBeNull();
+
+    await handleBacklogCallback(deps, 1, 11, `bklg:undo:${id}`);
+
+    expect(readFileSync(JANO, "utf8")).not.toContain("Idea");
   });
 });

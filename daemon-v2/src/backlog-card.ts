@@ -75,8 +75,7 @@ export function renderDoneProposal(destino: string, linea: string, shortId: stri
     ].join("\n"),
     keyboard: {
       // "✅ Confirmar" (12 chars) y "❌ Descartar" (12 chars) NO son el binario corto ≤8 chars
-      // que el skill permite en una sola fila (ej. "✅ Sí"/"❌ No") — acá la acción escribe el
-      // archivo y no tiene ↩️ Deshacer, así que cada una va en su propia fila.
+      // que el skill permite en una sola fila (ej. "✅ Sí"/"❌ No") — cada una va en su propia fila.
       inline_keyboard: [
         [{ text: "✅ Confirmar", callback_data: `bklg:save:${shortId}` }],
         [{ text: "❌ Descartar", callback_data: `bklg:drop:${shortId}` }],
@@ -85,11 +84,33 @@ export function renderDoneProposal(destino: string, linea: string, shortId: stri
   };
 }
 
-export function renderSaved(destino: string, texto: string, kind: "add" | "done"): Card {
-  const head = kind === "add" ? "📝 <b>Anotado</b>" : "☑️ <b>Marcado como hecho</b>";
+export function renderDiscardProposal(destino: string, linea: string, shortId: string): Card {
+  return {
+    text: [
+      "🚫 <b>Marcar como descartado</b>",
+      "",
+      `📁 ${esc(destino)}`,
+      `«${esc(linea)}»`,
+    ].join("\n"),
+    keyboard: {
+      // "❌ Cancelar" (no "Descartar" — acá esa palabra ya la usa la ACCIÓN en sí, repetirla
+      // en el botón de cancelar sería confuso: ¿cancela la propuesta o descarta el ítem?
+      inline_keyboard: [
+        [{ text: "✅ Confirmar", callback_data: `bklg:save:${shortId}` }],
+        [{ text: "❌ Cancelar", callback_data: `bklg:drop:${shortId}` }],
+      ],
+    },
+  };
+}
+
+/** `shortId` reusado como id de undo (bklg:undo:{shortId}) — la propuesta ya se limpió de KV
+ *  para este punto, pero el snapshot de deshacer vive aparte con su propio TTL de 10 min. */
+export function renderSaved(destino: string, texto: string, kind: "add" | "done" | "discard", shortId: string): Card {
+  const head =
+    kind === "add" ? "📝 <b>Anotado</b>" : kind === "done" ? "☑️ <b>Marcado como hecho</b>" : "🚫 <b>Marcado como descartado</b>";
   return {
     text: [head, "", `📁 ${esc(destino)}`, `«${esc(texto)}»`].join("\n"),
-    keyboard: { inline_keyboard: [] },
+    keyboard: { inline_keyboard: [[{ text: "↩️ Deshacer", callback_data: `bklg:undo:${shortId}` }]] },
   };
 }
 

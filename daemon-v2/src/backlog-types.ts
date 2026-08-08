@@ -45,13 +45,23 @@ export type MarkResult =
 
 /** Propuesta pendiente de confirmación, guardada en CF KV. */
 export interface BacklogProposal {
-  kind: "add" | "done";
+  kind: "add" | "done" | "discard";
   /** Clave del backlog destino. */
   key: string;
-  /** Texto del ítem a agregar, o texto que localiza el ítem a tildar. */
+  /** Texto del ítem a agregar, o texto que localiza el ítem a tildar/descartar. */
   text: string;
   /** Path del backlog destino al momento de crear la propuesta — informativo/auditoría.
    *  NUNCA reemplaza resolveBacklogPath() al escribir: ese sigue siendo el único camino
    *  validado (realpath + allowlist) para tocar el archivo. */
   path: string;
+}
+
+/** Snapshot del archivo COMPLETO justo antes de escribir, para el botón ↩️ Deshacer.
+ *  Deliberadamente de archivo entero (no un diff de línea): el archivo es chico (<30 KB) y
+ *  esto evita cualquier lógica de "reversa" propensa a errores. Gap conocido y aceptado: si
+ *  Cal guarda 2 ítems seguidos y deshace el más viejo, también se pierde el más nuevo — el
+ *  archivo está en git, así que la red de seguridad real es el commit, no este snapshot. */
+export interface BacklogUndo {
+  path: string;
+  content: string;
 }
