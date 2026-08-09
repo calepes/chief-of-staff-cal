@@ -9,6 +9,26 @@ import { fetchAsUser } from "./fetch-as-user.js";
 import { addDomainAndSync } from "./cookie-jar.js";
 import { extractPdfFromBuffer, fetchPdfBuffer, necesitaOcr } from "./pdf-extract.js";
 import { analyzePdf } from "./vision.js";
+import { sendCronMessage, editCronMessage, stripHtmlTags } from "../proactive/rich-send.js";
+
+// A diferencia de sendCronMessage/editCronMessage (2 niveles, contenido 100% code-generado de
+// los crons), acá el cuerpo del resumen viene de un subproceso `claude` externo que resume
+// contenido de terceros (artículos/videos) — mismo perfil de riesgo de HTML mal formado que el
+// reply libre del modelo en index.ts. Perder el mensaje acá es perder el resultado central de la
+// tool, no una notificación secundaria, así que se agrega un 3er nivel de texto plano (hallazgo
+// de daemon-health-reviewer, 2026-08-09). Misma forma de opts que sendCronMessage/editCronMessage
+// a propósito — drop-in replacement en todos los call sites de este archivo.
+async function sendResumenMessage(botToken: string, opts: { chatId: number; text: string; replyMarkup?: unknown }): Promise<{ message_id: number } | null> {
+  const sent = await sendCronMessage(botToken, opts).catch(() => null);
+  if (sent) return sent;
+  return sendMessage(botToken, { chatId: opts.chatId, text: stripHtmlTags(opts.text), replyMarkup: opts.replyMarkup }).catch(() => null);
+}
+
+async function editResumenMessage(botToken: string, opts: { chatId: number; messageId: number; text: string; replyMarkup?: unknown }): Promise<boolean> {
+  const ok = await editCronMessage(botToken, opts).then(() => true).catch(() => false);
+  if (ok) return true;
+  return editMessage(botToken, opts.chatId, opts.messageId, stripHtmlTags(opts.text), null, opts.replyMarkup).then(() => true).catch(() => false);
+}
 
 // Resumidor universal para Jano. Reutiliza los MISMOS scripts standalone que el
 // skill `resumir` (~/.claude/scripts/*), invocándolos con spawn(argv) — sin shell,
@@ -434,10 +454,10 @@ function buildProposalCard(proposal: PendingProposal): { text: string; keyboard:
 // Edita un mensaje existente (la tarjeta); si no hay messageId o el edit falla, manda uno nuevo.
 async function setCardMessage(botToken: string, chatId: number, messageId: number | undefined, text: string, keyboard?: unknown): Promise<number | undefined> {
   if (messageId != null) {
-    const ok = await editMessage(botToken, chatId, messageId, text, "HTML", keyboard).then(() => true).catch(() => false);
+    const ok = await editResumenMessage(botToken, { chatId, messageId, text, replyMarkup: keyboard });
     if (ok) return messageId;
   }
-  const sent = await sendMessage(botToken, { chatId, text, parseMode: "HTML", replyMarkup: keyboard }).catch(() => null);
+  const sent = await sendResumenMessage(botToken, { chatId, text, replyMarkup: keyboard });
   return sent?.message_id;
 }
 
@@ -662,8 +682,7 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
   const parts = chunk(header + mdToTelegram(md), TG_MAX);
   await setAnchor(parts[0] ?? "(resumen vacío)");
   for (const extra of parts.slice(1)) {
-    const sent = await sendMessage(botToken, { chatId, text: extra, parseMode: "HTML" }).catch(() => null);
-    if (!sent) await sendMessage(botToken, { chatId, text: extra }).catch(() => {});
+    await sendResumenMessage(botToken, { chatId, text: extra });
   }
 
   // Checkpoint: tarjeta de propuesta con botones (mensaje nuevo). NO escribe a Readwise hasta confirmar.
@@ -680,7 +699,7 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     feedbinId: opts.feedbinId,
   };
   const card = buildProposalCard(proposal);
-  const cardSent = await sendMessage(botToken, { chatId, text: card.text, parseMode: "HTML", replyMarkup: card.keyboard }).catch(() => null);
+  const cardSent = await sendResumenMessage(botToken, { chatId, text: card.text, replyMarkup: card.keyboard }).catch(() => null);
   proposal.messageId = cardSent?.message_id;
   try { writeFileSync(pendingPath(chatId), JSON.stringify(proposal), "utf8"); }
   catch { /* si no se puede persistir, igual mostramos la propuesta */ }
@@ -688,7 +707,7 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
 
 async function runGuardar(deps: ResumirDeps, chatId: number, args: GuardarReadwiseArgs): Promise<void> {
   const { botToken } = deps;
-  const tg = (text: string) => sendMessage(botToken, { chatId, text, parseMode: "HTML" }).catch(() => {});
+  const tg = (text: string) => sendResumenMessage(botToken, { chatId, text }).catch(() => {});
   const p = pendingPath(chatId);
   let proposal: PendingProposal;
   if (!existsSync(p)) {
@@ -763,10 +782,9 @@ export function resumirContenido(
   // Fire-and-forget: el daemon es de larga vida; el pipeline corre en background.
   void run(deps, chatId, kind, args).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
-    void sendMessage(deps.botToken, {
+    void sendResumenMessage(deps.botToken, {
       chatId,
       text: `❌ Error resumiendo (${msg}). Intentá de nuevo.`,
-      parseMode: "HTML",
     }).catch(() => {});
   });
 
@@ -788,10 +806,9 @@ export function guardarResumenReadwise(
 ): { status: string; message: string } {
   void runGuardar(deps, chatId, args).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
-    void sendMessage(deps.botToken, {
+    void sendResumenMessage(deps.botToken, {
       chatId,
       text: `❌ Error guardando en Readwise (${msg}).`,
-      parseMode: "HTML",
     }).catch(() => {});
   });
   return { status: "started", message: "Guardado iniciado: YA edito la tarjeta en Telegram (⏳ Guardando → 📚 Guardado) y avanzo la cola solo. NO escribas ningún texto de respuesta — devolvé VACÍO." };
@@ -802,12 +819,12 @@ async function runEditar(deps: ResumirDeps, chatId: number, args: EditarPropuest
   const { botToken } = deps;
   const p = pendingPath(chatId);
   if (!existsSync(p)) {
-    await sendMessage(botToken, { chatId, text: "No hay ninguna propuesta pendiente para editar. Mandame un link o título para resumir.", parseMode: "HTML" }).catch(() => {});
+    await sendResumenMessage(botToken, { chatId, text: "No hay ninguna propuesta pendiente para editar. Mandame un link o título para resumir." }).catch(() => {});
     return;
   }
   const proposal = readJsonSafe<PendingProposal | null>(p, null);
   if (!proposal || proposal.placeholder || proposal.saving || !Array.isArray(proposal.tags) || !Array.isArray(proposal.highlights)) {
-    await sendMessage(botToken, { chatId, text: "⏳ El resumen se está procesando o guardando; esperá un momento.", parseMode: "HTML" }).catch(() => {});
+    await sendResumenMessage(botToken, { chatId, text: "⏳ El resumen se está procesando o guardando; esperá un momento." }).catch(() => {});
     return;
   }
   if (Array.isArray(args.setTags)) {
@@ -842,7 +859,7 @@ async function runEditar(deps: ResumirDeps, chatId: number, args: EditarPropuest
 export function editarPropuestaResumen(deps: ResumirDeps, chatId: number, args: EditarPropuestaArgs): { status: string; message: string } {
   void runEditar(deps, chatId, args).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
-    void sendMessage(deps.botToken, { chatId, text: `❌ Error editando la propuesta (${msg}).`, parseMode: "HTML" }).catch(() => {});
+    void sendResumenMessage(deps.botToken, { chatId, text: `❌ Error editando la propuesta (${msg}).` }).catch(() => {});
   });
   return { status: "started", message: "YA actualicé la tarjeta en Telegram con los cambios (sin guardar en Readwise). NO escribas texto de respuesta — devolvé VACÍO; Cal confirma con el botón ✅ Guardar." };
 }
@@ -1159,7 +1176,7 @@ export async function checkStarredResumir(deps: ResumirDeps, chatIdArg?: number,
   writeJsonSafe(STARRED_QUEUE, q);
   // Con ancla (tap): el mismo mensaje fluye al procesamiento; sin ancla (cron): notificar los nuevos.
   if (added > 0 && anchorMsgId == null) {
-    await sendMessage(deps.botToken, { chatId, text: `⭐ ${added} starred nuevo(s) en Feedbin.`, parseMode: "HTML" }).catch(() => {});
+    await sendResumenMessage(deps.botToken, { chatId, text: `⭐ ${added} starred nuevo(s) en Feedbin.` }).catch(() => {});
   }
   if (q.items.length === 0) {
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "👌 Revisé los starred: no hay nuevos.");
@@ -1170,7 +1187,7 @@ export async function checkStarredResumir(deps: ResumirDeps, chatIdArg?: number,
   if (existsSync(pendingPath(chatId))) {
     const msg = `📋 Tenés una propuesta en curso. Resolvéla ("guardar" o "salta") y sigo con los starred (${q.items.length} en cola).`;
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, msg);
-    else await sendMessage(deps.botToken, { chatId, text: msg, parseMode: "HTML" }).catch(() => {});
+    else await sendResumenMessage(deps.botToken, { chatId, text: msg }).catch(() => {});
     return { status: "ok", message: `Propuesta en curso; ${q.items.length} en cola.` };
   }
   if (q.mode === "batch") {
@@ -1186,13 +1203,13 @@ export async function checkStarredResumir(deps: ResumirDeps, chatIdArg?: number,
 export function revisarStarredResumir(deps: ResumirDeps, chatId: number): { status: string; message: string } {
   void checkStarredResumir(deps, chatId).then((r) => {
     if (r.status === "ok" && r.message.startsWith("Sin starred")) {
-      void sendMessage(deps.botToken, { chatId, text: "👌 Revisé los starred de Feedbin: no hay nuevos.", parseMode: "HTML" }).catch(() => {});
+      void sendResumenMessage(deps.botToken, { chatId, text: "👌 Revisé los starred de Feedbin: no hay nuevos." }).catch(() => {});
     } else if (r.status === "noop") {
-      void sendMessage(deps.botToken, { chatId, text: "No tengo credenciales de Feedbin configuradas.", parseMode: "HTML" }).catch(() => {});
+      void sendResumenMessage(deps.botToken, { chatId, text: "No tengo credenciales de Feedbin configuradas." }).catch(() => {});
     }
   }).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
-    void sendMessage(deps.botToken, { chatId, text: `❌ Error revisando los starred (${msg}).`, parseMode: "HTML" }).catch(() => {});
+    void sendResumenMessage(deps.botToken, { chatId, text: `❌ Error revisando los starred (${msg}).` }).catch(() => {});
   });
   return { status: "started", message: "Revisando los starred de Feedbin en background..." };
 }
@@ -1277,7 +1294,7 @@ async function advancePlaylistQueue(deps: ResumirDeps, chatId: number, anchorMsg
     delete q.mode;
     writeJsonSafe(PLAYLIST_QUEUE, q);
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "✅ Playlist al día — no quedan videos por resumir.");
-    else await sendMessage(deps.botToken, { chatId, text: "✅ Playlist al día — no quedan videos por resumir.", parseMode: "HTML" }).catch(() => {});
+    else await sendResumenMessage(deps.botToken, { chatId, text: "✅ Playlist al día — no quedan videos por resumir." }).catch(() => {});
     return;
   }
   writeJsonSafe(PLAYLIST_QUEUE, q);
@@ -1303,14 +1320,14 @@ async function maybeAdvance(deps: ResumirDeps, chatId: number): Promise<void> {
   if (pq.videos.length > 0) {
     if (pq.mode === "batch") { await advancePlaylistQueue(deps, chatId); return; }
     const sel = buildQueueSelector("v", pq.videos.map((v) => ({ id: v.id, title: v.title })));
-    await sendMessage(deps.botToken, { chatId, text: sel.text, parseMode: "HTML", replyMarkup: sel.keyboard }).catch(() => {});
+    await sendResumenMessage(deps.botToken, { chatId, text: sel.text, replyMarkup: sel.keyboard }).catch(() => {});
     return;
   }
   const sq = readJsonSafe<{ items: StarredItem[]; mode?: "batch" }>(STARRED_QUEUE, { items: [] });
   if (sq.items.length > 0) {
     if (sq.mode === "batch") { await advanceStarredQueue(deps, chatId); return; }
     const sel = buildQueueSelector("s", sq.items.map((it) => ({ id: it.id, title: it.title })));
-    await sendMessage(deps.botToken, { chatId, text: sel.text, parseMode: "HTML", replyMarkup: sel.keyboard }).catch(() => {});
+    await sendResumenMessage(deps.botToken, { chatId, text: sel.text, replyMarkup: sel.keyboard }).catch(() => {});
     return;
   }
 }
@@ -1339,7 +1356,7 @@ export async function checkPlaylistsResumir(deps: ResumirDeps, chatIdArg?: numbe
   writeJsonSafe(PLAYLIST_QUEUE, q);
   // Con ancla (tap): el mismo mensaje fluye al procesamiento; sin ancla (cron): notificar los nuevos.
   if (added > 0 && anchorMsgId == null) {
-    await sendMessage(deps.botToken, { chatId, text: `🎬 ${added} video(s) nuevo(s) en tu playlist.`, parseMode: "HTML" }).catch(() => {});
+    await sendResumenMessage(deps.botToken, { chatId, text: `🎬 ${added} video(s) nuevo(s) en tu playlist.` }).catch(() => {});
   }
   if (q.videos.length === 0) {
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, "👌 Revisé la playlist: no hay videos nuevos.");
@@ -1350,7 +1367,7 @@ export async function checkPlaylistsResumir(deps: ResumirDeps, chatIdArg?: numbe
   if (existsSync(pendingPath(chatId))) {
     const msg = `📋 Tenés una propuesta en curso. Resolvéla ("guardar" o "salta") y sigo con la playlist (${q.videos.length} en cola).`;
     if (anchorMsgId != null) await setCardMessage(deps.botToken, chatId, anchorMsgId, msg);
-    else await sendMessage(deps.botToken, { chatId, text: msg, parseMode: "HTML" }).catch(() => {});
+    else await sendResumenMessage(deps.botToken, { chatId, text: msg }).catch(() => {});
     return { status: "ok", message: `Propuesta en curso; ${q.videos.length} en cola.` };
   }
   if (q.mode === "batch") {
@@ -1366,13 +1383,13 @@ export async function checkPlaylistsResumir(deps: ResumirDeps, chatIdArg?: numbe
 export function revisarPlaylistResumir(deps: ResumirDeps, chatId: number): { status: string; message: string } {
   void checkPlaylistsResumir(deps, chatId).then((r) => {
     if (r.status === "ok" && r.message.startsWith("Sin videos")) {
-      void sendMessage(deps.botToken, { chatId, text: "👌 Revisé la playlist: no hay videos nuevos.", parseMode: "HTML" }).catch(() => {});
+      void sendResumenMessage(deps.botToken, { chatId, text: "👌 Revisé la playlist: no hay videos nuevos." }).catch(() => {});
     } else if (r.status === "noop") {
-      void sendMessage(deps.botToken, { chatId, text: "No hay playlists configuradas para resumir.", parseMode: "HTML" }).catch(() => {});
+      void sendResumenMessage(deps.botToken, { chatId, text: "No hay playlists configuradas para resumir." }).catch(() => {});
     }
   }).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
-    void sendMessage(deps.botToken, { chatId, text: `❌ Error revisando la playlist (${msg}).`, parseMode: "HTML" }).catch(() => {});
+    void sendResumenMessage(deps.botToken, { chatId, text: `❌ Error revisando la playlist (${msg}).` }).catch(() => {});
   });
   return { status: "started", message: "Revisando la playlist en background..." };
 }
@@ -1520,12 +1537,12 @@ export function saltarResumen(deps: ResumirDeps, chatId: number): { status: stri
   void (async () => {
     const p = pendingPath(chatId);
     if (!existsSync(p)) {
-      await sendMessage(deps.botToken, { chatId, text: "No hay ninguna propuesta pendiente para saltar.", parseMode: "HTML" }).catch(() => {});
+      await sendResumenMessage(deps.botToken, { chatId, text: "No hay ninguna propuesta pendiente para saltar." }).catch(() => {});
       return;
     }
     const prop = readJsonSafe<PendingProposal | null>(p, null);
     if (prop && prop.placeholder) {
-      await sendMessage(deps.botToken, { chatId, text: "⏳ Ese video todavía se está procesando; esperá el resumen para decidir si lo guardas o lo saltas.", parseMode: "HTML" }).catch(() => {});
+      await sendResumenMessage(deps.botToken, { chatId, text: "⏳ Ese video todavía se está procesando; esperá el resumen para decidir si lo guardas o lo saltas." }).catch(() => {});
       return;
     }
     try { unlinkSync(p); } catch { /* noop */ }
@@ -1574,7 +1591,7 @@ async function runDetener(deps: ResumirDeps, chatId: number): Promise<void> {
       ? `⏹️ <b>Paré la cola</b> — saqué ${remaining} pendiente(s).${tail} Si quedó una propuesta arriba, resolvéla con ✅ o ⏭️.`
       : `⏹️ <b>Listo</b> — no había nada más en cola.`;
   }
-  await sendMessage(botToken, { chatId, text, parseMode: "HTML" }).catch(() => {});
+  await sendResumenMessage(botToken, { chatId, text }).catch(() => {});
 }
 
 // Tool/botón "⏹️ Parar la cola": detiene la tanda. Si hay un ítem resumiéndose, lo cancela
@@ -1582,7 +1599,7 @@ async function runDetener(deps: ResumirDeps, chatId: number): Promise<void> {
 export function detenerResumidor(deps: ResumirDeps, chatId: number): { status: string; message: string } {
   void runDetener(deps, chatId).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
-    void sendMessage(deps.botToken, { chatId, text: `❌ Error al detener la cola (${msg}).`, parseMode: "HTML" }).catch(() => {});
+    void sendResumenMessage(deps.botToken, { chatId, text: `❌ Error al detener la cola (${msg}).` }).catch(() => {});
   });
   return { status: "started", message: "YA paré la cola y avisé en Telegram. NO escribas texto de respuesta — devolvé VACÍO." };
 }
