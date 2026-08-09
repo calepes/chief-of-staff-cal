@@ -10,22 +10,69 @@ export function sanitizeForTelegram(text: string): string {
   // 1. Tables first (before bold/italic, to avoid conflicts with ** in cells)
   result = convertMarkdownTables(result);
 
-  // 2. **bold** → <b>bold</b>
+  // 2. Headings (#/##/###) → <h3> real (Rich Messages) — antes se perdían como texto
+  // plano o bold, y el mensaje nunca aprovechaba la API nueva aunque el transporte
+  // ya la usara. Va antes de listas/bold para no competir con esos regex.
+  result = convertMarkdownHeadings(result);
+
+  // 3. Listas (- / * / 1.) → <ul>/<ol> reales — antes "- item" quedaba como "• item"
+  // (bullet de texto plano), visualmente indistinguible de HTML clásico.
+  result = convertMarkdownLists(result);
+
+  // 4. **bold** → <b>bold</b>
   result = result.replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>');
 
-  // 3. *italic* → <i>italic</i> (only when not surrounded by word chars)
+  // 5. *italic* → <i>italic</i> (only when not surrounded by word chars)
   result = result.replace(/(?<![*\w])\*([^*\n]+?)\*(?![*\w])/g, '<i>$1</i>');
 
-  // 4. Horizontal rules (--- or ___) → remove
+  // 6. Horizontal rules (--- or ___) → remove
   result = result.replace(/^[-_]{3,}\s*$/gm, '');
 
-  // 5. "- item" list bullets → "• item" (only at line start)
-  result = result.replace(/^- /gm, '• ');
-
-  // 6. Collapse 3+ blank lines to 2
+  // 7. Collapse 3+ blank lines to 2
   result = result.replace(/\n{3,}/g, '\n\n');
 
   return result.trim();
+}
+
+function convertMarkdownHeadings(text: string): string {
+  return text.replace(/^#{1,6}\s+(.+)$/gm, '\n<h3>$1</h3>\n');
+}
+
+const UL_RE = /^[-*]\s+(.+)$/;
+const OL_RE = /^\d+\.\s+(.+)$/;
+
+/** Agrupa líneas consecutivas "- item"/"* item" en <ul> y "1. item" en <ol> — cada
+ * línea se vuelve un <li> real en vez de un bullet de texto plano. Tolera UNA línea en
+ * blanco entre items del MISMO tipo (frecuente cuando el modelo separa puntos con aire
+ * para legibilidad en Markdown) sin cortar la lista en dos — solo cierra si la línea en
+ * blanco no está seguida de otro item del mismo tipo (hallazgo de daemon-health-reviewer). */
+function convertMarkdownLists(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const isUl = UL_RE.test(lines[i]);
+    const isOl = OL_RE.test(lines[i]);
+    if (isUl || isOl) {
+      const re = isUl ? UL_RE : OL_RE;
+      const items: string[] = [];
+      while (i < lines.length) {
+        if (re.test(lines[i])) {
+          items.push(`<li>${lines[i].match(re)![1]}</li>`);
+          i++;
+        } else if (lines[i].trim() === '' && i + 1 < lines.length && re.test(lines[i + 1])) {
+          i++; // línea en blanco entre items del mismo tipo — saltar sin cerrar la lista
+        } else {
+          break;
+        }
+      }
+      out.push(isUl ? `<ul>${items.join('')}</ul>` : `<ol>${items.join('')}</ol>`);
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return out.join('\n');
 }
 
 function parseTableRow(line: string): string[] {

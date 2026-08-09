@@ -461,13 +461,14 @@ async function setCardMessage(botToken: string, chatId: number, messageId: numbe
   return sent?.message_id;
 }
 
-// Markdown → HTML de Telegram: headings a <b>, citas a <blockquote>, resto vía sanitizeForTelegram.
-// Garantiza una línea en blanco antes/después de cada subtítulo y entre citas (más limpio).
+// Markdown → HTML de Telegram: citas a <blockquote>, resto vía sanitizeForTelegram (headings a
+// <h3> real, listas a <ul>/<ol> reales, tablas a <table> real — Rich Messages, no solo <b>/•
+// de texto plano, hallazgo 2026-08-09: el transporte ya usaba la API nueva pero el contenido
+// nunca generaba tags que Rich Messages renderiza distinto, así que se veía siempre igual).
 function mdToTelegram(md: string): string {
   let s = md.replace(/\r/g, "");
-  s = s.replace(/^#{1,6}\s+(.*)$/gm, "\n<b>$1</b>\n");           // subtítulo con aire alrededor
   s = s.replace(/^>\s?(.*)$/gm, "\n<blockquote>$1</blockquote>\n"); // citas separadas
-  s = sanitizeForTelegram(s); // **→<b>, *→<i>, - →•, colapsa 3+ saltos a 2, trim
+  s = sanitizeForTelegram(s); // headings→<h3>, listas→<ul>/<ol>, tablas→<table>, **→<b>
   return s;
 }
 
@@ -677,12 +678,24 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
   // ¿Cal pidió parar mientras resumíamos? Abortar antes de mostrar la tarjeta de propuesta.
   if (await bailIfCancelled()) return;
 
-  // Entrega del resumen: el primer chunk EDITA el ancla; los chunks extra van como mensajes nuevos.
+  // Entrega del resumen: intento ÚNICO sin fragmentar — Rich Messages soporta hasta 32.768
+  // chars (vs. 4.096 de HTML clásico), así que la gran mayoría de los resúmenes entran en un
+  // solo mensaje. Fragmentar de entrada (como antes) tiraba ese beneficio: un resumen de 6.000
+  // chars quedaba partido en 2 mensajes aunque Rich Messages lo aceptara entero. Solo se cae al
+  // chunking viejo (~4000/mensaje) si el envío falla en los 3 niveles del fallback (rich→HTML
+  // clásico→texto plano) — señal de que el texto es tan largo que ni Rich Messages lo acepta,
+  // caso raro pero real (libro resumido desde conocimiento, sin tope de longitud del contenido).
   const header = buildResumenHeader(docTitle, docAuthor, kind);
-  const parts = chunk(header + mdToTelegram(md), TG_MAX);
-  await setAnchor(parts[0] ?? "(resumen vacío)");
-  for (const extra of parts.slice(1)) {
-    await sendResumenMessage(botToken, { chatId, text: extra });
+  const fullText = header + mdToTelegram(md);
+  const placeholderId = anchorId; // por si el intento único falla del todo — no perder la referencia al placeholder
+  await setAnchor(fullText || "(resumen vacío)");
+  if (anchorId == null && fullText) {
+    anchorId = placeholderId; // restaurar: seguir editando el placeholder, no dejarlo huérfano
+    const parts = chunk(fullText, TG_MAX);
+    await setAnchor(parts[0] ?? "(resumen vacío)");
+    for (const extra of parts.slice(1)) {
+      await sendResumenMessage(botToken, { chatId, text: extra });
+    }
   }
 
   // Checkpoint: tarjeta de propuesta con botones (mensaje nuevo). NO escribe a Readwise hasta confirmar.
