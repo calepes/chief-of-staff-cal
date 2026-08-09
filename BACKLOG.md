@@ -111,6 +111,7 @@ Reorganizado por tema (antes agrupado por fecha/sesión de origen — ver anotac
 ### Callbacks/UX Telegram
 
 - [x] ~~**Migrar Family/Vesta de MarkdownV2 a HTML**~~ (Fase 3 - 2026-04-29) — ✅ YA NO APLICA (verificado 2026-08-08): `Vesta/daemon-v2/src/system-prompt.ts` ya instruye explícito "parse_mode HTML. NUNCA uses Markdown ni MarkdownV2" — el bug descrito acá quedó resuelto de fondo por la migración de Vesta a `@cal/telegram` + Rich Messages (2026-08-05/06), que reescribió todo el manejo de formato/parse mode.
+- [x] **`tools/resumir.ts` (resumen de videos/artículos + auto-resumidor de starred de Feedbin) se había quedado afuera de la migración a Rich Messages** — ✅ HECHO 2026-08-09: Cal reportó que el resumidor y el starred de Feedbin no usaban la API nueva. Todos los ~25 call sites (antes `sendMessage`/`editMessage` clásicos) migrados a `sendCronMessage`/`editCronMessage` (`proactive/rich-send.ts`), con un 3er nivel de fallback a texto plano agregado a pedido de Cal (a diferencia de los demás crons, acá perder el mensaje es perder el resumen mismo, no una notificación secundaria). `stripHtmlTags` relocado desde `index.ts` a `rich-send.ts` como helper compartido, con 7 tests nuevos (antes sin cobertura). Reviewed por `daemon-health-reviewer` en 2 pasadas, sin bloqueantes; un bug real encontrado y corregido durante la implementación (`.then(() => true)` sobre una promesa que ya resolvía boolean directo, dejando `ok` siempre en `true`). 836/836 tests, typecheck y build limpios. Commit `269d2a9`, daemon reiniciado.
 
 #### Callback Optimization — Implementado (2026-04-11)
 - [x] Fork del plugin de Telegram con handler de callback_query
@@ -149,6 +150,10 @@ Reorganizado por tema (antes agrupado por fecha/sesión de origen — ver anotac
 
 #### Documentación Telegram
 - [x] **telegram-reference.md** — referencia cross-project consolidada en `~/Claude Projects/telegram-reference.md`. Cubre: bot, plugin fork, callbacks, UX patterns, integraciones (CoS, Presupuesto, MCP), workers, hooks, gotchas (2026-04-12)
+
+### boa-checkin (MCP compartido con Vesta)
+
+- [x] **`getBoaBoardingPass`/`generateBoaWalletPass` devolvían `boardingPassUrl` vacío** — ✅ HECHO 2026-08-09: Cal reportó que no podía obtener el boarding pass de un vuelo por Jano; el check-in en sí se había completado bien (asiento confirmado), pero la extracción del link del PDF fallaba consistentemente. Diagnosticado (NO era un cambio de sitio de BoA) reproduciendo en vivo contra la reserva real de Cal: al clickear "Download / Print" se abre una pestaña que arranca en `about:blank` y navega asincrónicamente al PDF real — el código leía la URL antes de que esa navegación terminara. Fix en `mcp-servers/servers/boa-checkin/src/flow.ts` (`waitForRealUrl`, poll con chequeo de estabilidad + error explícito en vez de vacío silencioso si se agota el timeout). Verificado end-to-end contra la misma reserva real, antes y después. Reviewed por `daemon-health-reviewer`, 1 blocking corregido. No requirió reinicio de daemon (server `stdio`, se lanza fresco por invocación). Detalle completo: skill `boa-checkin-bolivia`. Commit `276daa0` (mcp-servers).
 
 ### OpenClaw / Automatización proactiva
 
