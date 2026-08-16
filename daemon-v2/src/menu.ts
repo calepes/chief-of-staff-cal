@@ -249,7 +249,7 @@ export const ACTION_TEXT: Record<string, string> = {
   "j:yape:kpi": "Muéstrame las KPI cards de Yape de hoy",
   "j:yape:meetings": "Muéstrame mis meetings",
   "j:yape:ppt": "Retoma mi último PPT wizard",
-  "j:yape:lluvia": "Dame el reporte de lluvia y el pronóstico",
+  "j:yape:lluvia": "Quiero datos de lluvia en Bolivia. Preguntame en una línea, sin asumir nada: ¿reporte medido (¿de qué ciudad y qué fecha?) o pronóstico (¿de qué ciudad y cuántos días?)?",
   "j:flights:vvi:dep": "Muéstrame las salidas de hoy desde VVI (Viru Viru, Santa Cruz)",
   "j:flights:vvi:arr": "Muéstrame las llegadas de hoy a VVI (Viru Viru, Santa Cruz)",
   "j:flights:lpb:dep": "Muéstrame las salidas de hoy desde LPB (El Alto, La Paz)",
