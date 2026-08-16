@@ -332,6 +332,21 @@ vi.mock("./kpi-lending-notion.js", async (importOriginal) => {
 vi.mock("./rich-send.js", () => ({ sendCronMessage: vi.fn(async () => ({ message_id: 1 })) }));
 vi.mock("./kpi-card-daily.js", () => ({ checkKpiCardDaily: vi.fn() }));
 vi.mock("./kpi-card-lending-daily.js", () => ({ checkKpiCardLending: vi.fn() }));
+vi.mock("./lending-date-confirm.js", () => ({
+  LendingDateStore: vi.fn().mockImplementation(() => ({
+    createProposal: vi.fn(async () => "abc123"),
+    getProposal: vi.fn(async () => null),
+    clearProposal: vi.fn(async () => {}),
+    setPendingInput: vi.fn(async () => {}),
+    getPendingInput: vi.fn(async () => null),
+    clearPendingInput: vi.fn(async () => {}),
+  })),
+  previousBusinessDay: vi.fn((iso: string) => iso),
+  renderProposeCard: vi.fn((shortId: string, fecha: string, subject: string) => ({
+    text: `propose:${fecha}:${subject}`,
+    keyboard: { inline_keyboard: [] },
+  })),
+}));
 
 import {
   gmailAccessToken,
@@ -351,8 +366,10 @@ import { sendCronMessage } from "./rich-send.js";
 import { checkKpiCardDaily } from "./kpi-card-daily.js";
 import { checkKpiCardLending } from "./kpi-card-lending-daily.js";
 import { checkKpiIngest } from "./kpi-ingest-check.js";
+import { LendingDateStore } from "./lending-date-confirm.js";
 
 const gmailCreds = { clientId: "c", clientSecret: "s", refreshToken: "r" };
+const lendingDateStore = new LendingDateStore({} as any);
 let tmpDir: string;
 let statePath: string;
 
@@ -377,7 +394,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     vi.mocked(searchSelfServiceEmails).mockResolvedValue([{ id: "m1" }]);
     vi.mocked(getGmailMessage).mockResolvedValue({ id: "m1", internalDate: Date.now(), attachments: [] });
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(upsertKpiRow).not.toHaveBeenCalled();
     const state = JSON.parse(readFileSync(statePath, "utf8"));
@@ -401,7 +418,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     vi.mocked(upsertKpiRow).mockResolvedValue({ fecha: "2026-07-20", created: true, fieldsWritten: ["Saldo"] });
     vi.mocked(fillDerivedFields).mockResolvedValue({ completados: [], noCalculables: [] });
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(upsertKpiRow).toHaveBeenCalledWith("n", "2026-07-20", expect.objectContaining({ Saldo: 100 }));
     // Solo la fecha recién tocada — no recalcula todo el histórico en cada corrida.
@@ -431,7 +448,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     vi.mocked(upsertKpiRow).mockResolvedValue({ fecha: "2026-07-20", created: true, fieldsWritten: ["Saldo"] });
     vi.mocked(fillDerivedFields).mockResolvedValue({ completados: [], noCalculables: [] });
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     const [, , rawArg] = vi.mocked(upsertKpiRow).mock.calls[0];
     expect(rawArg).not.toHaveProperty("TRX");
@@ -444,7 +461,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     writeFileSync(statePath, JSON.stringify({ processed: ["m1"], pending: {}, lastErrorNotified: {} }));
     vi.mocked(searchSelfServiceEmails).mockResolvedValue([{ id: "m1" }]);
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(getGmailMessage).not.toHaveBeenCalled();
   });
@@ -459,7 +476,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     vi.mocked(getGmailMessage).mockResolvedValue({ id: "m1", internalDate: oldTimestamp, attachments: [] });
     vi.mocked(findCsvCandidates).mockReturnValue([]);
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(sendCronMessage).toHaveBeenCalledTimes(1);
     const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
@@ -482,7 +499,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     vi.mocked(searchSelfServiceEmails).mockResolvedValue([{ id: "m1" }]);
     vi.mocked(getGmailMessage).mockRejectedValue(new Error("gmail caído"));
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(sendCronMessage).not.toHaveBeenCalled();
   });
@@ -491,7 +508,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     vi.mocked(gmailAccessToken).mockRejectedValueOnce(new Error("token inválido"));
 
     await expect(
-      checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath }),
+      checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath }),
     ).resolves.toBeUndefined();
   });
 
@@ -502,10 +519,10 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     });
     vi.mocked(gmailAccessToken).mockReturnValueOnce(hangingTokenPromise);
 
-    const p1 = checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    const p1 = checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
     // Para cuando esta línea corre, p1 ya ejecutó de forma síncrona hasta el `await gmailAccessToken(...)`
     // colgado — el flag `running` ya quedó en true antes de ceder el control.
-    const p2 = checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    const p2 = checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     await expect(p2).resolves.toBeUndefined();
     // El segundo tick debe cortar antes de tocar Gmail — un solo llamado (el del primer tick, todavía colgado).
@@ -555,7 +572,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_PDF_TEXT,
     });
@@ -599,7 +616,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_PDF_TEXT,
     });
@@ -626,7 +643,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_PDF_TEXT,
     });
@@ -652,7 +669,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => "algo algo Updated Fail! algo",
     });
@@ -676,7 +693,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
     vi.mocked(getGmailMessage).mockResolvedValue({ id: "m1", internalDate: oldTimestamp, attachments: [] });
     vi.mocked(findPdfCandidates).mockReturnValue([]);
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
     expect(call.text).toContain("sin ningún PDF");
@@ -702,7 +719,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_PDF_TEXT,
     });
@@ -728,7 +745,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       { filename: "reporte-sin-fecha.pdf", mimeType: "application/pdf", attachmentId: "p1" },
     ]);
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(upsertKpiRow).not.toHaveBeenCalled();
     const state = JSON.parse(readFileSync(statePath, "utf8"));
@@ -765,7 +782,7 @@ describe("checkKpiIngest — pipeline PDF (Seguimiento Diario)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_PDF_TEXT,
     });
@@ -808,7 +825,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_LENDING_PDF_TEXT,
     });
@@ -855,7 +872,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_LENDING_PDF_TEXT,
     });
@@ -886,7 +903,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => REAL_LENDING_PDF_TEXT,
     });
@@ -907,7 +924,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
     vi.mocked(getGmailMessage).mockResolvedValue({ id: "m1", internalDate: oldTimestamp, attachments: [], bodyText: LENDING_BODY_TEXT });
     vi.mocked(findPdfCandidates).mockReturnValue([]);
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(sendCronMessage).toHaveBeenCalledTimes(1);
     const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
@@ -916,7 +933,11 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
     expect(state.processed).toContain("m1");
   });
 
-  it("NO marca processed si no encuentra la fecha en el cuerpo del mail — reintenta el próximo tick", async () => {
+  it("si no encuentra la fecha en el cuerpo del mail, propone una tarjeta con fecha sugerida y SÍ marca processed", async () => {
+    // Caso real 2026-08-11: quien reenvía cambió "cierre de la jornada de AAAA-MM-DD" por
+    // "cierre de la anterior jornada" — reintentar en silencio nunca iba a hacer aparecer la
+    // fecha, y dejaba el mail reintentando cada 15 min hasta salir de la ventana de búsqueda
+    // de Gmail (3 días) sin ningún aviso final. Ahora se propone por tarjeta y Cal confirma.
     const oldTimestamp = Date.now() - 16 * 60 * 1000;
     writeFileSync(
       statePath,
@@ -927,18 +948,24 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
       id: "m1",
       internalDate: oldTimestamp,
       attachments: [lendingAttachment],
-      bodyText: "un cuerpo de mail sin la frase esperada",
+      bodyText: "cierre de la anterior jornada",
+      subject: "Reporte diario Créditos Yape Lending - Riesgos",
     });
     vi.mocked(findPdfCandidates).mockReturnValue([lendingAttachment]);
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(upsertLendingRow).not.toHaveBeenCalled();
-    const state = JSON.parse(readFileSync(statePath, "utf8"));
-    expect(state.processed).not.toContain("m1");
+    expect(lendingDateStore.createProposal).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ messageId: "m1", subject: "Reporte diario Créditos Yape Lending - Riesgos" }),
+    );
     expect(sendCronMessage).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string };
-    expect(call.text).toContain("cierre de la jornada");
+    const call = vi.mocked(sendCronMessage).mock.calls[0]?.[1] as { text: string; replyMarkup?: unknown };
+    expect(call.text).toContain("propose:");
+    expect(call.replyMarkup).toBeDefined();
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(state.processed).toContain("m1");
   });
 
   it("marca fallo explícito y processed si la reconciliación no cierra — no escribe upsertLendingRow", async () => {
@@ -962,7 +989,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
       botToken: "t",
       chatId: 1,
       notionToken: "n",
-      gmail: gmailCreds,
+      gmail: gmailCreds, lendingDateStore,
       statePath,
       pdfTextExtractor: async () => brokenText,
     });
@@ -990,7 +1017,7 @@ describe("checkKpiIngest — pipeline Lending (Funnel Créditos Yape)", () => {
     vi.mocked(searchLendingReportEmails).mockResolvedValue([{ id: "m1" }]);
     vi.mocked(getGmailMessage).mockRejectedValue(new Error("gmail caído"));
 
-    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, statePath });
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
     expect(sendCronMessage).not.toHaveBeenCalled();
   });

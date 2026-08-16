@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { sendCronMessage } from "./rich-send.js";
+import { nowInLaPaz } from "../journal-capture.js";
 import {
   gmailAccessToken,
   searchSelfServiceEmails,
@@ -13,6 +14,7 @@ import {
   downloadGmailAttachmentBuffer,
   archiveAndMarkRead,
   type GmailCreds,
+  type GmailMessageDetail,
   type GmailMessageRef,
 } from "./kpi-ingest-gmail.js";
 import { parseCsv, applySundayRule, isSunday } from "./kpi-ingest-csv.js";
@@ -35,6 +37,7 @@ import {
 } from "./kpi-lending-notion.js";
 import { checkKpiCardDaily } from "./kpi-card-daily.js";
 import { checkKpiCardLending } from "./kpi-card-lending-daily.js";
+import { LendingDateStore, previousBusinessDay, renderProposeCard } from "./lending-date-confirm.js";
 
 const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse") as {
@@ -318,10 +321,20 @@ export interface CheckKpiIngestOpts {
   chatId: number;
   notionToken: string;
   gmail: GmailCreds;
+  /** Propuesta de fecha por tarjeta cuando el cuerpo del mail de Lending no la trae (ver
+   * lending-date-confirm.ts). */
+  lendingDateStore: LendingDateStore;
   /** Override para tests — default: `~/.cos-agent/kpi-ingest-state.json`. */
   statePath?: string;
   /** Override para tests — evita instanciar pdf-parse real sobre un binario de PDF de verdad. */
   pdfTextExtractor?: (buf: Buffer) => Promise<string>;
+}
+
+// nunca toISOString() directo acá: eso da la fecha en UTC, y La Paz es UTC-4 — un mail recibido
+// entre las 20:00 y medianoche hora local quedaría fechado al día siguiente. Mismo helper que
+// task-check.ts/daily-note-check.ts (ver Jano/CLAUDE.md).
+function isoDateFromMillis(ms: number): string {
+  return nowInLaPaz(new Date(ms)).slice(0, 10);
 }
 
 let running = false;
@@ -551,6 +564,79 @@ async function processPdfMessage(id: string, state: KpiIngestState, opts: CheckK
 }
 
 /**
+ * Baja el mail de Lending por id, parsea/reconcilia el PDF y escribe la fila en Notion para
+ * `fecha` — ya conocida por el caller (del cuerpo del mail, o confirmada/escrita a mano por Cal
+ * vía la tarjeta de `lending-date-confirm.ts`). Reusada por el camino automático (`processLending
+ * Message`) y por el callback de confirmación (`index.ts` → `handleLendingDateCallback`/
+ * `applyLendingDateInput`) — por eso NO dispara la tarjeta de KPIs ni toca `state`: cada caller
+ * decide eso con su propio criterio de dedup (ver `state.lendingCardSent` más abajo).
+ */
+export async function ingestLendingReportForDate(
+  id: string,
+  fecha: string,
+  opts: CheckKpiIngestOpts,
+  /** El camino automático (`processLendingMessage`) ya bajó `token`+`detail` para chequear
+   * adjunto/fecha antes de llegar acá — pasarlos evita un segundo round-trip a Gmail redundante
+   * en el camino feliz. El camino de confirmación (`index.ts` → `confirmLendingDate`) no tiene
+   * nada prefetcheado, así que los baja acá. */
+  prefetched?: { token: string; detail: GmailMessageDetail },
+): Promise<{ ok: boolean; fieldsWritten?: string[] }> {
+  const { botToken, chatId, notionToken, gmail } = opts;
+  const token = prefetched?.token ?? (await gmailAccessToken(gmail));
+  const detail = prefetched?.detail ?? (await getGmailMessage(id, token));
+  const candidates = findPdfCandidates(detail.attachments);
+
+  if (candidates.length === 0) {
+    await sendReport(
+      botToken,
+      chatId,
+      formatErrorReport("procesar el Funnel Yape Lending", "El mail llegó sin ningún PDF adjunto.", "Revisa el mail manualmente si se repite."),
+    );
+    return { ok: false };
+  }
+
+  const attachment = candidates[0];
+  const buf = await downloadGmailAttachmentBuffer(id, attachment.attachmentId, token);
+  const text = await (opts.pdfTextExtractor ?? defaultPdfTextExtractor)(buf);
+
+  const parsed = parseAndValidateLendingReport(text);
+  if (!parsed.ok) {
+    const detalle = parsed.errors.join("; ");
+    await markLendingReportFailed(notionToken, fecha, detalle);
+    await sendReport(botToken, chatId, formatLendingFailedReport(fecha, detalle));
+    console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_parse_failed", id, fecha, errors: parsed.errors }));
+    return { ok: false };
+  }
+
+  const result = await upsertLendingRow(notionToken, fecha, lendingFieldsToRaw(parsed.fields));
+  await clearLendingFailNote(notionToken, fecha);
+  const derived: LendingDerivedFillReport = await fillLendingDerivedFields(notionToken, [fecha]);
+
+  console.log(
+    JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_full_report", id, fecha, fieldsWritten: result.fieldsWritten, derived }),
+  );
+  await sendReport(botToken, chatId, formatLendingSuccessReport(fecha, parsed.fields, result));
+  return { ok: true, fieldsWritten: result.fieldsWritten };
+}
+
+/**
+ * Tarjeta "propose → botones" cuando el cuerpo del mail no trae la fecha del reporte (ver
+ * lending-date-confirm.ts) — en vez de reintentar en silencio hasta que el mail sale de la
+ * ventana de búsqueda de Gmail (3 días) sin ningún aviso final.
+ */
+async function proposeLendingDateConfirmation(id: string, detail: GmailMessageDetail, opts: CheckKpiIngestOpts): Promise<void> {
+  const { botToken, chatId, lendingDateStore } = opts;
+  const suggestedFecha = previousBusinessDay(isoDateFromMillis(detail.internalDate));
+  const subject = detail.subject ?? "(sin asunto)";
+  const shortId = await lendingDateStore.createProposal(chatId, { messageId: id, suggestedFecha, subject });
+  const card = renderProposeCard(shortId, suggestedFecha, subject);
+  await sendCronMessage(botToken, { chatId, text: card.text, replyMarkup: card.keyboard }).catch((err) =>
+    console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_date_propose_send_failed", id, err: String(err) })),
+  );
+  console.log(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_date_missing_proposed", id, suggestedFecha }));
+}
+
+/**
  * Pipeline "Funnel Yape Lending" (Riesgos/Créditos) — dominio distinto de "KPIs diarios"
  * (afiliación/TRX/DAU), DB Notion separada (kpi-lending-notion.ts). Reusa la misma infraestructura
  * de cron/estado (pollAndProcess/kpi-ingest-state.json) que los otros 2 pipelines — sin riesgo de
@@ -558,10 +644,13 @@ async function processPdfMessage(id: string, state: KpiIngestState, opts: CheckK
  *
  * A diferencia del PDF de "Seguimiento Diario" (fecha del FILENAME del adjunto), este reporte no
  * trae fecha en el nombre del PDF — se extrae del CUERPO del mail ("...cierre de la jornada de
- * 2026-07-26..."). Si no se encuentra, se lanza (retry en el próximo tick, no se marca processed —
- * podría ser un problema transitorio de formato). Si el parseo/reconciliación del PDF falla, la
- * fecha SÍ se conoce → se anota el fallo en Notas y se marca processed (reintentar el mismo mail no
- * va a cambiar su contenido).
+ * 2026-07-26..."). Si no se encuentra (ej. cambió la redacción del remitente, visto en vivo el
+ * 2026-08-11), se propone una fecha estimada por tarjeta (`proposeLendingDateConfirmation`) y SÍ
+ * se marca processed — reintentar el mismo mail cada 15 min no iba a hacer aparecer la fecha, y
+ * dejaba a Cal reintentando en silencio hasta que el mail salía de la ventana de búsqueda de
+ * Gmail sin ningún aviso final. Si el parseo/reconciliación del PDF falla, la fecha SÍ se conoce
+ * → se anota el fallo en Notas y se marca processed (reintentar el mismo mail no va a cambiar su
+ * contenido).
  */
 async function processLendingMessage(id: string, state: KpiIngestState, opts: CheckKpiIngestOpts): Promise<void> {
   const { botToken, chatId, notionToken, gmail } = opts;
@@ -582,38 +671,19 @@ async function processLendingMessage(id: string, state: KpiIngestState, opts: Ch
 
     const fecha = parseReportDateFromBody(detail.bodyText ?? "");
     if (!fecha) {
-      throw new Error('no pude encontrar "cierre de la jornada de YYYY-MM-DD" en el cuerpo del mail');
-    }
-
-    const attachment = candidates[0];
-    const buf = await downloadGmailAttachmentBuffer(id, attachment.attachmentId, token);
-    const text = await (opts.pdfTextExtractor ?? defaultPdfTextExtractor)(buf);
-
-    const parsed = parseAndValidateLendingReport(text);
-    if (!parsed.ok) {
-      const detalle = parsed.errors.join("; ");
-      await markLendingReportFailed(notionToken, fecha, detalle);
-      await sendReport(botToken, chatId, formatLendingFailedReport(fecha, detalle));
-      console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_parse_failed", id, fecha, errors: parsed.errors }));
+      await proposeLendingDateConfirmation(id, detail, opts);
       markProcessed(state, id);
       return;
     }
 
-    const result = await upsertLendingRow(notionToken, fecha, lendingFieldsToRaw(parsed.fields));
-    await clearLendingFailNote(notionToken, fecha);
-    const derived: LendingDerivedFillReport = await fillLendingDerivedFields(notionToken, [fecha]);
-
-    console.log(
-      JSON.stringify({ ts: Date.now(), msg: "kpi_ingest_lending_full_report", id, fecha, fieldsWritten: result.fieldsWritten, derived }),
-    );
-    await sendReport(botToken, chatId, formatLendingSuccessReport(fecha, parsed.fields, result));
+    const { ok } = await ingestLendingReportForDate(id, fecha, opts, { token, detail });
 
     // Igual patrón que la tarjeta de KPIs diarios desde processPdfMessage: se dispara sola apenas
     // este mail se procesa con éxito, en vez de esperar un horario fijo. Try/catch propio — un
     // fallo puntual de la tarjeta no debe hacer parecer que la ingesta completa falló, ni bloquear
     // el markProcessed de un mail ya procesado. Dedup por fecha vía state.lendingCardSent (array
     // propio, no comparte el de "KPIs diarios").
-    if (!state.lendingCardSent.includes(fecha)) {
+    if (ok && !state.lendingCardSent.includes(fecha)) {
       try {
         await checkKpiCardLending({ botToken, chatId, notionToken, fecha });
         state.lendingCardSent.push(fecha);

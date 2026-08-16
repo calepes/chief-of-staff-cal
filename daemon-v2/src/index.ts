@@ -19,7 +19,8 @@ import { defaultEffort, effortForMessage } from "./effort.js";
 import { sendMessage, editMessage, editRichMessage, editMessageReplyMarkup, sendChatAction, sendVoice, deleteMessage, answerCallbackQuery, type ChatAction } from "@cos/shared";
 import type { TelegramUpdate, QueueMessage, FuelEvent } from "@cos/shared";
 import { checkFlightCheckin } from "./proactive/flight-checkin.js";
-import { stripHtmlTags } from "./proactive/rich-send.js";
+import { stripHtmlTags, editCronMessage } from "./proactive/rich-send.js";
+import { checkKpiCardLending } from "./proactive/kpi-card-lending-daily.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick, handleCookieJarConfirm } from "./tools/resumir.js";
 import { COOKIE_JAR_NAMESPACE_ID } from "./tools/cookie-jar.js";
@@ -38,7 +39,13 @@ import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
 import { checkHealthGoals } from "./proactive/health-goals-check.js";
-import { checkKpiIngest } from "./proactive/kpi-ingest-check.js";
+import { checkKpiIngest, ingestLendingReportForDate, type CheckKpiIngestOpts } from "./proactive/kpi-ingest-check.js";
+import {
+  LendingDateStore,
+  isLendingDateCallback,
+  handleLendingDateCallback,
+  applyLendingDateInput,
+} from "./proactive/lending-date-confirm.js";
 import { checkDailyNotes } from "./proactive/daily-note-check.js";
 import {
   checkTaskEmails,
@@ -199,6 +206,7 @@ const journalStore = new JournalStore(kv);
 const backlogStore = new BacklogStore(kv);
 const learningStore = new LearningStore(kv);
 const taskStore = new TaskStore(kv);
+const lendingDateStore = new LendingDateStore(kv);
 
 // chatId del turno actual — los tools que necesitan saber a qué chat responder
 // (ej. checkPlaylistsResumir/checkStarredResumir, que disparan un flujo fire-and-forget
@@ -871,6 +879,53 @@ async function processMessage(
       return;
     }
 
+    // Callbacks de confirmación de fecha de Lending (lend:*) → mecánicos, sin LLM. "✅ Confirmar"
+    // baja el mail de nuevo y escribe en Notion, así que llevan el mismo lock anti-doble-tap que
+    // jnl:*/bklg:*/lrn:*/tsk:*.
+    // Va ARRIBA del catch-all de "Heavy callbacks legacy" más abajo, que se traga cualquier
+    // callback_data sin prefijo `j:`/`build:` y se lo manda al LLM como mensaje sintético. Puesto
+    // debajo de ese, `lend:*` sería código muerto SIN dejar rastro en logs (mismo motivo por el que
+    // `bklg:*`/`lrn:*`/`tsk:*` están donde están).
+    if (isLendingDateCallback(cb.data)) {
+      const lechat = cb.message.chat.id;
+      const leanchor = cb.message.message_id;
+      const lockUserId = cb.from.id;
+
+      const acquired = await tryAcquireLock(kv, lechat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+
+      // Fire-and-forget, mismo patrón que jnl:*/bklg:*/lrn:*/tsk:*: "✅ Confirmar" baja el PDF de
+      // Gmail de nuevo y escribe en Notion (varios segundos). El poll loop del daemon es
+      // estrictamente secuencial — awaitear acá congelaría todos los chats mientras tanto.
+      void handleLendingDateCallback(
+        {
+          store: lendingDateStore,
+          ingest: (messageId, fecha) => confirmLendingDate(messageId, fecha),
+          editCard: async (messageId, card) => {
+            // El teclado va SIEMPRE explícito: editMessageText no limpia reply_markup si se omite
+            // (gotcha de Telegram documentado en CLAUDE.md).
+            await editCronMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+              chatId: lechat,
+              messageId,
+              text: card.text,
+              replyMarkup: card.keyboard,
+            }).catch((err) => log({ msg: "lending_date_edit_failed", err: String(err) }));
+          },
+          log,
+        },
+        lechat,
+        leanchor,
+        cb.data!,
+      )
+        .catch((err) => log({ msg: "lending_date_callback_error", err: String(err) }))
+        .finally(() => releaseLock(kv, lechat, lockUserId).catch(() => {}));
+      return;
+    }
+
     // Checkpoint del resumidor: ✅ Guardar / 📄 Guardar artículo / ⏭️ Saltar / ⏹️ Parar → mecánico (sin LLM, edita la tarjeta).
     if (cb.data === "j:resu:save" || cb.data === "j:resu:savefull" || cb.data === "j:resu:skip" || cb.data === "j:resu:stop") {
       await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id);
@@ -1122,13 +1177,14 @@ async function processMessage(
     // Las dos lecturas a KV van en paralelo: se pagan en CADA mensaje (aunque Cal no
     // use el journal) y son round-trips Mac→Cloudflare de ~100-300ms. Secuenciales
     // erosionaban el objetivo de "placeholder en <1s".
-    // Las tres lecturas a KV van juntas por el mismo motivo que ya valía para dos: se pagan en
-    // CADA mensaje (aunque Cal no use ni el journal ni las tarjetas de tarea) y son round-trips
-    // Mac→Cloudflare de ~100-300ms. En serie erosionan el objetivo de "placeholder en <1s".
-    const [pendingEdit, journalMode, taskInput] = await Promise.all([
+    // Las cuatro lecturas a KV van juntas por el mismo motivo que ya valía para tres: se pagan en
+    // CADA mensaje (aunque Cal no use ninguno de estos flujos) y son round-trips Mac→Cloudflare de
+    // ~100-300ms. En serie erosionan el objetivo de "placeholder en <1s".
+    const [pendingEdit, journalMode, taskInput, lendingDateInput] = await Promise.all([
       text ? journalStore.getPendingEdit(chatId) : Promise.resolve(null),
       journalStore.getMode(chatId),
       text ? taskStore.getPendingInput(chatId).catch(() => null) : Promise.resolve(null),
+      text ? lendingDateStore.getPendingInput(chatId).catch(() => null) : Promise.resolve(null),
     ]);
 
     // Una edición pendiente (botón ✏️) gana sobre todo lo demás: el próximo texto
@@ -1177,6 +1233,40 @@ async function processMessage(
         taskInput,
       ).catch((err) => {
         log({ msg: "task_input_error", err: String(err) });
+        return false;
+      });
+      if (consumido) return;
+    }
+
+    // Respuesta al botón ✍️ de la tarjeta de confirmación de fecha de Lending. Mismo criterio que
+    // taskInput arriba: solo consume el mensaje si el texto REALMENTE parsea como fecha — si no,
+    // sigue su curso normal hacia el agente.
+    if (text && lendingDateInput) {
+      const consumido = await applyLendingDateInput(
+        {
+          store: lendingDateStore,
+          ingest: (messageId, fecha) => confirmLendingDate(messageId, fecha),
+          today: () => nowInLaPaz().slice(0, 10),
+          log,
+          clearKeyboard: async (messageId) => {
+            await editMessageReplyMarkup(env.COS_TELEGRAM_BOT_TOKEN, chatId, messageId, {
+              inline_keyboard: [],
+            }).catch(() => {});
+          },
+          sendCard: async (card) => {
+            await sendMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+              chatId,
+              text: card.text,
+              parseMode: "HTML",
+              replyMarkup: card.keyboard,
+            }).catch((err) => log({ msg: "lending_date_input_send_failed", err: String(err) }));
+          },
+        },
+        chatId,
+        text,
+        lendingDateInput,
+      ).catch((err) => {
+        log({ msg: "lending_date_input_error", err: String(err) });
         return false;
       });
       if (consumido) return;
@@ -1705,18 +1795,53 @@ function scheduleHealthGoalsDaily(): void {
   log({ msg: "health_goals_daily_scheduled", interval: "daily 21:00" });
 }
 
+/**
+ * Mismos opts los usa el cron y el callback de confirmación de fecha de Lending (`lend:*`,
+ * `applyLendingDateInput`) — comparten el `lendingDateStore`, así que apuntan al mismo lugar.
+ * Mismo patrón que `taskEmailOpts()` más abajo.
+ */
+function kpiIngestOpts(): CheckKpiIngestOpts {
+  return {
+    botToken: env.COS_TELEGRAM_BOT_TOKEN,
+    chatId: ALERT_CHAT_ID,
+    notionToken: env.NOTION_TOKEN,
+    gmail: {
+      clientId: env.GMAIL_OAUTH_CLIENT_ID,
+      clientSecret: env.GMAIL_OAUTH_CLIENT_SECRET,
+      refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN,
+    },
+    lendingDateStore,
+  };
+}
+
+/**
+ * Confirma (por botón o texto libre) la fecha propuesta para un mail de Lending que llegó sin
+ * fecha en el cuerpo — baja el PDF de nuevo, escribe en Notion y, si salió bien, dispara la
+ * tarjeta de KPIs. A diferencia de `processLendingMessage` (cron), esto es una acción puntual de
+ * Cal, así que la tarjeta se dispara SIN dedup contra `state.lendingCardSent` (ese array vive en
+ * `kpi-ingest-state.json`, que este camino no toca).
+ */
+async function confirmLendingDate(messageId: string, fecha: string): Promise<void> {
+  const opts = kpiIngestOpts();
+  const { ok } = await ingestLendingReportForDate(messageId, fecha, opts);
+  if (!ok) {
+    // ingestLendingReportForDate YA mandó el detalle real del fallo (sin PDF adjunto, o la
+    // reconciliación no cerró) por sendReport — acá hay que TIRAR, no devolver silenciosamente:
+    // handleLendingDateCallback/applyLendingDateInput solo pintan "✅ Cargado" cuando esta promesa
+    // resuelve sin excepción, así que un `return` acá pintaba éxito encima de un fallo real
+    // (hallado por daemon-health-reviewer antes de producción).
+    throw new Error("no se pudo cargar — revisa el detalle que mandé arriba");
+  }
+  try {
+    await checkKpiCardLending({ botToken: opts.botToken, chatId: opts.chatId, notionToken: opts.notionToken, fecha });
+  } catch (err) {
+    log({ msg: "kpi_card_lending_trigger_failed", fecha, err: String(err) });
+  }
+}
+
 function scheduleKpiIngestCheck(): void {
   cron.schedule("*/15 6-23 * * *", () => {
-    void checkKpiIngest({
-      botToken: env.COS_TELEGRAM_BOT_TOKEN,
-      chatId: ALERT_CHAT_ID,
-      notionToken: env.NOTION_TOKEN,
-      gmail: {
-        clientId: env.GMAIL_OAUTH_CLIENT_ID,
-        clientSecret: env.GMAIL_OAUTH_CLIENT_SECRET,
-        refreshToken: env.GMAIL_OAUTH_REFRESH_TOKEN,
-      },
-    }).catch((err) => log({ msg: "kpi_ingest_check_unhandled_error", err: String(err) }));
+    void checkKpiIngest(kpiIngestOpts()).catch((err) => log({ msg: "kpi_ingest_check_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
   log({ msg: "kpi_ingest_check_scheduled", interval: "every 15min 6-23h" });
 }

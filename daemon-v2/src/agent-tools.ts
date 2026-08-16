@@ -72,6 +72,7 @@ import {
 import { executeRemctl } from "./tools/reminders.js";
 import { executeClings, thingsWrite } from "./tools/things.js";
 import { notionApi, notionPageMarkdown, notionUpdateBody } from "./tools/notion-cli.js";
+import { listClaudeProjects, openClaudeProject } from "./tools/claude-launcher.js";
 import { JOURNAL_DB_ID } from "./journal-ids.js";
 import { compactJournalRows } from "./tools/journal.js";
 import {
@@ -1925,6 +1926,31 @@ export function buildSdkTools(deps: ToolDeps) {
       "Reemplaza el CUERPO de una página de Notion con Markdown (vía ntn pages update). REEMPLAZA todo el body. Args: { pageId, markdown }.",
       { pageId: z.string(), markdown: z.string() },
       async ({ pageId, markdown }) => asText(notionUpdateBody(pageId, markdown)),
+    ),
+
+    // ── Claude Launcher (abrir proyectos en VS Code / cmux) ─────────────────────
+    tool(
+      "listarProyectosClaude",
+      "Lista los proyectos registrados en el Claude Launcher de Cal (Jano, Pecunia, Vesta, Learning, Achoradazos, Inversiones, Guadalajara 205, 'Claude Projects (root)', etc.) con su path y si están preparados para auto-arrancar Claude Code. Llamar cuando Cal pida ver las opciones, el nombre que dio no matchee ninguno, o necesites resolver cuál es el nombre exacto antes de abrirProyectoClaude. " +
+      "Al mostrar la lista a Cal: formato telegram-bot-ux — bullets '•' (nunca '-'), emoji 📁 (uno solo, de header, no por línea), marcar con ⚠️ los que salgan 'preparado:false'. Nunca pegues el JSON crudo.",
+      {},
+      async () => ({ content: [{ type: "text" as const, text: await listClaudeProjects() }] }),
+      READ_ONLY,
+    ),
+    tool(
+      "abrirProyectoClaude",
+      "Abre un proyecto de Cal en VS Code (con Claude Code auto-arrancando si el proyecto está preparado) o en una sesión nueva de cmux. " +
+      "'nombre' tiene que matchear (case-insensitive) el nombre exacto que devuelve listarProyectosClaude — si Cal no especificó el proyecto o el nombre no matchea, llamar listarProyectosClaude primero y preguntar. " +
+      "⚠️ REGLA DURA sobre 'modo' — NO tiene default silencioso. Un único criterio, sin excepciones ni casos grises: " +
+      "¿el mensaje de Cal nombró EXPLÍCITAMENTE la app ('VS Code' o 'cmux'/'paralelo')? " +
+      "SI → usá esa, listo (no preguntes; abrir VS Code es acción visible pero no destructiva). " +
+      "NO (esto incluye CUALQUIER pedido que no la nombre, aunque sea liso como 'abrí X' — 'no la nombró' es la única condición que importa, no evalúes 'ambigüedad') → preguntale en texto plano: '¿lo abro en VS Code o en una sesión paralela de cmux? (cmux corre un agente de Claude Code SIN gate de permisos sobre ese repo)' y NO llames la tool en este turno; recién en el mensaje siguiente de Cal resolvés 'modo'. " +
+      "Además, modo='paralelo' (abre SIEMPRE una sesión NUEVA de cmux corriendo `claude --dangerously-skip-permissions`, sin dedupe) requiere confirmación explícita de Cal en un mensaje POSTERIOR a esta llamada, sin excepción — con una sola excepción a esa excepción: si ya le preguntaste con el texto de arriba (que ya revela el riesgo) y Cal respondió eligiendo cmux, esa respuesta ES la confirmación, no reiteres la pregunta. Si en cambio Cal escribió 'paralelo'/'cmux' explícito desde su pedido original (rama SI de arriba), ahí sí falta confirmar — preguntale '¿confirmás abrir la sesión paralela en <proyecto>? corre sin gate de permisos' y esperá el mensaje siguiente antes de llamar la tool.",
+      {
+        nombre: z.string().describe("Nombre exacto del proyecto tal como aparece en listarProyectosClaude, ej. 'Vesta', 'Claude Projects (root)'"),
+        modo: z.enum(["vscode", "paralelo"]).describe("Resolvé cuál corresponde ANTES de llamar (ver regla dura en la descripción de la tool) — no hay valor por default implícito."),
+      },
+      async ({ nombre, modo }) => ({ content: [{ type: "text" as const, text: await openClaudeProject({ nombre, modo }) }] }),
     ),
   ];
 }

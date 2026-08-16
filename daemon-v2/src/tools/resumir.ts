@@ -462,13 +462,13 @@ async function setCardMessage(botToken: string, chatId: number, messageId: numbe
 }
 
 // Markdown → HTML de Telegram: citas a <blockquote>, resto vía sanitizeForTelegram (headings a
-// <h3> real, listas a <ul>/<ol> reales, tablas a <table> real — Rich Messages, no solo <b>/•
-// de texto plano, hallazgo 2026-08-09: el transporte ya usaba la API nueva pero el contenido
-// nunca generaba tags que Rich Messages renderiza distinto, así que se veía siempre igual).
+// título en negrilla <b>, listas a <ul>/<ol> reales, tablas a <table> real — Rich Messages
+// para lo que sí tiene forma de bloque; headings NO usan <h3>/<h4> — decisión de Cal 2026-08-09,
+// el margen propio de esos tags quedaba mal con varios headings seguidos en un mismo resumen).
 function mdToTelegram(md: string): string {
   let s = md.replace(/\r/g, "");
   s = s.replace(/^>\s?(.*)$/gm, "\n<blockquote>$1</blockquote>\n"); // citas separadas
-  s = sanitizeForTelegram(s); // headings→<h3>, listas→<ul>/<ol>, tablas→<table>, **→<b>
+  s = sanitizeForTelegram(s); // headings→<b>, listas→<ul>/<ol>, tablas→<table>, **→<b>
   return s;
 }
 

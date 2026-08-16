@@ -6,13 +6,13 @@ describe("sanitizeForTelegram", () => {
     expect(sanitizeForTelegram("**negrita** y *cursiva*")).toBe("<b>negrita</b> y <i>cursiva</i>");
   });
 
-  it("convierte un heading # a <h3> real (no <b>) — hallazgo 2026-08-09", () => {
-    expect(sanitizeForTelegram("# Título del resumen")).toBe("<h3>Título del resumen</h3>");
+  it("convierte un heading # a título en negrilla <b> (NO <h1>-<h6>) — decisión de Cal 2026-08-09", () => {
+    expect(sanitizeForTelegram("# Título del resumen")).toBe("<b>Título del resumen</b>");
   });
 
-  it("convierte headings de cualquier nivel (##/###) a <h3> por igual", () => {
-    expect(sanitizeForTelegram("## Subtítulo")).toBe("<h3>Subtítulo</h3>");
-    expect(sanitizeForTelegram("### Otro nivel")).toBe("<h3>Otro nivel</h3>");
+  it("convierte headings de cualquier nivel (##/###) a <b> por igual", () => {
+    expect(sanitizeForTelegram("## Subtítulo")).toBe("<b>Subtítulo</b>");
+    expect(sanitizeForTelegram("### Otro nivel")).toBe("<b>Otro nivel</b>");
   });
 
   it("convierte una lista con guiones a <ul><li> real, no bullets de texto plano", () => {
@@ -58,11 +58,24 @@ describe("sanitizeForTelegram", () => {
   it("heading + lista + tabla combinados en un mismo texto", () => {
     const md = "# Resumen\n\n- punto uno\n- punto dos\n\nTexto final.";
     const out = sanitizeForTelegram(md);
-    expect(out).toBe("<h3>Resumen</h3>\n\n<ul><li>punto uno</li><li>punto dos</li></ul>\n\nTexto final.");
+    // <b> es inline (a diferencia de un heading de bloque) — no se toca el \n original de
+    // la línea, se preserva la separación normal que ya trae el Markdown fuente.
+    expect(out).toBe("<b>Resumen</b>\n\n<ul><li>punto uno</li><li>punto dos</li></ul>\n\nTexto final.");
   });
 
   it("colapsa 3+ saltos de línea a 2 incluso después de agregar headings", () => {
     const out = sanitizeForTelegram("a\n\n\n\nb");
     expect(out).toBe("a\n\nb");
+  });
+
+  it("varios headings ## seguidos (forma real de un resumen: TL;DR + secciones) quedan como títulos en negrilla normales, sin margen de bloque acumulado — decisión de Cal 2026-08-09", () => {
+    const md = "## TL;DR\n\nTexto breve.\n\n## Contexto\n\nMás texto.\n\n## Fuente\n\nLink.";
+    const out = sanitizeForTelegram(md);
+    // <b> no tiene margen propio de bloque (a diferencia de <h3>/<h4>, probados y
+    // descartados el mismo día): separación normal de párrafo, una línea en blanco,
+    // sin importar cuántos títulos seguidos tenga el resumen.
+    expect(out).toBe(
+      "<b>TL;DR</b>\n\nTexto breve.\n\n<b>Contexto</b>\n\nMás texto.\n\n<b>Fuente</b>\n\nLink."
+    );
   });
 });

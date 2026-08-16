@@ -10,9 +10,15 @@ export function sanitizeForTelegram(text: string): string {
   // 1. Tables first (before bold/italic, to avoid conflicts with ** in cells)
   result = convertMarkdownTables(result);
 
-  // 2. Headings (#/##/###) → <h3> real (Rich Messages) — antes se perdían como texto
-  // plano o bold, y el mensaje nunca aprovechaba la API nueva aunque el transporte
-  // ya la usara. Va antes de listas/bold para no competir con esos regex.
+  // 2. Headings (#/##/###) → título normal en negrilla (<b>Título</b>), NO <h3>/<h4>
+  // (decisión de Cal 2026-08-09, tras probar ambos: los headings de bloque de Rich
+  // Messages traen margen propio impredecible — con varios headings seguidos, típico de
+  // un resumen (TL;DR + secciones + Citas + Takeaways + Fuente), el mensaje quedaba con
+  // huecos grandes sin importar cuánto se ajustara el \n alrededor del tag). `<b>` es
+  // INLINE — no fuerza salto de línea solo, así que acá NO se toca el \n original de la
+  // línea (a diferencia de un heading de bloque): se preserva la separación normal que ya
+  // trae el Markdown fuente (típicamente una línea en blanco antes/después). Va antes de
+  // listas/bold para no competir con esos regex.
   result = convertMarkdownHeadings(result);
 
   // 3. Listas (- / * / 1.) → <ul>/<ol> reales — antes "- item" quedaba como "• item"
@@ -35,7 +41,7 @@ export function sanitizeForTelegram(text: string): string {
 }
 
 function convertMarkdownHeadings(text: string): string {
-  return text.replace(/^#{1,6}\s+(.+)$/gm, '\n<h3>$1</h3>\n');
+  return text.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
 }
 
 const UL_RE = /^[-*]\s+(.+)$/;
