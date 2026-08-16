@@ -99,3 +99,18 @@ describe("buildLluviaMessages — alerta", () => {
     expect(alerta).not.toContain("Santa Cruz (centro):");
   });
 });
+
+describe("buildLluviaMessages — escaping", () => {
+  it("escapa HTML en ciudad/categoria/error (regresión del fix f2f98ec)", () => {
+    const { reporte, confirmacion, alerta } = buildLluviaMessages("2026-08-16", [
+      resultado({ ciudad: "<script>", categoria: "Considerable", total: 50, percentil: 90 }),
+      resultado({ ciudad: "Cochabamba", ok: false, total: null, error: "<b>boom</b> & fail" }),
+    ]);
+    expect(reporte).toContain("&lt;script&gt;");
+    expect(reporte).not.toContain("<script>");
+    expect(confirmacion).toContain("&lt;b&gt;boom&lt;/b&gt; &amp; fail");
+    expect(confirmacion).not.toContain("<b>boom</b>");
+    expect(alerta).toContain("&lt;script&gt;");
+    expect(alerta).not.toContain("<script>");
+  });
+});
