@@ -1,3 +1,136 @@
+# Rediseño del menú de Telegram de Jano — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Reestructurar `daemon-v2/src/menu.ts` de un menú plano de 10 botones a un árbol de 2
+niveles (11 botones de categoría/acción directa en el nivel 1, 6 submenús nuevos/extendidos en
+el nivel 2), agregando acceso a 12 capacidades de Jano que hoy solo son accesibles por texto.
+
+**Architecture:** Todo el cambio vive en un solo archivo, `menu.ts` — funciones puras
+`buildXMenu()` que devuelven `MenuPayload`, más dos tablas de despacho (`NAV_MENUS` para
+navegación sin LLM, `ACTION_TEXT` para acciones que se convierten en texto natural para el LLM).
+`index.ts` NO se toca: ya despacha genéricamente cualquier `callback_data` con prefijo `j:` a
+`handleMenuCallback()`, y los 3 casos mecánicos (`j:star`/`j:ytpl`/`j:journal`) siguen
+interceptados ahí arriba sin cambios, con los mismos nombres de callback.
+
+**Tech Stack:** TypeScript, vitest (`npm run test -w @cos/daemon`), mismo patrón de test que
+`proactive/rich-send.test.ts`.
+
+---
+
+## Task 1: Rediseñar `menu.ts` — árbol de 2 niveles + test de integridad de wiring
+
+**Files:**
+- Modify: `daemon-v2/src/menu.ts`
+- Create: `daemon-v2/src/menu.test.ts`
+
+### Contexto para quien ejecute esta tarea
+
+`menu.ts` hoy exporta `buildMainMenu()` (10 botones planos), `buildHealthMenu()`,
+`buildCambioMenu()`, `buildFlightsMenu()`/`buildFlightsDirMenu()` (submenú de vuelos ya
+anidado), dos tablas privadas `ACTION_TEXT`/`NAV_MENUS`, y `handleMenuCallback()` (despachador
+genérico, sin cambios en esta tarea). El spec completo con la tabla botón→tool está en
+`docs/superpowers/specs/2026-08-16-jano-telegram-menu-redesign-design.md`.
+
+Cambio de fondo: `buildMainMenu()` pasa a devolver 11 botones (7 categorías/acciones nuevas +
+4 que ya existían: `j:fuel`, `j:tokens`, `j:journal` se quedan en nivel 1; `j:health`/`j:fx`
+también se quedan en nivel 1 pero ahora apuntan a submenús EXTENDIDOS). Se agregan 4 funciones
+`buildXMenu()` nuevas (`buildPersonalMenu`, `buildLearningMenu`, `buildViajesMenu`,
+`buildYapeMenu`). `buildHealthMenu`/`buildCambioMenu` ganan un botón cada uno.
+`buildFlightsMenu()` cambia SOLO su botón "← Volver": de `j:menu` pasa a `j:viajes`, porque
+Vuelos queda anidado un nivel más adentro (dentro de la categoría Viajes).
+
+`ACTION_TEXT` y `NAV_MENUS` pasan de privadas (`const`) a exportadas (`export const`) — las
+necesita el test de integridad de wiring de este mismo task para verificar que cada
+`callback_data` que aparece en algún botón tiene una entrada real en alguna de las dos tablas
+(o es uno de los 3 casos mecánicos interceptados en `index.ts`). Sin este export, un typo en un
+`callback_data` (ej. escribir `j:leaning:reader` en vez de `j:learning:reader`) no fallaría
+ningún test — el botón simplemente no haría nada al tocarlo, en producción, sin ningún error.
+
+- [ ] **Step 1: Escribir el test de integridad (falla contra el `menu.ts` actual)**
+
+Crear `daemon-v2/src/menu.test.ts`:
+
+```typescript
+import { describe, it, expect } from "vitest";
+import {
+  buildMainMenu,
+  buildPersonalMenu,
+  buildHealthMenu,
+  buildLearningMenu,
+  buildViajesMenu,
+  buildYapeMenu,
+  buildCambioMenu,
+  buildFlightsMenu,
+  NAV_MENUS,
+  ACTION_TEXT,
+} from "./menu.js";
+import type { MenuPayload } from "./menu.js";
+
+// Callbacks manejados FUERA de menu.ts (interceptados en index.ts antes del
+// startsWith("j:") genérico que despacha a handleMenuCallback) — nunca viven
+// en NAV_MENUS ni en ACTION_TEXT, y eso es correcto.
+const MECHANICAL_ELSEWHERE = new Set(["j:star", "j:ytpl", "j:journal"]);
+
+function allCallbacks(menus: MenuPayload[]): string[] {
+  return menus.flatMap((m) => m.keyboard.inline_keyboard.flat().map((b) => b.callback_data));
+}
+
+const ALL_MENUS = (): MenuPayload[] => [
+  buildMainMenu(),
+  buildPersonalMenu(),
+  buildHealthMenu(),
+  buildLearningMenu(),
+  buildViajesMenu(),
+  buildYapeMenu(),
+  buildCambioMenu(),
+  buildFlightsMenu(),
+];
+
+describe("menu wiring integrity", () => {
+  it("every callback_data across all menus is wired (NAV_MENUS, ACTION_TEXT, or mechanical)", () => {
+    const unwired = allCallbacks(ALL_MENUS()).filter(
+      (cb) => !(cb in NAV_MENUS) && !(cb in ACTION_TEXT) && !MECHANICAL_ELSEWHERE.has(cb),
+    );
+    expect(unwired).toEqual([]);
+  });
+
+  it("ningún menú excede 3 botones por fila ni 4 filas (convención de menu.ts)", () => {
+    for (const menu of ALL_MENUS()) {
+      expect(menu.keyboard.inline_keyboard.length).toBeLessThanOrEqual(4);
+      for (const row of menu.keyboard.inline_keyboard) {
+        expect(row.length).toBeLessThanOrEqual(3);
+      }
+    }
+  });
+
+  it("buildMainMenu expone los 11 botones de nivel 1 acordados, en orden", () => {
+    expect(allCallbacks([buildMainMenu()])).toEqual([
+      "j:personal", "j:health", "j:learning",
+      "j:viajes", "j:yape", "j:fx",
+      "j:fuel", "j:tokens", "j:launcher",
+      "j:backlog", "j:journal",
+    ]);
+  });
+
+  it("buildFlightsMenu vuelve a j:viajes (queda anidado bajo Viajes, no en el nivel 1)", () => {
+    const backButtonRow = buildFlightsMenu().keyboard.inline_keyboard.at(-1);
+    expect(backButtonRow?.[0]?.callback_data).toBe("j:viajes");
+  });
+});
+```
+
+- [ ] **Step 2: Correr el test y verificar que falla**
+
+Run: `npm run test -w @cos/daemon -- menu.test.ts`
+Expected: FAIL — `buildPersonalMenu`/`buildLearningMenu`/`buildViajesMenu`/`buildYapeMenu` no
+existen todavía (error de import/compilación), y `NAV_MENUS`/`ACTION_TEXT` no están exportadas.
+
+- [ ] **Step 3: Reescribir `menu.ts` completo**
+
+Reemplazar TODO el contenido de `daemon-v2/src/menu.ts` por:
+
+```typescript
 /**
  * menu.ts — Menú interactivo de Telegram para Jano (CoS personal de Cal).
  *
@@ -341,3 +474,80 @@ export async function handleMenuCallback(
   // 3. LLM reemplaza el placeholder con la respuesta
   await processMessageFn(synthetic, 0, { existingPlaceholderId: menuMsgId });
 }
+```
+
+- [ ] **Step 4: Correr el test y verificar que pasa**
+
+Run: `npm run test -w @cos/daemon -- menu.test.ts`
+Expected: PASS — 4/4 tests.
+
+- [ ] **Step 5: Typecheck y build completo del daemon**
+
+Run:
+```bash
+cd "/Users/calepes/Claude Projects/Personal/Agents/Jano"
+npm run typecheck -w @cos/daemon
+npm run test -w @cos/daemon
+npm -w @cos/shared run build && npm -w @cos/daemon run build
+```
+Expected: sin errores en las 3 corridas (typecheck limpio, suite completa en verde — no solo
+`menu.test.ts`, para confirmar que exportar `ACTION_TEXT`/`NAV_MENUS` y renombrar el target del
+botón "← Volver" de Vuelos no rompió nada en otros tests), build genera `dist/` sin errores.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "/Users/calepes/Claude Projects/Personal/Agents/Jano"
+git add daemon-v2/src/menu.ts daemon-v2/src/menu.test.ts
+git commit -m "feat(jano): rediseñar menú de Telegram a árbol de 2 niveles
+
+11 botones en nivel 1 (Personal/Salud/Learning/Viajes/Yape/Finanzas +
+Combustible/Tokens/Claude Launcher/Backlog/Journal), 4 submenús nuevos
+(Personal, Learning, Viajes, Yape) + 2 extendidos (Salud +Foco CAL,
+Finanzas +Inversiones). Expone 12 capacidades que antes solo eran
+accesibles por texto. Spec/plan: docs/superpowers/specs+plans/2026-08-16-jano-telegram-menu-redesign.*"
+```
+
+---
+
+## Verificación en producción (fuera de los tasks de código — requiere a Cal)
+
+No es un task de esta sección porque no es código: sigue la norma ya establecida en este repo
+(`CLAUDE.md` → "Comandos operativos" y regla dura de confirmar restarts).
+
+1. Restart del daemon **con confirmación explícita de Cal antes de ejecutarlo**:
+   ```bash
+   launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cal.cos-agent-v2.plist
+   ```
+2. Arranque limpio verificado en logs: `tail -n 50 ~/Library/Logs/cos-agent-v2.{out,err}.log`.
+3. Prueba real por Telegram: abrir `/menu`, entrar a cada una de las 6 categorías con submenú
+   (Personal, Salud, Learning, Viajes, Yape, Finanzas), tocar al menos un botón nuevo de cada una
+   y confirmar que dispara la respuesta esperada. Confirmar que `⭐ Starred`/`🎬 Playlist`
+   (ahora dentro de Learning) y `📓 Journal` (nivel 1, sin cambios) siguen funcionando igual que
+   antes del rediseño — son los 3 casos mecánicos que no pasaron por ninguna prueba automatizada.
+   Confirmar que Vuelos → "← Volver" ahora cae en Viajes, no en el menú principal.
+
+## Self-Review
+
+**Cobertura del spec:** las 8 secciones de nivel 2 del spec (Personal, Salud+Foco, Learning,
+Viajes, Yape, Finanzas+Inversiones, nivel 1 con Combustible/Tokens/Claude
+Launcher/Backlog/Journal, y el reancla de Vuelos→Viajes) están todas en el Task 1 — un solo
+archivo, un solo task, sin fragmentación artificial porque es una reescritura cohesiva de una
+única estructura de datos.
+
+**Placeholders:** ninguno — código completo en cada step, incluido el archivo entero de
+`menu.ts` (no un diff parcial, para que quien ejecute no tenga que adivinar cómo integrar los
+fragmentos).
+
+**Consistencia de tipos:** `MenuPayload`/`InlineKeyboardButton`/`InlineKeyboardMarkup` no
+cambian. Las 4 funciones nuevas (`buildPersonalMenu`/`buildLearningMenu`/`buildViajesMenu`/
+`buildYapeMenu`) siguen exactamente la firma `(): MenuPayload` de las 3 existentes. Los nombres
+de `callback_data` en el test (`menu.test.ts`) son un match literal contra los mismos strings
+usados en `menu.ts` — verificado dato por dato al escribir el plan, no solo por convención de
+nombre.
+
+**Fuera de alcance (no tocado por este plan):** `index.ts` (el despacho genérico y los 3 casos
+mecánicos ya cubren el nuevo árbol sin cambios), `agent-tools.ts`/`agent-options.ts` (ningún
+tool nuevo — todos los botones nuevos disparan tools que YA existen y ya están en la
+allowlist), cualquier otro archivo de `daemon-v2`.
