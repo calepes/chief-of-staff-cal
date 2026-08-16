@@ -118,6 +118,11 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Vuelos NAABOL (Bolivia) — útil para viajes laborales Yape (LPB-VVI, VVI-LIM, etc.)
   "mcp__naabol-flights__getFlight",
   "mcp__naabol-flights__getAirportFlights",
+  // Lluvia Bolivia — dato medido (SYNOP) + pronóstico (Open-Meteo) por ciudad
+  "mcp__lluvia-bolivia__getLluviaDia",
+  "mcp__lluvia-bolivia__getLluviaSerie",
+  "mcp__lluvia-bolivia__getLluviaResumen",
+  "mcp__lluvia-bolivia__getPronosticoLluvia",
   // Check-in online BoA (Boliviana de Aviación) — automatizado vía Chrome real + CDP
   "mcp__boa-checkin__prepareBoaCheckin",
   "mcp__boa-checkin__confirmBoaCheckin",

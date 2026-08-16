@@ -269,6 +269,8 @@ const YT_TRANSCRIBE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
 const EXCHANGE_RATE_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
+const LLUVIA_BOLIVIA_DIST =
+  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/lluvia-bolivia/dist/index.js";
 const MCP_REMOTE = "/Users/calepes/.npm-global/bin/mcp-remote";
 const HEALTH_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
@@ -318,6 +320,11 @@ const BASE_OPTIONS: Options = {
       type: "stdio",
       command: NODE_BIN,
       args: [EXCHANGE_RATE_DIST],
+    },
+    "lluvia-bolivia": {
+      type: "stdio",
+      command: NODE_BIN,
+      args: [LLUVIA_BOLIVIA_DIST],
     },
     // Automatiza el check-in de BoA lanzando el Chrome real del sistema y
     // conectando vía CDP (chromium.launch() propio es bloqueado por el WAF
