@@ -38,6 +38,7 @@ import { scheduleLearningReflect, LEARNINGS_PATH } from "./proactive/learning-re
 import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
+import { checkLluvia } from "./proactive/lluvia-check.js";
 import { checkHealthGoals } from "./proactive/health-goals-check.js";
 import { checkKpiIngest, ingestLendingReportForDate, type CheckKpiIngestOpts } from "./proactive/kpi-ingest-check.js";
 import {
@@ -1769,6 +1770,26 @@ function scheduleHealthSyncCheck(): void {
 }
 
 /**
+ * Reporte diario de lluvia + confirmación del cron de ingesta + alertas (2026-08-16,
+ * pedido de Cal). 09:50 La Paz — 20 min después del cron Python de ingesta (09:30,
+ * launchd, ver ~/Claude Projects/Personal/Apps/lluvia-bolivia/). 3 mensajes separados,
+ * el de confirmación sale TODOS los días (éxito o falla) — a diferencia del criterio
+ * "solo reportar la excepción" de health-sync-check/kpi-ingest-check, acá Cal pidió
+ * explícitamente la confirmación diaria. Detalle: docs/superpowers/specs/2026-08-16-
+ * lluvia-bolivia-alertas-mcp-design.md
+ */
+function scheduleLluviaCheck(): void {
+  cron.schedule("50 9 * * *", () => {
+    void checkLluvia({
+      kv,
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+    }).catch((err) => log({ msg: "lluvia_check_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "lluvia_check_scheduled", interval: "daily 09:50" });
+}
+
+/**
  * Chequeo proactivo de las 9 metas de "Metas Salud" (2026-08-08, pedido de Cal) — mecánico, sin
  * LLM. Antes de comparar contra las metas valida que Health Auto Export haya sincronizado
  * recientemente (health-goals-check.ts, isSyncFresh) — si no, avisa a Cal a hacer sync en vez de
@@ -1960,6 +1981,7 @@ async function loop(): Promise<void> {
   // Corte de sync de Apple Health (2026-07-16, pedido de Cal) — reabre la proactividad puntualmente
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
+  scheduleLluviaCheck();
   scheduleHealthGoalsMidday();
   scheduleHealthGoalsDaily();
   scheduleJournalSweep();
