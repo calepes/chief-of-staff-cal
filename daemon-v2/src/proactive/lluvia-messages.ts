@@ -23,6 +23,10 @@ export interface LluviaMessages {
 // Umbral acordado con Cal: desde "Considerable" en adelante (p75+), no solo Fuerte/Excepcional.
 const UMBRAL_ALERTA = new Set(["Considerable", "Fuerte", "Excepcional"]);
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 export function buildLluviaMessages(fecha: string, resultados: CiudadDiaResultado[]): LluviaMessages {
   return {
     reporte: buildReporte(fecha, resultados),
@@ -35,8 +39,8 @@ function buildReporte(fecha: string, resultados: CiudadDiaResultado[]): string {
   const filas = resultados
     .map((r) => {
       const mm = r.total != null ? `${r.total} mm` : "sin dato";
-      const cat = r.categoria ? ` (${r.categoria})` : "";
-      return `<tr><td>${r.ciudad}</td><td>${mm}${cat}</td></tr>`;
+      const cat = r.categoria ? ` (${escapeHtml(r.categoria)})` : "";
+      return `<tr><td>${escapeHtml(r.ciudad)}</td><td>${mm}${cat}</td></tr>`;
     })
     .join("");
   return `<b>🌧️ Lluvia de hoy (${fecha})</b>\n<table><tr><th>Ciudad</th><th>Total</th></tr>${filas}</table>`;
@@ -48,7 +52,7 @@ function buildConfirmacion(fecha: string, resultados: CiudadDiaResultado[]): str
     return `✅ Cron de lluvia OK (${fecha}) — las ${resultados.length} ciudades cargaron.`;
   }
   const detalle = faltantes
-    .map((r) => `${r.ciudad}${r.error ? ` (${r.error})` : " (sin dato de hoy)"}`)
+    .map((r) => `${escapeHtml(r.ciudad)}${r.error ? ` (${escapeHtml(r.error)})` : " (sin dato de hoy)"}`)
     .join(", ");
   return `⚠️ Cron de lluvia con problemas (${fecha}): ${detalle}. Revisa cron.log en la Mac.`;
 }
@@ -59,7 +63,7 @@ function buildAlerta(fecha: string, resultados: CiudadDiaResultado[]): string | 
   const lineas = disparadas
     .map((r) => {
       const pct = r.percentil != null ? ` (percentil ${r.percentil})` : "";
-      return `• <b>${r.ciudad}</b>: ${r.total} mm — ${r.categoria}${pct}`;
+      return `• <b>${escapeHtml(r.ciudad)}</b>: ${r.total} mm — ${escapeHtml(r.categoria ?? "")}${pct}`;
     })
     .join("\n");
   return `🌧️ <b>Lluvia inusual hoy (${fecha})</b>\n${lineas}`;
