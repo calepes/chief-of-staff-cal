@@ -6,6 +6,9 @@
 
 ## Pendientes
 
+### Surgió en sesión 2026-08-16
+- [ ] **Que el coaching de salud de Jano (getHealthSummary/getHealthTrend) incluya acciones concretas para subir el HRV cuando detecte que está bajo, no solo reportar el dato**
+
 ### Surgió en sesión 2026-08-08
 - [ ] **Migrar del Spark CLI al MCP de Gmail**
 
