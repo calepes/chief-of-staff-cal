@@ -53,29 +53,35 @@ export async function checkLluvia(opts: CheckLluviaOpts): Promise<void> {
     const yaCorrio = await kv.get<boolean>(dedupKey);
     if (yaCorrio) return;
   } catch (err) {
-    console.log(JSON.stringify({ ts: Date.now(), msg: "lluvia_check_kv_error", err: String(err) }));
+    console.log(JSON.stringify({ ts: Date.now(), msg: "lluvia_check_kv_read_error", err: String(err) }));
   }
 
   const resultados = await Promise.all(CIUDADES.map((c) => fetchCiudadDia(c, fecha)));
   const { reporte, confirmacion, alerta } = buildLluviaMessages(fecha, resultados);
 
   const mensajes = [reporte, confirmacion, alerta].filter((t): t is string => t !== null);
+  let algunEnvioOk = false;
   for (const text of mensajes) {
     try {
       await sendCronMessage(botToken, { chatId, text });
+      algunEnvioOk = true;
     } catch (err) {
       console.log(JSON.stringify({ ts: Date.now(), msg: "lluvia_check_send_failed", err: String(err) }));
     }
   }
 
-  // Se marca SIEMPRE, no solo si los 3 envíos salieron bien: el cron corre una vez al
-  // día (no cada 30 min como health-sync-check), así que no hay "próximo tick" donde
-  // reintentar un envío puntual que falló — el objetivo del dedup es no duplicar los 3
-  // mensajes si el daemon reinicia el mismo día, no garantizar entrega (mismo criterio
-  // "sin retry, sin cola" documentado en Vesta/CLAUDE.md § Decisiones de diseño).
-  try {
-    await kv.set(dedupKey, true, DEDUP_TTL_SEC);
-  } catch (err) {
-    console.log(JSON.stringify({ ts: Date.now(), msg: "lluvia_check_kv_error", err: String(err) }));
+  // Se marca solo si AL MENOS UNO de los 3 envíos salió bien: si los 3 fallan (ej. el SNI
+  // filtering que bloquea Telegram, documentado en Jano/CLAUDE.md), no se marca el dedup —
+  // un reinicio del daemon ese mismo día vuelve a intentar los 3 mensajes desde cero. Es
+  // intencional: perder los 3 mensajes en silencio por una falla total sería peor que, en el
+  // caso raro de falla total + reinicio el mismo día, mandar algún mensaje duplicado.
+  if (algunEnvioOk) {
+    try {
+      await kv.set(dedupKey, true, DEDUP_TTL_SEC);
+    } catch (err) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "lluvia_check_kv_write_error", err: String(err) }));
+    }
+  } else {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "lluvia_check_all_sends_failed", fecha }));
   }
 }
