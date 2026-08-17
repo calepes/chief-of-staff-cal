@@ -4,27 +4,36 @@
 - Comando `/menu` desde el chat, o desde el ícono `/` junto al campo de texto.
 - Comandos registrados: `/menu`, `/reset`.
 
-## Estructura de botones
+## Estructura de botones (rediseño 2026-08-16 — árbol de 2 niveles)
 
-**Menú principal:**
+> Spec/plan del rediseño: `docs/superpowers/{specs,plans}/2026-08-16-jano-telegram-menu-redesign.*`
+
+**Menú principal (11 botones, 4 filas):**
 ```
-[🔮 Briefing]    [📋 Tareas]    [📅 Agenda]
-[🏥 Salud]       [💰 Cambio]    [🚗 Combustible]
-[✈️ Vuelos]      [⚡ Tokens]
+[🏠 Personal]     [🩺 Salud]        [📚 Learning]
+[✈️ Viajes]       [💼 Yape]         [💰 Finanzas]
+[🚗 Combustible]  [⚡ Tokens]       [💻 Claude Launcher]
+[📋 Backlog]      [📓 Journal]
 ```
 
 **Sub-menús:**
 
 | Sección | Opciones |
 |---------|---------|
-| Briefing | 🇧🇴 Bolivia · 🇵🇪 Perú · 🇨🇴 Colombia |
-| Tareas | Personal · Vibe Projects · Nueva |
-| Agenda | Hoy · Esta semana · Outlook · Nuevo evento |
-| Salud | Resumen · Tendencia · Workouts |
-| Cambio | BCB Oficial · P2P Binance · Ambos |
-| Combustible | → dispara `requestUserLocation` → estaciones cercanas |
-| Vuelos | → pasa directo al LLM |
-| Tokens | → pasa directo al LLM |
+| 🏠 Personal | Things hoy · Proyectos (Things) · Reminders (familia/mercado) |
+| 🩺 Salud | Resumen · Tendencia · Workouts · Foco CAL |
+| 📚 Learning | ⭐ Starred · 🎬 Playlist · 📚 Resumir · Estado · Readwise · Reader · Feedbin · Libros |
+| ✈️ Viajes | ✈️ Vuelos (→ submenú por aeropuerto, ver abajo) · QR Aduana · Check-in BoA |
+| 💼 Yape | KPI cards · Meetings · PPT wizard · Lluvia/pronóstico |
+| 💰 Finanzas | BCB Oficial · P2P Binance · Ambos · Inversiones |
+| ✈️ Vuelos (nivel 3, dentro de Viajes) | VVI/LPB/CBB/TJA/SRE/ORU → Salidas/Llegadas de hoy |
+| 🚗 Combustible / ⚡ Tokens / 💻 Claude Launcher / 📋 Backlog | botones directos de nivel 1, sin submenú — pasan directo al LLM |
+| 📓 Journal | mecánico (interceptado en `index.ts`, NO pasa por `handleMenuCallback` ni por el LLM) — abre el modo journal de terapia |
+
+⚠️ `⭐ Starred`/`🎬 Playlist` (dentro de Learning) y `📓 Journal` (nivel 1) son los 3 casos
+**mecánicos**: se interceptan en `index.ts` ANTES del `startsWith("j:")` genérico, nunca pasan
+por `NAV_MENUS`/`ACTION_TEXT`. `✈️ Vuelos` → "← Volver" cae en `j:viajes` (su padre real), no en
+`j:menu` — quedó un nivel más adentro que antes del rediseño.
 
 ## Convención de callback_data
 
@@ -80,10 +89,10 @@ Spotify callbacks (`spotify:*`) descartados por el worker (out of scope v2). Pen
 
 El menú `j:*` vive 100% en el daemon (NO en el worker). El worker solo maneja `t:d/c/s/sd` (legacy).
 
-1. Editar `daemon-v2/src/menu.ts` — agregar botón en `buildXxxMenu()` o crear nueva función de sub-menú.
-2. Si es **navegación**: agregar entrada en `NAV_MENUS` dentro de `handleMenuCallback` (callback_data → función de menú).
-3. Si es **acción**: agregar entrada en `ACTION_TEXTS` dentro de `handleMenuCallback` (callback_data → texto natural para el LLM).
-4. Agregar entry en `daemon-v2/src/agent.ts:TOOL_MESSAGES` si la acción dispara un tool específico.
+1. Editar `daemon-v2/src/menu.ts` — agregar botón en `buildXxxMenu()` o crear nueva función de sub-menú (exportarla).
+2. Si es **navegación**: agregar entrada en `NAV_MENUS` (const exportada a nivel de módulo, NO dentro de `handleMenuCallback`) — callback_data → función de menú.
+3. Si es **acción**: agregar entrada en `ACTION_TEXT` (mismo patrón — const exportada, sin "S" al final) — callback_data → texto natural para el LLM.
+4. **Test de integridad (`menu.ts.test.ts`, agregado 2026-08-16):** corre `npm run test -w @cos/daemon -- menu.test.ts` — falla si algún `callback_data` de un botón no tiene entrada en `NAV_MENUS`/`ACTION_TEXT`/el set de mecánicos, o si algún menú excede 3 botones/fila o 4 filas.
 5. Build solo del daemon: `npm -w @cos/shared run build && npm -w @cos/daemon run build` + restart daemon (no se necesita deploy del worker).
 
 ## Botones inline en reply
