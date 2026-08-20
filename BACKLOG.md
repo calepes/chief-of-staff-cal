@@ -6,6 +6,9 @@
 
 ## Pendientes
 
+### Surgió en sesión 2026-08-17
+- [ ] **Mejoras al resumidor (YouTube + Feedbin starred)** — análisis completo (código real + research de comunidad) listo, esperando que Cal responda 4 preguntas antes de implementar. Falla real y reproducible: timeout de 360s por transcripción sin truncar (pasó el 2026-08-16 22:16, ya había pasado el 2026-07-03). Cron diario apagado desde 2026-07-14 dejó dormido también el flujo de starred (que YA existe, completo, no es idea nueva). Detalle completo, prioridades y preguntas: `HANDOFF-resumidor-mejoras.md`.
+
 ### Surgió en sesión 2026-08-16
 - [ ] **Que el coaching de salud de Jano (getHealthSummary/getHealthTrend) incluya acciones concretas para subir el HRV cuando detecte que está bajo, no solo reportar el dato**
 
