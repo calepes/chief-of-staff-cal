@@ -205,6 +205,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__cos-tools__travelTime",
   // Consumo de tokens Claude Max — ciclo activo, burn rate, presupuesto
   "mcp__cos-tools__getTokenUsage",
+  // Registro de capturas del límite semanal de Codex
+  "mcp__cos-tools__registrarUsoCodex",
   // Foco CAL — check-ins proactivos y revisión on-demand
   "mcp__cos-tools__getFocoCalStatus",
   "mcp__cos-tools__logFocoProgress",
@@ -229,6 +231,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__spark__postComment",
   "mcp__spark__emailAction",
   "mcp__spark__contactAction",
+  "mcp__spark__triageInboxDiagnostico",
+  "mcp__spark__archiveEmails",
   // Fraternidad Peruana (Achoradazos) — gestión de fraternos, eventos, pagos
   "mcp__achoradazos__searchFraterno",
   "mcp__achoradazos__listPendingPayments",

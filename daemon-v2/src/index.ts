@@ -38,6 +38,9 @@ import { scheduleLearningReflect, LEARNINGS_PATH } from "./proactive/learning-re
 import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
+import { checkBooksDailyReport } from "./proactive/books-daily-report.js";
+import { checkFeedbinDailyReport } from "./proactive/feedbin-daily-report.js";
+import { refreshTopicsProfile } from "./proactive/topics-profile-refresh.js";
 import { checkLluvia } from "./proactive/lluvia-check.js";
 import { checkHealthGoals } from "./proactive/health-goals-check.js";
 import { checkKpiIngest, ingestLendingReportForDate, type CheckKpiIngestOpts } from "./proactive/kpi-ingest-check.js";
@@ -102,6 +105,11 @@ const env = {
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? "",
   HOME_PIN: process.env.HOME_PIN ?? "",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY ?? "",
+  FEEDBIN_USERNAME: process.env.FEEDBIN_USERNAME ?? "",
+  FEEDBIN_PASSWORD: process.env.FEEDBIN_PASSWORD ?? "",
+  CODEX_USAGE_URL: process.env.CODEX_USAGE_URL ?? "",
+  CODEX_USAGE_PUSH_SECRET: process.env.CODEX_USAGE_PUSH_SECRET ?? "",
+  NOTIF_BOT_TOKEN: process.env.NOTIF_BOT_TOKEN ?? "",
 };
 
 // Force SDK to use OAuth Max instead of API key (Tier 1 rate limited).
@@ -235,6 +243,8 @@ const sdkTools = buildSdkTools({
   getLastPdfPath: () => lastPdfByChat.get(currentChatId),
   gmapsApiKey: env.GOOGLE_MAPS_API_KEY || undefined,
   homePin: env.HOME_PIN || undefined,
+  codexUsageUrl: env.CODEX_USAGE_URL || undefined,
+  codexUsagePushSecret: env.CODEX_USAGE_PUSH_SECRET || undefined,
   kv,
   cookieJarKv,
   // BASE_OPTIONS ya no trae systemPrompt (se recalcula por turno, ver currentSystemPrompt()):
@@ -1662,6 +1672,67 @@ async function processMessage(
   }
 }
 
+const WEBHOOK_ALERT_THRESHOLD_MS = 10 * 60 * 1000;
+const WEBHOOK_BROKEN_SINCE_KEY = "jano:webhook:brokenSince";
+const WEBHOOK_ALERTED_KEY = "jano:webhook:alerted";
+
+// Bot de notifications (@ClaudeCalbot) — token y chat separados del webhook de Jano,
+// para poder avisar aunque el propio webhook de Jano esté desconfigurado. No cubre el
+// caso "la Mac entera no alcanza api.telegram.org" (mismo path de red para ambos bots),
+// pero sí el caso más común: el webhook se desincroniza con la Mac sana (blip del
+// Worker, alguien lo pisó). Ver CLAUDE.md sección Telegram.
+// Reusa sendMessage() de @cos/shared (ya importado, toma el token como parámetro) en
+// vez de un fetch a mano: valida res.ok/data.ok y tira si Telegram rechaza el envío
+// (bot bloqueado, chat_id inválido, token rotado) — sin eso "mandé la alerta" quedaba
+// sin confirmar nunca. Devuelve boolean en vez de propagar, así los callers deciden
+// si marcar "ya avisado" sin necesitar su propio try/catch.
+async function notifyViaNotifBot(text: string): Promise<boolean> {
+  if (!env.NOTIF_BOT_TOKEN) {
+    log({ msg: "webhook_notif_bot_token_missing" });
+    return false;
+  }
+  try {
+    await sendMessage(env.NOTIF_BOT_TOKEN, { chatId: ALERT_CHAT_ID, text, parseMode: "HTML" });
+    return true;
+  } catch (err) {
+    log({ msg: "webhook_notif_send_failed", err: String(err) });
+    return false;
+  }
+}
+
+async function markWebhookHealthy(): Promise<void> {
+  const wasAlerted = await kv.get<boolean>(WEBHOOK_ALERTED_KEY);
+  await kv.delete(WEBHOOK_BROKEN_SINCE_KEY);
+  await kv.delete(WEBHOOK_ALERTED_KEY);
+  if (wasAlerted) {
+    const sent = await notifyViaNotifBot("✅ <b>Webhook de Jano recuperado</b>\nYa vuelve a recibir mensajes normal.");
+    if (sent) log({ msg: "webhook_recovery_notified" });
+  }
+}
+
+// Cuenta como "problema" tanto el drift confirmado (currentUrl != esperado) como no poder
+// ni siquiera chequear (timeout/fetch failed) — ambos significan "no puedo confirmar que
+// el webhook esté sano", que es la condición real que le importa a Cal.
+async function markWebhookBroken(): Promise<void> {
+  const since = await kv.get<number>(WEBHOOK_BROKEN_SINCE_KEY);
+  const brokenSince = since ?? Date.now();
+  if (!since) await kv.set(WEBHOOK_BROKEN_SINCE_KEY, brokenSince, 24 * 60 * 60);
+
+  const alerted = await kv.get<boolean>(WEBHOOK_ALERTED_KEY);
+  if (alerted || Date.now() - brokenSince < WEBHOOK_ALERT_THRESHOLD_MS) return;
+
+  const minutos = Math.round((Date.now() - brokenSince) / 60_000);
+  const sent = await notifyViaNotifBot(
+    `⚠️ <b>Webhook de Jano roto hace ${minutos} min</b>\nLos mensajes que le mandes a Jano no van a llegar. Revisa conectividad de la Mac o reinicia el daemon.`,
+  );
+  // Solo marcar "ya avisado" si el mensaje realmente salió — si falló, dejar el flag
+  // sin marcar para reintentar en el próximo tick (mismo patrón que health-sync-check.ts).
+  if (sent) {
+    await kv.set(WEBHOOK_ALERTED_KEY, true, 24 * 60 * 60);
+    log({ msg: "webhook_alert_sent", minutos });
+  }
+}
+
 async function ensureWebhook(): Promise<void> {
   if (!env.COS_WEBHOOK_SECRET || !env.COS_WEBHOOK_URL) return;
   try {
@@ -1669,8 +1740,12 @@ async function ensureWebhook(): Promise<void> {
       r.json() as Promise<{ ok: boolean; result?: { url?: string } }>,
     );
     const currentUrl = info.result?.url ?? "";
-    if (currentUrl === env.COS_WEBHOOK_URL) return;
+    if (currentUrl === env.COS_WEBHOOK_URL) {
+      await markWebhookHealthy().catch((err) => log({ msg: "webhook_health_kv_error", err: String(err) }));
+      return;
+    }
     log({ msg: "webhook_drift_detected", currentUrl, expected: env.COS_WEBHOOK_URL });
+    await markWebhookBroken().catch((err) => log({ msg: "webhook_health_kv_error", err: String(err) }));
     const res = await fetch(`https://api.telegram.org/bot${env.COS_TELEGRAM_BOT_TOKEN}/setWebhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1690,6 +1765,7 @@ async function ensureWebhook(): Promise<void> {
     }
   } catch (err) {
     log({ msg: "webhook_check_error", err: String(err) });
+    await markWebhookBroken().catch((kvErr) => log({ msg: "webhook_health_kv_error", err: String(kvErr) }));
   }
 }
 
@@ -1767,6 +1843,42 @@ function scheduleHealthSyncCheck(): void {
     }).catch((err) => log({ msg: "health_sync_check_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
   log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
+}
+
+function scheduleBooksDailyReport(): void {
+  cron.schedule("0 7 * * *", () => {
+    void checkBooksDailyReport({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+    }).catch((err) => log({ msg: "books_daily_report_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "books_daily_report_scheduled", interval: "daily 07:00" });
+}
+
+function scheduleFeedbinDailyReport(): void {
+  cron.schedule("0 8 * * *", () => {
+    if (!env.FEEDBIN_USERNAME || !env.FEEDBIN_PASSWORD) return;
+    void checkFeedbinDailyReport({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      feedbin: { username: env.FEEDBIN_USERNAME, password: env.FEEDBIN_PASSWORD },
+    }).catch((err) => log({ msg: "feedbin_daily_report_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "feedbin_daily_report_scheduled", interval: "daily 08:00" });
+}
+
+// Domingo 19:00 — mismo horario que scheduleJournalSweep, patrón ya establecido de
+// "barrido semanal" en este repo.
+function scheduleTopicsProfileRefresh(): void {
+  cron.schedule("0 19 * * 0", () => {
+    if (!env.FEEDBIN_USERNAME || !env.FEEDBIN_PASSWORD) return;
+    void refreshTopicsProfile({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+      feedbin: { username: env.FEEDBIN_USERNAME, password: env.FEEDBIN_PASSWORD },
+    }).catch((err) => log({ msg: "topics_profile_refresh_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "topics_profile_refresh_scheduled", interval: "sundays 19:00" });
 }
 
 /**
@@ -1981,6 +2093,9 @@ async function loop(): Promise<void> {
   // Corte de sync de Apple Health (2026-07-16, pedido de Cal) — reabre la proactividad puntualmente
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
+  scheduleBooksDailyReport();
+  scheduleFeedbinDailyReport();
+  scheduleTopicsProfileRefresh();
   scheduleLluviaCheck();
   scheduleHealthGoalsMidday();
   scheduleHealthGoalsDaily();
