@@ -1,5 +1,52 @@
 # CHANGELOG — Jano
 
+## 2026-08-26
+
+### Fix (infra) — Journal entries perdidos durante un corte de webhook de ~8.5h
+Cal: *"Mandé un entry y no hizo el flujo"*. El log mostraba `skip_message: unsupported kind` justo
+en la ventana en la que había mandado el texto, lo cual no cuadraba — un mensaje de texto plano
+siempre llena `message.text`. La investigación real necesitó bajar hasta la capa del Worker.
+
+- **Root cause de la ventana rota (22:15→06:53, ~8.5h):** un blip de Cloudflare (`Bad Gateway` al
+  validar la URL del webhook durante un `setWebhook`) coincidió con que la Mac perdió conectividad
+  saliente hacia `api.telegram.org` por horas (mismo síntoma que el gotcha de SNI filtering ya
+  documentado). El watchdog del webhook corre LOCAL en la Mac — sin esa conectividad no podía ni
+  diagnosticar ni reintentar arreglar nada, aunque corra cada 1 min. Los `skip_message` que sí
+  aparecieron en el log eran ruido de esa ventana (updates corruptos/reintentados de Telegram), no
+  el journal de Cal — ese directamente nunca llegó a la cola.
+- **Diagnóstico en vivo:** `wrangler tail` sobre `cos-agent-worker` + un `console.log` temporal del
+  `update` crudo en `worker-v2/src/index.ts` (revertido y redeployado limpio al terminar) —
+  confirmó que, con la infra sana, un mensaje de texto normal con prefijo `Journal:` guarda
+  perfecto (`journal_saved`, entrada real en Notion). No había ningún bug en `journal-capture.ts`
+  ni en la clasificación de `message.text`/`voice`/`photo`/`document` de `index.ts` — el problema
+  fue 100% la ventana de conectividad.
+- **No se tocó código de journal.** El único cambio real de este incidente es la mitigación de
+  abajo.
+
+### Feature — Alerta proactiva si el webhook lleva roto >10 min
+Mismo incidente: no había forma de que Cal se enterara de que el webhook estaba roto sin mandar
+un mensaje primero (y descubrir que no pasa nada). `scheduleWebhookWatchdog()`/`ensureWebhook()`
+(`index.ts`) ahora trackea desde cuándo no puede confirmar el webhook sano.
+
+- **Bot separado para el aviso** (@ClaudeCalbot / `notifications`, token `NOTIF_BOT_TOKEN` — ya en
+  `apps.env`, sin secretos nuevos que agregar): si el webhook de Jano está roto, un aviso por el
+  MISMO bot no serviría de nada. No cubre el caso "la Mac entera sin red hacia Telegram" (mismo
+  path para ambos bots, visto en este incidente) — sí cubre el caso más común: el webhook se
+  desincroniza con la Mac sana (blip del Worker, algo lo pisó).
+- **Umbral 10 min, dedup + timestamp en CF KV** (`jano:webhook:brokenSince`/`jano:webhook:alerted`,
+  TTL 24h) — evita spamear cada minuto mientras dure el corte, y avisa también al recuperarse.
+  Mismo patrón que `health-sync-check.ts` (alerta de corte de sync de Apple Health).
+- **2 bloqueantes encontrados por `daemon-health-reviewer` antes de mergear, corregidos:**
+  (1) el primer intento usaba un `fetch` a mano sin validar `res.ok`/`data.ok` — reemplazado por
+  `sendMessage()` de `@cos/shared` (ya usado en todo el resto del archivo, toma el token como
+  parámetro), que sí valida y tira si Telegram rechaza el envío. (2) `markWebhookBroken()` marcaba
+  `alerted=true` en KV sin importar si el envío realmente salió — exactamente el escenario que
+  debía cubrir (un fallo de red o `NOTIF_BOT_TOKEN` vacío/rotado dejaría a Cal sin aviso por 24h,
+  sin reintento). Fix: solo marcar `alerted` en éxito confirmado, mismo patrón que
+  `health-sync-check.ts` ya documentaba en su propio comentario.
+- Typecheck limpio, 916 tests OK, build + reinicio del daemon confirmados por Cal, arranque limpio
+  verificado en logs.
+
 ## 2026-07-29
 
 ### UX — El reporte diario de KPIs (CSV) pasó de ~30 líneas a 2

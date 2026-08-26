@@ -6,6 +6,13 @@
 
 ## Pendientes
 
+### Surgió en sesión 2026-08-22
+- [ ] **Ajustar el cron de salud (scheduleHealthSyncCheck / health-sync-check) para asegurar que la data de Apple Health esté al día y genere reportes de estado de salud**
+
+### Surgió en sesión 2026-08-21
+- [ ] **Crear widget que muestre las tareas de Notion de la semana**
+- [ ] **Dar contexto al triage de inbox (Spark) para que identifique qué mails son importantes de abrir/leer**
+
 ### Surgió en sesión 2026-08-17
 - [ ] **Mejoras al resumidor (YouTube + Feedbin starred)** — análisis completo (código real + research de comunidad) listo, esperando que Cal responda 4 preguntas antes de implementar. Falla real y reproducible: timeout de 360s por transcripción sin truncar (pasó el 2026-08-16 22:16, ya había pasado el 2026-07-03). Cron diario apagado desde 2026-07-14 dejó dormido también el flujo de starred (que YA existe, completo, no es idea nueva). Detalle completo, prioridades y preguntas: `HANDOFF-resumidor-mejoras.md`.
 
@@ -16,7 +23,7 @@
 - [ ] **Migrar del Spark CLI al MCP de Gmail**
 
 Reorganizado por tema (antes agrupado por fecha/sesión de origen — ver anotaciones `(YYYY-MM-DD)` en cada ítem/sub-sección para la fecha original cuando no está ya en el texto).
-- [ ] **Crear tool que aprenda qué tipo de artículos/contexto le interesa más a Cal (Feedbin/Reader) para sugerir qué leer y qué marcar como leído automáticamente**
+- [x] **Crear tool que aprenda qué tipo de artículos/contexto le interesa más a Cal (Feedbin/Reader) para sugerir qué leer y qué marcar como leído automáticamente** — ✅ HECHO 2026-08-25: `scheduleTopicsProfileRefresh()` (domingos 19:00, sintetiza el perfil desde shortlist Reader + starred/leídos Feedbin) + `scheduleFeedbinDailyReport()` (diario 08:00, recomienda qué abrir usando ese perfil — solo sugiere, nunca marca leído). Detalle completo: `CLAUDE.md` sección "Automatización — dos capas".
 
 ### Secretos / 1Password
 - [ ] **Migrar los secretos de Jano de `apps.env` a 1Password** — fase 2 del piloto hecho en Vesta (fase 1, completa y validada el 2026-08-02: vault `Daemons`, wrapper `op run`, fail-loud real). El vault ya tiene 12 ítems creados y reusables (`Anthropic API Key`, `Notion Integration Token`, `SerpAPI`, `OpenRouter`, `ElevenLabs`, `Google Maps`, `Home PIN`, `OpenWeather`, `WeatherAPI`, `Pecunia Internal`, `Cloudflare Account ID`, `Cloudflare API Token`) — Jano comparte varias de estas credenciales (`ELEVENLABS_VOICE_ID` ya se agregó en texto plano al plist de Jano el mismo día, por ser la misma voz que Vesta; `HOME_PIN`/`GOOGLE_MAPS_API_KEY` genéricos también los usa Jano). Antes de sacar el fallback a `apps.env`: auditar bien las variables reales que lee Jano — el relevamiento de Vesta falló la primera vez porque un grep por `process.env.NOMBRE` no detectó las leídas vía `requireEnv()`/notación de corchete (causó una caída real en producción, con rollback). Referencia técnica completa: `Vesta/docs/superpowers/specs/2026-08-02-1password-secrets-pilot-design.md`. Pointer también en `Personal/Agents/CLAUDE.md`.

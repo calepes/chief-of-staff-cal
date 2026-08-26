@@ -51,7 +51,7 @@ corrupto.
 
 ## Índice de tools + MCPs
 Implementación y detalle en código (ver "dónde vive qué"). Inventario:
-- **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo) · **mapaBacklogs/leerBacklog/proponerItemBacklog** (leer y escribir los `BACKLOG.md` de los proyectos de Cal — ver sección "Backlogs de proyectos" abajo) · **guardarReferenciaDiseno** (capturar y guardar referencias visuales de diseño en `Personal/Referencias de Diseño/` — ver sección "Referencias de Diseño" abajo) · **listarProyectosClaude/abrirProyectoClaude** (abrir un proyecto de Cal en VS Code o cmux desde el chat — wrapper del mismo `claude-launcher-helper.sh` que usa el skill `claude-launcher` en sesión interactiva; flujo en `tools/claude-launcher.ts`, guía en `system-prompt.ts` sección "Claude Launcher").
+- **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.claude/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo) · **mapaBacklogs/leerBacklog/proponerItemBacklog** (leer y escribir los `BACKLOG.md` de los proyectos de Cal — ver sección "Backlogs de proyectos" abajo) · **guardarReferenciaDiseno** (capturar y guardar referencias visuales de diseño en `Personal/Referencias de Diseño/` — ver sección "Referencias de Diseño" abajo) · **listarProyectosClaude/abrirProyectoClaude** (abrir un proyecto de Cal en VS Code o cmux desde el chat — wrapper del mismo `claude-launcher-helper.sh` que usa el skill `claude-launcher` en sesión interactiva; flujo en `tools/claude-launcher.ts`, guía en `system-prompt.ts` sección "Claude Launcher") · **searchBooks/addBook/updateBook/confirmCreateBookRelation/getReadingHistory** (gestión de la BD de libros en Notion — ver sección "Libros" abajo).
 
 ### Resumidor (`tools/resumir.ts`) — checkpoint con tarjeta + colas
 Resumidor universal con checkpoint antes de guardar a Readwise. Reusa los scripts del skill `resumir` vía spawn (sin Bash); cookies Safari con `~/.claude/bin/node-fda` (requiere FDA bajo launchd).
@@ -73,6 +73,94 @@ Cartelera + compra de entradas de los 3 cines de Santa Cruz (**Cinemark** Ventur
 - **Específico de Jano — allowlist:** `enviarFotoLocal` (`tools/telegram-files.ts`) acepta `cine-*.png` además de `boa-wallet-*` y `kpi-card-*`; el MCP devuelve PATHS en `tmpdir()` y el daemon los sube.
 - **Compra real end-to-end VALIDADA** (2026-07-26, Cal la corrió hasta el QR de pago y el código de retiro). Multicine y Cine Center siguen sin compra automatizada (Multicine se frena en un reCAPTCHA v2 del checkout; Cine Center tiene el modo invitado bugueado).
 - **Al mandar el mapa de asientos, mandá TAMBIÉN la lista `butacasLibres`** que devuelve `iniciarCompraCine` (agrupada por fila, ej. `Fila B: B1-B4, B6-B9`). El screenshot NO trae los números de butaca impresos, así que sin esa lista Cal adivina el código y pide asientos que no existen. En salas premier las butacas vienen de a pares pero **cada mitad es independiente**: para 2 personas juntas hay que pedir las dos (`['A1','A2']`). Detalle técnico del parser (dos renderizados según tipo de sala) en `mcp-servers/CLAUDE.md`, fila `cine` — no duplicar acá.
+
+### Libros (`tools/books.ts`) — gestión ampliada 2026-08-24/25
+
+DB de libros de Notion (135 libros al momento del análisis). A pedido de Cal ("análisis completo de la
+Bd. y qué tools debería tener Jano para gestión de libros desde el bot") se auditó la BD entera y se
+amplió `books.ts` de gestión básica a un set completo: crear/actualizar con relaciones, confirmar
+relaciones nuevas con gate real, buscar por cualquier campo (incluidos rollups), y ver historial de
+lectura.
+
+- **Bug real encontrado y arreglado — "Estado" cambió de `select` a `status` en Notion, el código
+  seguía tratándolo como `select`.** Rompía `searchBooks` con meta 2026 (`filter type mismatch`).
+  Corregido en los 5 lugares que lo tocan (filtro de query, lectura en `pageToBookResult`, escritura en
+  `addBook`/`updateBook`). **Gotcha de sesión SDK con `resume:true`:** después de aplicar el fix, Cal
+  seguía viendo el mismo error porque el historial retomado traía el tool_call fallido — el modelo
+  reintentaba con `notionCli` como workaround en vez de re-llamar `searchBooks` ya arreglado. Se
+  resuelve con `/reset` en el chat (limpia KV + `sessionId`, ver sección "Runtime del SDK" abajo).
+- **`avanceTracking` se leía del path equivocado:** `props["Avance Tracking"]?.number` en vez de
+  `.rollup?.number` — el shape real es un rollup, no un number plano. Corregido.
+- **`EstadoLibro` (union type) estaba incompleto:** no incluía `"Not started"` (51/135 libros — la
+  mayoría del catálogo) ni `"Por comprar"` (1/135). Ampliado.
+- **URL se escribía a una propiedad inexistente** (`"userDefined:URL"` en vez de `"URL"`, el nombre
+  real en Notion). Corregido.
+- **`addBook`/`updateBook` ganaron `author`/`tags`/`bigThemes`** (relaciones a las DBs `Author`,
+  `Tags`, `Big Themes`) vía `resolveRelation()` (busca match EXACTO por título en la DB relacionada).
+  Si no matchea 1:1 (`not_found`/`ambiguous`), la tool **NO crea nada por su cuenta** — devuelve una
+  nota pendiente (`resolveOrNote()`) para que Jano le pregunte a Cal si quiere crear la entrada nueva.
+- **Gate técnico real anti-prompt-injection para crear relaciones nuevas** (`tools/book-relation-pending.ts`,
+  bloqueante antes de producción según `daemon-health-reviewer` — Jano tiene web search/fetch, y solo
+  confiar en prosa del system prompt ("esperá confirmación de Cal") es vulnerable). `addPendingRelation`
+  registra `(bookPageId, tipo, nombre)` en `~/.cos-agent/book-relation-pending.json` con TTL 15 min;
+  `confirmCreateBookRelation` (tool nueva) SOLO crea la página+relación si `consumePendingRelation`
+  encuentra un pending real que matchea — si no, rechaza sin tocar Notion.
+- **`updateBook.author` REEMPLAZA (no mergea)** — es un campo single-value, corre independiente sin
+  necesitar leer relaciones existentes primero. `tags`/`bigThemes` sí **mergean** (leen la página
+  actual, agregan a lo existente). **Bug de silent clobber encontrado por review:** si el GET para leer
+  relaciones existentes fallaba, el código seguía con lista vacía y el PATCH pisaba (perdía) las
+  relaciones ya guardadas. Fix: `existingFetchFailed` aborta la escritura de esas relaciones puntuales
+  con una nota explícita a Cal, en vez de seguir con datos parciales.
+- **`clearPlanningToRead` (nuevo, booleano en `updateBook`)** — gap real que Cal encontró en vivo: no
+  había forma de VACIAR el campo "Planning to read" (select de años 2021-2026), solo asignarlo. Gana
+  sobre `planningToRead` si ambos vienen en la misma llamada (`properties["Planning to read"] =
+  {select:null}`).
+- **`searchBooks` reescrito con ~17 filtros combinables** (`{and:[...]}` cuando hay 2+): `query, estado,
+  rating, planningToRead, isbn (contains, no equals — evita falso negativo por formato), totalPaginas
+  Min/Max, startDate/finishDate From/To, avanceTrackingMin/Max (SÍ se puede filtrar por rollup —
+  `{rollup:{number:{...}}}`), ultimaLecturaFrom/To (rollup date), author/tag/bigTheme` (relaciones
+  resueltas por nombre vía `resolveRelation`, sin fallback silencioso si no matchea). Usa
+  `queryAllPages()` (paginación real con `start_cursor`, techo defensivo 20 páginas) — antes cortaba en
+  la primera página y perdía resultados con más de 100 filas.
+- **`getReadingHistory` (nuevo)** — "cómo he ido leyendo": busca en TODA la biblioteca (`queryAllPages`)
+  y trae el historial de sesiones de la Tracking DB ordenado por fecha para el libro que matchea.
+- **Bug de fecha UTC en `logReadingProgress`, encontrado construyendo el cron de libros (ver
+  `scheduleBooksDailyReport` en "Automatización" abajo):** usaba `new Date().toISOString().slice(0,10)`
+  en vez de `nowInLaPaz()` — sesiones de lectura registradas entre las 20:00 y medianoche hora La Paz
+  quedaban fechadas al día siguiente (mismo gotcha documentado más abajo para `task-check.ts`/
+  `daily-note-check.ts`, no se había aplicado acá todavía). Una línea, corregido.
+- **Cover automático** (icon + cover de la página = portada del libro) ya existía antes de esta ronda,
+  sin cambios.
+
+### Análisis de imágenes (`tools/vision.ts`) — rediseño 2026-08-24/25
+
+Cal mandó un screenshot de Apple Books y Jano "no supo qué hacer" — el diagnóstico mostró que
+`processPhoto()` clasificaba la imagen con una heurística (`taskForPhotoCaption`/`isCodexUsageAnalysis`)
+ANTES de mirarla, y el resumen que le devolvía al modelo principal era demasiado acotado ("1-3 líneas
+para familia") para que decidiera bien qué hacer. Pedido explícito de Cal: *"Quiero que vea toda imagen
+que suba y sobre eso decida qué hacer o pregunte. Ajustemos el prompt y quitemos lo de codex."*
+
+- **Heurística de pre-clasificación eliminada.** `taskForPhotoCaption()`/`isCodexUsageAnalysis()`
+  removidas; `processPhoto()` (`index.ts`) ahora siempre pide `task:"describe"`. `AnalyzePhotoOpts["task"]`
+  pasó de `"ocr"|"describe"|"design_critique"|"classify"` a solo los 3 primeros (`"classify"` era código
+  muerto de la heurística removida).
+- **Prompt "describe" reescrito** de un resumen corto y acotado a extracción COMPLETA sin resumir ni
+  limitar el dominio — el LLM principal necesita el contenido real de la imagen para decidir, no un
+  resumen ya recortado por otro modelo.
+- **Modelo de visión — 3 iteraciones en la misma sesión, investigado con la API pública de OpenRouter**
+  (`api/v1/models`, no WebFetch a la web — un WebFetch anterior había traído datos de precios
+  sospechosos/posiblemente alucinados, ver memoria `feedback_verificar_research_llm_en_vivo`):
+  1. `google/gemini-3-pro-image` — **error real, descartado antes de producción:** es el modelo de
+     GENERACIÓN de imágenes de Google ("Nano Banana Pro"), no de comprensión. Riesgo real si hubiera
+     llegado a producción: costo ~10x y el parser rompiendo con `content` como array de imágenes.
+  2. `moonshotai/kimi-k2.5` — funcionó técnicamente, pero Cal lo probó con una foto real y "no anduvo
+     bien" en calidad.
+  3. **`qwen/qwen3-vl-235b-a22b-thinking`** — elegido, en producción.
+- **`max_tokens` 1024 → 2048; agregado `modalities: ["text"]`** al body del request.
+- **Parseo de `content` ahora defensivo:** soporta tanto string plano como array de partes
+  `{type:"text",text}` — distintos modelos de OpenRouter devuelven formatos distintos en la misma API.
+- **`vision.test.ts` eliminado** — solo testeaba las 2 funciones removidas, sin lógica pura nueva que
+  reemplazarlo.
 
 ## Telegram Rich Messages (@cal/telegram) — migrado y activado 2026-08-06
 
@@ -201,6 +289,7 @@ Fuente: `daemon-v2/src/index.ts`.
 - **Emojis de dominio Mundial (lexicon extendido):** además del lexicon estándar (`telegram-bot-ux/references/lexicon.md`), Jano puede usar para fútbol/Mundial 2026: `⚽` (header deportivo), `🥇 🥈 🥉` (podio/ranking de goleadores/posiciones/power ranking), y banderas de país (`🇦🇷 🇧🇷 …`) junto al nombre de la selección. **Regla:** las banderas NO van dentro de bloques `<pre>` (rompen la alineación monoespaciada → usar código de 3 letras tipo ARG/FRA ahí). Para rankings de datos preferir **lista** (bullets `•` + `<b>`) sobre tabla `<pre>`, salvo que la densidad de columnas lo justifique.
 - **PDF/DOCX:** `processDocument()` en `index.ts` (pdf-parse v2 / mammoth), trunca a 50K. API pdf-parse v2: `const { PDFParse } = require("pdf-parse")` (named export, NO la clase directa) → `new PDFParse({data}).getText()` → `.text`. Mismo patrón obligatorio en `tools/schedule-cal.ts` (`extractPdfUrl`, PDFs de Notion) — archivo compartido con Vesta; al tocarlo copiar a ambos y rebuildar. Bug histórico (fix 2026-06-21): require sin destructurar + `parsed.text` sin `.getText()` → TypeError enmascarado como `"[PDF — error al procesar]"`.
 - **SNI filtering bloquea Telegram** en algunas redes (WiFi guest/hoteles): "Connection reset" en TLS. Daemon arranca pero el bot queda mudo. Diagnóstico: `curl -s https://api.telegram.org/bot$TOKEN/getMe` vacío mientras google.com funciona. Fix: cambiar red.
+- **Webhook roto sin aviso — incidente real 2026-08-26, ~8.5h (22:15→06:53).** Un blip del Worker (`Bad Gateway` al validar la URL en el `setWebhook`) coincidió con que la Mac perdió conectividad saliente a `api.telegram.org` por horas (mismo síntoma que el gotcha de SNI de arriba) — el watchdog corre LOCAL en la Mac, así que sin esa conectividad no podía ni diagnosticar ni arreglar nada, aunque corra cada 1 min. Cal mandó un entry al Journal en esa ventana y se perdió en silencio (Telegram reintenta y eventualmente descarta el update; el daemon nunca lo vio). Diagnosticado con `wrangler tail` sobre `cos-agent-worker` + un `console.log` temporal del `update` crudo (revertido después) — confirmó que un mensaje de texto normal, una vez sano el webhook, guarda perfecto (`journal_saved`). **Mitigación agregada el mismo día:** alerta proactiva por el bot de notifications si el corte pasa de 10 min (ver `scheduleWebhookWatchdog()` arriba) — no cubre el caso "la Mac entera sin red" (mismo path que la alerta), pero sí "el webhook se desincroniza con la Mac sana". Recuperación manual más rápida: reiniciar el daemon fuerza un `setWebhook` inmediato sin esperar al watchdog (ver "Comandos operativos").
 - **Debug estado launchd:** `launchctl print gui/$(id -u)/com.cal.cos-agent-v2` (más útil que `launchctl list | grep`).
 - **`reminders` con pantalla bloqueada cuelga** (espera TCC). En procesos sin sesión: `timeout 30s reminders ...`.
 - **Things 3 (`tools/things.ts`) — split read/write por TCC bajo launchd:** las ESCRITURAS de `clings` usan osascript/JXA (Apple Events) → cuelgan esperando permiso TCC de Automatización que no se puede responder en background (confirmado 2026-06-13: hasta `clings add`/`delete` interactivos cuelgan). **Lecturas** (`executeClings`, SQLite/FDA) sí funcionan. **Escrituras** van por URL scheme `things:///add|update` vía `open` (`thingsWrite`), que NO usa Apple Events → headless-safe. `things:///add` sin token; `things:///update` requiere `THINGS3_AUTH_TOKEN` (el wrapper lo agrega). `clings` está **`brew pin`-eado** (con reminders-cli) — un upgrade rompería el path versionado del Cellar y su binding FDA.
@@ -587,7 +676,7 @@ Hay dos mecanismos de proactividad independientes:
 7 plists `bootout` + archivados en `~/Library/LaunchAgents/disabled-2026-06-13/`. Cubrían heartbeat/learnings. Carpetas `heartbeat-tasks/`, `hooks/`, `launchd/` conservadas. Cómo era y cómo reactivar: `docs/references/hooks-automatizacion.md`.
 
 **2. Crons internos del daemon (`node-cron`, dentro del proceso) — los apaga/prende el código, NO launchd.** En `index.ts` (`loop()`):
-- `scheduleWebhookWatchdog()` — ACTIVO (re-set webhook cada 1 min; infra necesaria, no es proactividad hacia Cal).
+- `scheduleWebhookWatchdog()` — ACTIVO (re-set webhook cada 1 min; infra necesaria, no es proactividad hacia Cal). **Alerta de corte agregada 2026-08-26** (ver gotcha "Webhook roto sin aviso" abajo): si el webhook lleva >10 min sin poder confirmarse sano, avisa por el bot de notifications (@ClaudeCalbot, `NOTIF_BOT_TOKEN` — bot/token separados del de Jano) y de nuevo cuando se recupera. Dedup + timestamp "roto desde" en CF KV (`jano:webhook:brokenSince`/`alerted`, TTL 24h).
 - `scheduleResumirPlaylist()` — **DESACTIVADO 2026-07-14** (pedido de Cal). Estuvo activo desde 2026-06-20 (opt-in). 1×/día revisaba la playlist YouTube "Para resumir" + starred de Feedbin, encolaba y proponía de a uno con checkpoint. Los botones ⭐/🎬 del menú siguen funcionando on-demand igual (no dependen del cron).
 - `scheduleFlightCheckin()` — **DESACTIVADO 2026-06-17** (check-ins de vuelos, every 30min 7-22h).
 - `scheduleFocoCheckinsLocal()` — **DESACTIVADO 2026-06-17** (Foco CAL am/md/pm, `proactive/foco-check.ts`).
@@ -694,6 +783,11 @@ Otros dos, menores pero con síntoma visible: `renderCreated` muestra el conteo 
 - **Reviewed por `daemon-health-reviewer`** (tres pasadas: el pipeline original, el rediseño con tarjeta + cola, y la verificación de los fixes). Los 2 bloqueantes y los 8 warnings del rediseño están arriba, resueltos y con test de regresión; la tercera pasada cerró sin bloqueantes y aportó los 3 warnings que introdujo el propio fix de concurrencia (timeout de la cadena, `advanceTaskQueue` con `proposalId`, caché de la propuesta) — también resueltos. Gaps aceptados a conciencia: (a) si el proceso muere entre el envío de la tarjeta y el `mutateState`, ese mail se re-propone (tarjeta duplicada, no tarea duplicada — la creación sí es idempotente); (b) `MAX_QUEUE` = 50 con la búsqueda de Gmail acotada a 3 días: si la cola sigue llena al cuarto día el correo sale de la ventana, por eso el aviso al llenarse.
 - **Lo que va a CF KV** (`jano:task:proposal:*`, TTL 7 días) es asunto + síntesis de correo interno de BCP. Misma postura que journal/backlog, pero con un TTL bastante más largo — decisión consciente, no un descuido.
 
+- `scheduleBooksDailyReport()` — **ACTIVO 2026-08-25** (pedido de Cal, ver sección "Libros" abajo). Cron `0 7 * * *`, mecánico (sin agente SDK) — status de la meta de libros 2026 agrupado por Estado + avance de páginas leídas AYER por libro (suma `Avance (pag)` de la Tracking DB vía rollup "Book Name"). Reporta **todos los días**, no solo cuando hubo avance — decisión explícita de Cal, para reforzar el hábito de lectura en vez de reportar solo la excepción (a diferencia del principio "reportar la excepción" del pipeline de KPIs de arriba — acá el objetivo es el recordatorio diario en sí, no una alerta).
+- `scheduleFeedbinDailyReport()` — **ACTIVO 2026-08-25** (pedido de Cal — motor de aprendizaje de temas). Cron `0 8 * * *` — no leídos de Feedbin agrupados por carpeta + recomendación de qué abrir, usando el perfil de temas semanal (`topics-profile-refresh.ts`, ver bullet siguiente); solo **SUGIERE**, nunca marca nada como leído por su cuenta. Sin `FEEDBIN_USERNAME`/`FEEDBIN_PASSWORD` el cron no se registra al arrancar.
+  - **Bug real encontrado corriendo el cron manualmente el mismo día de implementarlo (2026-08-25):** con 733 artículos sin leer acumulados, un solo page de `getAllUnreadEntries` (`per_page=1000`) tarda ~10.3s en responder del lado de Feedbin — por encima del timeout de 10s que tenía `apiFetch()` en `tools/feedbin-client.ts`. Medido en vivo contra la API real (200 OK, 10351ms, reproducido 2 veces). **Fix:** timeout subido a 25s.
+- `scheduleTopicsProfileRefresh()` — **ACTIVO 2026-08-25** (mismo pedido, motor de aprendizaje). Cron `0 19 * * 0` (domingos 19:00 — **mismo horario que `scheduleJournalSweep()`**, son independientes, no se pisan) — sintetiza el perfil de temas de interés ACTUALES desde 3 señales (de más a menos fuerte): shortlist de Reader, starred de Feedbin, leídos recientes de Feedbin. **Regenera el perfil ENTERO cada semana** (no acumula como `learnings.md` — "intereses actuales" caduca, un perfil de hace 2 meses ya no representa lo que Cal lee hoy) en `~/.cos-agent/topics-profile.md`, consumido por `feedbin-daily-report.ts`.
+
 Los otros 3 (resumidor/flight-checkin/foco-checkin) siguen comentados en `loop()`. Reactivar: descomentar la llamada correspondiente + rebuild + restart.
 
 **Al reactivar (familia 6 del rediseño de mensajes Telegram, 2026-07-02):** `scheduleFlightCheckin`,
@@ -710,20 +804,21 @@ las proactivas hoy desactivadas en Jano, copiar ese mismo patrón desde el día 
 (único proactivo activo en ese momento) y un futuro `fuel_alert` reactivado — nunca se confirmó en la
 práctica ni se implementó nada, y quedó sin objeto al apagarse `scheduleResumirPlaylist` el 2026-07-14.
 
-**Estado real (actualizado 2026-07-28):** **6 proactivos internos activos** — `scheduleHealthSyncCheck()`
+**Estado real (actualizado 2026-08-25):** **9 proactivos internos activos** — `scheduleHealthSyncCheck()`
 (alerta de corte de sync de Apple Health), `scheduleKpiIngestCheck()` (ingesta del mail diario de BCP a
 "KPIs diarios" + tarjeta de KPIs disparada desde ahí mismo, ver arriba), `scheduleJournalSweep()`
 (barrido dominical del Journal de terapia, ver abajo), `scheduleDailyNoteCheck()` (ingesta de
 "Daily Notes Yape" por mail, cada 15 min 6-23h — implementado en otra sesión el 2026-07-27,
 **pendiente de documentar en detalle por quien lo hizo**), `scheduleTaskEmailCheck()` (mails
 "(Tarea)" → tarjeta de propuesta en el chat, y tarea en la DB Notion "Tareas" al confirmarla; cola
-de a uno, cada 15 min 6-23h — ver sección propia arriba) y
-`scheduleLearningReflect()` (reflexión nocturna del self-learning, 22:00 La Paz — ver sección
-"Self-learning" abajo), además del webhook watchdog (infra, no le manda nada a Cal).
-`scheduleKpiCardDaily()` dejó de ser un cron propio el 2026-07-24 — ver arriba, quedó absorbido
-dentro del pipeline PDF de `scheduleKpiIngestCheck()`. Los otros 3 crons de dominio (resumidor,
-flight check-in, Foco check-in) siguen desactivados. Jano ya no es
-100% reactivo — son las seis excepciones puntuales a esa decisión del 2026-07-14.
+de a uno, cada 15 min 6-23h — ver sección propia arriba), `scheduleLearningReflect()` (reflexión
+nocturna del self-learning, 22:00 La Paz — ver sección "Self-learning" abajo), y los tres agregados
+el 2026-08-25: `scheduleBooksDailyReport()`, `scheduleFeedbinDailyReport()` y
+`scheduleTopicsProfileRefresh()` (ver bullets arriba) — además del webhook watchdog (infra, no le
+manda nada a Cal). `scheduleKpiCardDaily()` dejó de ser un cron propio el 2026-07-24 — ver arriba,
+quedó absorbido dentro del pipeline PDF de `scheduleKpiIngestCheck()`. Los otros 3 crons de dominio
+(resumidor, flight check-in, Foco check-in) siguen desactivados. Jano ya no es
+100% reactivo — son las nueve excepciones puntuales a esa decisión del 2026-07-14.
 **Sin proactividad por evento externo** — el monitor de combustible sigue apagado (`crons = []` en
 `combustible-proxy/wrangler.toml`, verificado 2026-07-03), ver abajo. Verificar qué crons internos
 arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.

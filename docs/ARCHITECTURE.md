@@ -201,6 +201,11 @@ Viven en `~/.claude/hooks/` por convención: `heartbeat.sh`, `heartbeat-status.s
 4. Esto cubre el caso (en teoría imposible post-2026-05-03) de que algún proceso
    externo llame deleteWebhook. Sin estado-dir interactivo y con token rotado,
    no debería disparar nunca.
+5. Agregado 2026-08-26: si el paso 2/3 falla o el drift persiste >10 min sin
+   resolverse, avisa por un bot de Telegram DISTINTO (@ClaudeCalbot, notifications)
+   al chat de Cal — dedup + timestamp "roto desde" en CF KV (TTL 24h), y un
+   segundo aviso cuando se confirma sano de nuevo. Ver incidente real del mismo
+   día en Jano/CLAUDE.md, gotcha "Webhook roto sin aviso".
 ```
 
 ### Flujo 6: Morning build (propuesta + aprobación Telegram)
