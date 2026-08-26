@@ -9,7 +9,7 @@ export interface AnalyzePhotoOpts {
   imagePath: string;
   mimeType?: string;
   caption?: string;
-  task?: "ocr" | "classify" | "describe" | "design_critique";
+  task?: "ocr" | "describe" | "design_critique";
 }
 
 export interface PhotoAnalysis {
@@ -19,14 +19,21 @@ export interface PhotoAnalysis {
   rawTokens: { input: number; output: number };
 }
 
-const MODEL = "google/gemini-3.1-flash-lite";
+const MODEL = "qwen/qwen3-vl-235b-a22b-thinking";
 
 const TASK_PROMPTS: Record<NonNullable<AnalyzePhotoOpts["task"]>, string> = {
   ocr: "Extrae todo el texto visible en la foto. Si hay datos estructurados (lista, tabla, formulario), preserva la estructura. Responde solo con el texto extraído, sin comentarios.",
-  classify:
-    "Clasifica esta foto en una de estas categorías y resume su contenido relevante para coordinación familiar (cumple, evento escolar, lista de mercado, ticket, recordatorio de salud, foto familiar, otro). Responde con: <categoría>: <resumen 1-2 líneas>.",
+  // Toda foto que Cal manda por Telegram (sin importar dominio — familia, libros, finanzas,
+  // diseño, trabajo) pasa por este task. No decide de antemano qué es relevante ni resume
+  // a pocas líneas: el LLM principal (Jano) es quien decide qué hacer con el contenido, o
+  // pregunta — este paso solo tiene que dejarle TODO lo que hay en la imagen, sin filtrar.
   describe:
-    "Describe brevemente el contenido relevante de la foto en 1-3 líneas, enfocándote en información útil para una familia (Cal, Noe y sus hijas Antonia y Catalina).",
+    "Extraé y describí TODO el contenido relevante de la imagen, sin resumir de más ni limitarte a un " +
+    "dominio en particular. Si hay texto visible (capturas de pantalla, listas, tablas, cifras, títulos, " +
+    "etiquetas), transcribilo COMPLETO preservando la estructura — no omitas datos por acortar. Si es una " +
+    "foto sin texto (un lugar, un objeto, una persona, un evento), describí el contexto visual con el " +
+    "detalle necesario para actuar sobre ella. El objetivo es que quien reciba esta descripción tenga todo " +
+    "lo necesario para decidir qué hacer, sin tener que ver la imagen de nuevo.",
   design_critique:
     "Sos un crítico de diseño de producto evaluando este screenshot para guardarlo como referencia " +
     "de inspiración. Respondé EXACTAMENTE en este formato, un campo por línea (sin markdown, sin " +
@@ -103,10 +110,13 @@ export async function analyzePhoto(opts: AnalyzePhotoOpts): Promise<PhotoAnalysi
     .filter(Boolean)
     .join("\n\n");
 
-  // OpenAI-compatible format (OpenRouter)
+  // OpenAI-compatible format (OpenRouter). `modalities: ["text"]` fuerza salida
+  // solo-texto — defensivo contra un modelo que también sepa generar/editar imagen
+  // (algunos en OpenRouter comparten familia con modelos de generación).
   const body = {
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 2048,
+    modalities: ["text"],
     messages: [
       {
         role: "user",
@@ -137,11 +147,19 @@ export async function analyzePhoto(opts: AnalyzePhotoOpts): Promise<PhotoAnalysi
   }
 
   const data = await res.json() as {
-    choices: Array<{ message: { content: string } }>;
+    choices: Array<{ message: { content: unknown } }>;
     usage?: { prompt_tokens: number; completion_tokens: number };
   };
 
-  const text = data.choices[0]?.message?.content?.trim() ?? "";
+  // Defensivo: la mayoría de proveedores devuelven `content` como string plano, pero un
+  // modelo con salida multimodal puede devolver un array de partes ({type:"text",text})
+  // — sin este chequeo, `.trim()` sobre un array explota en vez de fallar con un error claro.
+  const rawContent = data.choices[0]?.message?.content;
+  const text = typeof rawContent === "string"
+    ? rawContent.trim()
+    : Array.isArray(rawContent)
+      ? rawContent.filter((p): p is { type: string; text: string } => p?.type === "text").map((p) => p.text).join("\n").trim()
+      : "";
   return {
     text,
     rawTokens: {
