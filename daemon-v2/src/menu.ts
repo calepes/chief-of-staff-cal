@@ -77,7 +77,7 @@ export function buildPersonalMenu(): MenuPayload {
     keyboard: {
       inline_keyboard: [
         [
-          { text: "📋 Things hoy", callback_data: "j:personal:things-today" },
+          { text: "📋 Tareas hoy", callback_data: "j:personal:things-today" },
           { text: "📁 Proyectos", callback_data: "j:personal:things-projects" },
           { text: "👪 Reminders", callback_data: "j:personal:reminders" },
         ],
@@ -237,8 +237,8 @@ export const ACTION_TEXT: Record<string, string> = {
   "j:tokens": "¿Cuánto presupuesto de Claude Max llevo hoy?",
   "j:launcher": "Muéstrame los proyectos del Claude Launcher",
   "j:backlog": "Muéstrame el mapa de mis backlogs",
-  "j:personal:things-today": "Muéstrame mis tareas de hoy en Things",
-  "j:personal:things-projects": "Muéstrame mis proyectos de Things",
+  "j:personal:things-today": "Muéstrame mis tareas de hoy en Todoist",
+  "j:personal:things-projects": "Muéstrame mis proyectos de Todoist",
   "j:personal:reminders": "Muéstrame los reminders de hoy de familia y mercado",
   "j:learning:readwise": "Dame mi daily review de Readwise",
   "j:learning:reader": "Muéstrame lo nuevo en mi inbox de Readwise Reader",

@@ -7,11 +7,11 @@ import { homedir } from "node:os";
  * Wrapper angosto de ~/.claude/skills/claude-launcher/scripts/claude-launcher-helper.sh
  * (mismo script que usa el skill claude-launcher en sesión interactiva) — Jano NO tiene
  * Bash (bloqueado en DISALLOWED_BUILTINS), así que esto spawnea el binario fijo del helper
- * en vez de exponerle shell genérico al LLM (mismo patrón que things.ts/qr-aduana/cine).
+ * en vez de exponerle shell genérico al LLM (mismo patrón que todoist.ts/qr-aduana/cine).
  *
- * `open -a "Visual Studio Code"` y `cmux new-workspace` no usan Apple Events (a diferencia
- * de las escrituras de `clings`), así que deberían funcionar headless bajo launchd — mismo
- * mecanismo que things:///add vía `open`.
+ * `open -a "Visual Studio Code"` y `cmux new-workspace` no usan Apple Events, así que
+ * deberían funcionar headless bajo launchd — mismo criterio que todoist.ts (sin dependencias
+ * de Apple Events/TCC).
  */
 const HELPER_BIN = `${homedir()}/.claude/skills/claude-launcher/scripts/claude-launcher-helper.sh`;
 const TIMEOUT_MS = 40000; // open-parallel puede tardar ~25s (arranque de cmux + reintentos de new-workspace)

@@ -55,8 +55,7 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__notionCli":           "🗂️ Consultando Notion (ntn)...",
   "mcp__cos-tools__notionPageMarkdown":  "🗂️ Leyendo página de Notion...",
   "mcp__cos-tools__notionUpdateBody":    "🗂️ Actualizando página de Notion...",
-  "mcp__cos-tools__executeClings":       "🗂️ Leyendo tareas de Things...",
-  "mcp__cos-tools__thingsWrite":         "✅ Guardando en Things...",
+  "mcp__cos-tools__executeTd":           "✅ Consultando Todoist...",
   "mcp__cos-tools__getWhatsappContacts": "📱 Leyendo contactos de WhatsApp...",
   "mcp__cos-tools__saveWhatsappContact": "💾 Guardando contacto de WhatsApp...",
   "mcp__cos-tools__readPersistedOutput":  "📂 Leyendo resultado completo...",
@@ -143,6 +142,8 @@ const TOOL_MESSAGES: Record<string, string> = {
   "mcp__cos-tools__updateBook":                        "✏️ Actualizando libro...",
   "mcp__cos-tools__logReadingProgress":                "📊 Registrando progreso de lectura...",
   "mcp__cos-tools__setBookCover":                      "🖼️ Buscando cover del libro...",
+  "mcp__cos-tools__confirmCreateBookRelation":         "🔗 Creando y vinculando...",
+  "mcp__cos-tools__getReadingHistory":                 "📈 Buscando historial de lectura...",
   // Schedule CAL — Vacaciones
   "mcp__cos-tools__listVacaciones":     "🏖️ Consultando vacaciones...",
   "mcp__cos-tools__getVacacionDetail":  "📋 Leyendo detalle de vacaciones...",

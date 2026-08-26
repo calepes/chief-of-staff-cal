@@ -48,11 +48,15 @@ import {
   updateBook,
   logReadingProgress,
   setBookCover,
+  confirmCreateBookRelation,
+  getReadingHistory,
   type EstadoLibro,
   type AddBookParams,
   type UpdateBookParams,
   type LogProgressParams,
   type SetCoverParams,
+  type ConfirmCreateRelationParams,
+  type SearchBooksParams,
 } from "./tools/books.js";
 import { runSubAgent } from "./agent.js";
 import {
@@ -70,7 +74,8 @@ import {
 // listTasks, createTask, setTaskStatus, setTaskFecha, setTaskDeadline, getPersonas
 // removidas 2026-05-02 — pendientes en Apple Reminders (Personal / Vibe Me), no Notion.
 import { executeRemctl } from "./tools/reminders.js";
-import { executeClings, thingsWrite } from "./tools/things.js";
+import { executeTd } from "./tools/todoist.js";
+import { registerCodexUsage } from "./tools/codex-usage.js";
 import { notionApi, notionPageMarkdown, notionUpdateBody } from "./tools/notion-cli.js";
 import { listClaudeProjects, openClaudeProject } from "./tools/claude-launcher.js";
 import { JOURNAL_DB_ID } from "./journal-ids.js";
@@ -150,6 +155,8 @@ export interface ToolDeps {
   getLastPdfPath?: () => string | undefined;
   gmapsApiKey?: string;
   homePin?: string;
+  codexUsageUrl?: string;
+  codexUsagePushSecret?: string;
   kv: CfKv;
   cookieJarKv: CfKv;
   getOptions: () => Options;
@@ -297,6 +304,19 @@ export function buildSdkTools(deps: ToolDeps) {
         return { content: [{ type: "text" as const, text: msg }] };
       },
       READ_ONLY,
+    ),
+    tool(
+      "registrarUsoCodex",
+      "Registra una captura del límite semanal de Codex. Usar SOLO después de leer una foto de la pantalla 'Usage and limits' de Codex. remainingPct es el porcentaje que queda, no el consumido. resetAt debe ser la fecha/hora ISO-8601 exacta del reset semanal, resuelta con la fecha actual de La Paz.",
+      {
+        remainingPct: z.number().min(0).max(100),
+        resetAt: z.string().datetime(),
+      },
+      async ({ remainingPct, resetAt }) =>
+        asText(await registerCodexUsage(
+          { remainingPct, resetAt },
+          { url: deps.codexUsageUrl ?? "", secret: deps.codexUsagePushSecret ?? "" },
+        )),
     ),
     tool(
       "requestUserLocation",
@@ -886,7 +906,7 @@ export function buildSdkTools(deps: ToolDeps) {
       // Texto CRUDO, no asText: el card ya viene renderizado en HTML de Telegram y asText lo
       // pasaría por JSON.stringify, dejando los saltos de línea escapados como "\\n" — el modelo
       // tendría que desescaparlo a mano para cumplir el "mándalo TAL CUAL". Mismo patrón que
-      // executeClings/executeRemctl, que también devuelven texto ya formateado.
+      // executeTd/executeRemctl, que también devuelven texto ya formateado.
       async () => ({
         content: [{ type: "text" as const, text: renderBacklogMap(buildBacklogMap(discoverBacklogs())).text }],
       }),
@@ -1572,38 +1592,56 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "searchBooks",
-      "Busca libros en la BD de Notion de Cal. Filtra por nombre y/o estado. Devuelve lista con título, estado, % avance y link.",
+      "Busca libros en la BD de Notion de Cal. Todos los filtros son opcionales y combinables (AND) — devuelve lista con título, estado, % avance y link.",
       {
-        query:  z.string().optional().describe("Texto a buscar en el título del libro"),
-        estado: z.enum(["Goal","Reading","Read","Focus","Stand-By","Reference","wish list"]).optional(),
+        query:             z.string().optional().describe("Texto a buscar en el título del libro"),
+        estado:            z.enum(["Not started","Goal","Reading","Read","Focus","Stand-By","Reference","wish list","Por comprar"]).optional(),
+        rating:            z.enum(["🥱","😶","😊","😍"]).optional(),
+        planningToRead:    z.enum(["2021","2022","2023","2024","2025","2026"]).optional().describe("\"Meta AÑO\" — año en que Cal planea leerlo"),
+        isbn:              z.string().optional(),
+        totalPaginasMin:   z.number().int().positive().optional(),
+        totalPaginasMax:   z.number().int().positive().optional(),
+        startDateFrom:     z.string().optional().describe("ISO date YYYY-MM-DD"),
+        startDateTo:       z.string().optional().describe("ISO date YYYY-MM-DD"),
+        finishDateFrom:    z.string().optional().describe("ISO date YYYY-MM-DD"),
+        finishDateTo:      z.string().optional().describe("ISO date YYYY-MM-DD"),
+        avanceTrackingMin: z.number().min(0).max(1).optional().describe("% actual de avance, mínimo (0.0–1.0)"),
+        avanceTrackingMax: z.number().min(0).max(1).optional().describe("% actual de avance, máximo (0.0–1.0)"),
+        ultimaLecturaFrom: z.string().optional().describe("ISO date — última sesión de lectura, desde"),
+        ultimaLecturaTo:   z.string().optional().describe("ISO date — última sesión de lectura, hasta"),
+        author:            z.string().optional().describe("Nombre del autor — se busca en la DB de Personas de Cal"),
+        tag:               z.string().optional().describe("Un tag/tema — se busca en la DB de Tags"),
+        bigTheme:          z.string().optional().describe("Un Big Theme — se busca en la DB de Big Themes"),
       },
-      async ({ query, estado }) =>
-        asText(await searchBooks(query, estado as EstadoLibro | undefined)),
+      async (params) => asText(await searchBooks(params as SearchBooksParams)),
       READ_ONLY,
     ),
     tool(
       "addBook",
-      "Agrega un libro nuevo a la BD de Notion. Busca y setea el cover automáticamente si hay ISBN o título. Setea cover e icono con la misma imagen.",
+      "Agrega un libro nuevo a la BD de Notion. Busca y setea el cover automáticamente si hay ISBN o título. Setea cover e icono con la misma imagen. author/tags/bigThemes son opcionales: si el nombre no matchea exactamente uno existente en Notion, el libro se crea igual y la tool devuelve un aviso pidiendo confirmación — si Cal confirma, usar confirmCreateBookRelation con el pageId que te devolvió esta tool.",
       {
         name:           z.string().describe("Título del libro"),
         subtitle:       z.string().optional(),
         isbn:           z.string().optional(),
-        estado:         z.enum(["Goal","Reading","Read","Focus","Stand-By","Reference","wish list"]),
+        estado:         z.enum(["Not started","Goal","Reading","Read","Focus","Stand-By","Reference","wish list","Por comprar"]),
         planningToRead: z.enum(["2021","2022","2023","2024","2025","2026"]).optional(),
         totalPaginas:   z.number().int().positive().optional(),
         startDate:      z.string().optional().describe("ISO date YYYY-MM-DD"),
         finishDate:     z.string().optional().describe("ISO date YYYY-MM-DD"),
         url:            z.string().optional().describe("URL del libro (Apple Books, Amazon, etc.)"),
         fetchCover:     z.boolean().optional().describe("Buscar y setear cover automáticamente. Default true."),
+        author:         z.string().optional().describe("Nombre del autor — se busca en la DB de Personas de Cal"),
+        tags:           z.array(z.string()).optional().describe("Tags/temas del libro — se buscan en la DB de Tags"),
+        bigThemes:      z.array(z.string()).optional().describe("Big Themes del libro — se buscan en la DB de Big Themes"),
       },
       async (params) => asText(await addBook(params as AddBookParams)),
     ),
     tool(
       "updateBook",
-      "Actualiza propiedades de un libro existente en la BD de Notion. Solo actualiza los campos provistos.",
+      "Actualiza propiedades de un libro existente en la BD de Notion. Solo actualiza los campos provistos. author/tags/bigThemes se MERGEAN con lo que el libro ya tenía (no reemplazan) — si un nombre no matchea exactamente uno existente, la tool avisa y no lo escribe hasta que Cal confirme vía confirmCreateBookRelation.",
       {
         pageId:         z.string().describe("ID de la página Notion del libro"),
-        estado:         z.enum(["Goal","Reading","Read","Focus","Stand-By","Reference","wish list"]).optional(),
+        estado:         z.enum(["Not started","Goal","Reading","Read","Focus","Stand-By","Reference","wish list","Por comprar"]).optional(),
         rating:         z.enum(["🥱","😶","😊","😍"]).optional(),
         startDate:      z.string().optional().describe("ISO date YYYY-MM-DD"),
         finishDate:     z.string().optional().describe("ISO date YYYY-MM-DD"),
@@ -1612,8 +1650,31 @@ export function buildSdkTools(deps: ToolDeps) {
         subtitle:       z.string().optional(),
         url:            z.string().optional(),
         planningToRead: z.enum(["2021","2022","2023","2024","2025","2026"]).optional(),
+        clearPlanningToRead: z.boolean().optional().describe("true para VACIAR el campo Planning to read (sacarle la meta). No combinar con planningToRead."),
+        author:         z.string().optional().describe("Nombre del autor — se busca en la DB de Personas de Cal"),
+        tags:           z.array(z.string()).optional().describe("Tags/temas a agregar — se buscan en la DB de Tags"),
+        bigThemes:      z.array(z.string()).optional().describe("Big Themes a agregar — se buscan en la DB de Big Themes"),
       },
       async (params) => asText(await updateBook(params as UpdateBookParams)),
+    ),
+    tool(
+      "confirmCreateBookRelation",
+      "Crea una página nueva (autor/tag/big theme) y la vincula a un libro, DESPUÉS de que Cal confirmó explícitamente que querés crearla — nunca la llames sin que Cal haya dicho que sí a la pregunta que te devolvió addBook/updateBook.",
+      {
+        tipo:       z.enum(["author","tag","bigTheme"]).describe("Qué tipo de relación crear"),
+        nombre:     z.string().describe("Nombre exacto a crear"),
+        bookPageId: z.string().describe("pageId del libro al que vincularlo (viene de la respuesta de addBook/updateBook)"),
+      },
+      async (params) => asText(await confirmCreateBookRelation(params as ConfirmCreateRelationParams)),
+    ),
+    tool(
+      "getReadingHistory",
+      "Trae el historial completo de sesiones de lectura de un libro (fecha + % inicial/final de cada sesión) — usar cuando Cal pregunte 'cómo he ido leyendo X' o pida el progreso detallado, no solo el % actual.",
+      {
+        query: z.string().describe("Texto a buscar en el título del libro"),
+      },
+      async ({ query }) => asText(await getReadingHistory(query)),
+      READ_ONLY,
     ),
     tool(
       "logReadingProgress",
@@ -1639,34 +1700,15 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "executeRemctl",
-      "Lee y escribe Apple Reminders via remctl CLI. SOLO para FAMILIA y MERCADO (las tareas/proyectos PERSONALES de Cal viven en Things — usar executeClings). Usar --json siempre. Ejemplos: ['lists','--json'] · ['show','Tareas Familia','--json'] · ['today','--json'] · ['add','Mercado','Leche','--json'] · ['done','<id>','--json'] · ['delete','<id>','--force','--json']. El <id> es el campo 'id' del --json. Listas de Cal en Reminders: Tareas Familia · Mercado · Colegio AntoCata.",
+      "Lee y escribe Apple Reminders via remctl CLI. SOLO para FAMILIA y MERCADO (las tareas/proyectos PERSONALES de Cal viven en Todoist — usar executeTd). Usar --json siempre. Ejemplos: ['lists','--json'] · ['show','Tareas Familia','--json'] · ['today','--json'] · ['add','Mercado','Leche','--json'] · ['done','<id>','--json'] · ['delete','<id>','--force','--json']. El <id> es el campo 'id' del --json. Listas de Cal en Reminders: Tareas Familia · Mercado · Colegio AntoCata.",
       { args: z.array(z.string()).describe("Array de argumentos para remctl, sin incluir el binario. Ej: ['show','Tareas Familia','--json']") },
       async ({ args }) => ({ content: [{ type: "text" as const, text: await executeRemctl(args) }] }),
     ),
     tool(
-      "executeClings",
-      "LECTURAS de Things 3 (tareas/proyectos PERSONALES de Cal). SOLO read-only — para CREAR/MODIFICAR usar thingsWrite. Usar --json siempre. Subcomandos: ['today','--json'] · ['inbox','--json'] · ['anytime','--json'] · ['upcoming','--json'] · ['someday','--json'] · ['logbook','--json'] (completadas) · ['projects','--json'] (listar proyectos — resolver nombre exacto antes de crear) · ['areas','--json'] · ['tags','--json'] · ['search','texto','--json'] · ['show','<id>','--json'] · ['stats','--json'] · ['filter','<query>','--json']. El <id>/<uuid> sale de estas lecturas. Áreas de Cal: '⚡️ Cal'. NO usar add/complete/delete/update acá (cuelgan por TCC bajo el daemon).",
-      { args: z.array(z.string()).describe("Argumentos read-only para clings. Ej: ['today','--json'], ['projects','--json'], ['search','vinos','--json']") },
-      async ({ args }) => ({ content: [{ type: "text" as const, text: await executeClings(args) }] }),
-    ),
-    tool(
-      "thingsWrite",
-      "ESCRIBE en Things 3 (crear/modificar/completar/cancelar tareas y proyectos personales) vía URL scheme — headless-safe. command='add' crea TAREA, 'add-project' crea PROYECTO, 'update' modifica tarea (requiere id), 'update-project' modifica/mueve proyecto (requiere id). IMPORTANTE: para TAREAS usar 'list' (nombre del proyecto/área contenedora); para PROYECTOS usar 'area' (nombre del área, ej. '⚡️ Cal') — NO 'list'. Mover un proyecto a un área: {command:'update-project', id:'<uuid>', area:'⚡️ Cal'}. COMPLETAR: {command:'update', id, completed:true}. CANCELAR: +canceled:true. 'notes' soporta saltos de línea. 'when'=today|tomorrow|evening|anytime|someday|YYYY-MM-DD. El auth-token se agrega solo. Resolver nombres exactos de proyecto/área con executeClings ['projects','--json'] / ['areas','--json'] primero. Ejemplos: crear tarea {command:'add', title:'Llamar a X', notes:'tel:...', list:'Pascal'} · crear proyecto en área {command:'add-project', title:'Mi proyecto', area:'⚡️ Cal'}.",
-      {
-        command: z.enum(["add", "update", "add-project", "update-project"]),
-        id: z.string().optional(),
-        title: z.string().optional(),
-        notes: z.string().optional(),
-        when: z.string().optional(),
-        deadline: z.string().optional(),
-        tags: z.string().optional(),
-        list: z.string().optional().describe("Para TAREAS (add): proyecto o área contenedora"),
-        area: z.string().optional().describe("Para PROYECTOS (add-project/update-project): nombre del área"),
-        checklistItems: z.string().optional(),
-        completed: z.boolean().optional(),
-        canceled: z.boolean().optional(),
-      },
-      async (p) => ({ content: [{ type: "text" as const, text: await thingsWrite(p) }] }),
+      "executeTd",
+      "LEE y ESCRIBE en Todoist (tareas/proyectos PERSONALES de Cal — reemplaza a Things desde 2026-08-26) vía la CLI `td`. Headless-safe (auth por token en Keychain, sin AppleScript). SIEMPRE pasar --json --quiet. Proyectos de Cal (usar el nombre EXACTO en --project): '💰 Finanzas' · '❤️ Familia y Hogar' (secciones: Hogar, Salud, Niñas, Vehículos, Trámites) · '⚡️ Cal' (secciones: Exportación Vinos, Pascal) · '🤓 Learning' (secciones: Claudathon, Coach to 5k AI) · '🛠️ Build & Herramientas' (secciones: Backlog de Build with AI, Claude Code Cal, Apps, Setup & Flujos, Notas sueltas). Comandos clave: ['task','add','<título>','--project','<X>','--section','<Y>','--due','today|tomorrow|every 25th|YYYY-MM-DD','--labels','Cal ☕️,Personal','--description','<notas>','--json','--quiet'] · ['task','list','--project','<X>','--json'] · ['task','complete','<id>','--quiet'] · ['task','update','<id>','--due','<...>','--json'] · ['task','move','<id>','--project','<X>','--section','<Y>'] · ['task','delete','<id>','--yes'] · ['project','list','--json'] · ['section','list','--project','<X>','--json']. Sin sección explícita, la tarea cae directo en la raíz del proyecto. Todoist NO tiene 'Algún día' nativo: una tarea sin --due es indistinguible de una tarea 'anytime' — Cal decidió así a propósito (ver filtro 'Algún Día' = sin fecha en la app), no inventar una etiqueta para diferenciarlas salvo que él lo pida.",
+      { args: z.array(z.string()).describe("Argumentos completos para td, sin incluir el binario. Ej: ['task','add','Pagar luz','--project','💰 Finanzas','--json','--quiet']") },
+      async ({ args }) => ({ content: [{ type: "text" as const, text: await executeTd(args) }] }),
     ),
 
     // ── Readwise Reader ─────────────────────────────────────────────────────────
