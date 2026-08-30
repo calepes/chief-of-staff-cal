@@ -28,6 +28,10 @@ type SimpleKey = Exclude<keyof LendingFunnelFields, "enProcesoDerivados" | "enPr
 // label "VISTOS" (el residuo "NO " tiene letras, se rechaza).
 const SIMPLE_LABELS: Record<string, SimpleKey> = {
   LEADS: "leads",
+  // Power BI renombró "LEADS" a "TOTAL" desde el reporte del 2026-08-19/20 (nuevo mini-funnel
+  // resumen arriba del funnel principal, termina en "TOTAL" con el mismo valor que antes era
+  // "Leads" — verificado: Vistos+NoVistos=TOTAL, igual que antes era Vistos+NoVistos=Leads).
+  TOTAL: "leads",
   VISTOS: "vistos",
   "NO VISTOS": "noVistos",
   "ME INTERESA": "meInteresa",
@@ -50,6 +54,13 @@ const EN_PROCESO_BRANCH_BY_ANCHOR: Partial<Record<SimpleKey, "enProcesoAgencia" 
   desembolso: "enProcesoAgencia",
   derivados: "enProcesoDerivados",
 };
+
+// Power BI renombró la 2ª ocurrencia de "EN PROCESO" (rama Derivados→Agencia) a "SIN VISITA"
+// desde el reporte del 2026-08-19/20 — verificado aritméticamente: Agencia+SinVisita=Derivados,
+// igual que antes era Agencia+EnProceso(ancla derivados)=Derivados. Mapea DIRECTO a
+// enProcesoDerivados (sin pasar por el mecanismo de ancla, que ya no aplica a esta label). La
+// rama Agencia→Desembolso sigue llamándose "EN PROCESO" sin cambios.
+const SIN_VISITA_LABEL = "SIN VISITA";
 
 const DIACRITICS_RANGE_START = 0x0300;
 const DIACRITICS_RANGE_END = 0x036f;
@@ -117,7 +128,6 @@ export function extractLendingFunnel(text: string): LendingExtractResult {
   const issues: LendingParseIssue[] = [];
 
   let lastAnchor: SimpleKey | null = null;
-  let enProcesoCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -142,8 +152,18 @@ export function extractLendingFunnel(text: string): LendingExtractResult {
       continue;
     }
 
+    if (matchLabelSuffix(line, SIN_VISITA_LABEL) !== null) {
+      if (fields.enProcesoDerivados != null) continue; // ya resuelto (ej. por el "EN PROCESO" viejo)
+      const num = parseNumber(lines[i + 1] ?? "");
+      if (num === null) {
+        issues.push({ campo: "enProcesoDerivados", motivo: `no pude leer el valor de "SIN VISITA" en línea ${i}` });
+      } else {
+        fields.enProcesoDerivados = num;
+      }
+      continue;
+    }
+
     if (matchLabelSuffix(line, EN_PROCESO_LABEL) !== null) {
-      enProcesoCount++;
       const branch = lastAnchor ? EN_PROCESO_BRANCH_BY_ANCHOR[lastAnchor] : undefined;
       if (!branch) {
         issues.push({ campo: "enProceso", motivo: `"EN PROCESO" sin ancla reconocible (línea ${i}, ancla previa: ${lastAnchor ?? "ninguna"})` });
@@ -162,10 +182,10 @@ export function extractLendingFunnel(text: string): LendingExtractResult {
     }
   }
 
-  if (enProcesoCount !== 2) {
-    issues.push({ campo: "enProceso", motivo: `esperaba 2 ocurrencias de "EN PROCESO", encontré ${enProcesoCount}` });
-  }
-
+  // Ya no se cuentan ocurrencias de "EN PROCESO" (asumía siempre 2 — dejó de valer cuando Power BI
+  // renombró una de las dos ramas a "SIN VISITA", ver arriba). Un branch sin resolver queda null y
+  // lo atrapa el chequeo genérico de "campos faltantes" en parseAndValidateLendingReport() más
+  // abajo — mismo mecanismo que cualquier otro campo del funnel, sin un caso especial acá.
   return { fields, issues };
 }
 

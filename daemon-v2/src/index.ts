@@ -65,7 +65,7 @@ import { downloadTelegramFile } from "./tools/telegram-files.js";
 import { extractPdfFromBuffer, necesitaOcr } from "./tools/pdf-extract.js";
 import { transcribeAudio } from "./tools/whisper.js";
 import { analyzePhoto, analyzePdf, notaOcrParcial } from "./tools/vision.js";
-import { buildMainMenu, handleMenuCallback } from "./menu.js";
+import { buildMainMenu, cancelExpenseJunteNameInput, consumeExpenseJunteNameInput, consumeExpenseJunteSelection, handleMenuCallback, type ExpenseJunte } from "./menu.js";
 
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
 loadEnv({ path: `${process.env.HOME}/.claude/secrets/apps.env` });
@@ -299,6 +299,26 @@ const SPARK_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/spark/dist/index.js";
 const ACHORADAZOS_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/achoradazos/dist/index.js";
+const ACHORADAZOS_BASE_ID = "appufIxiXnYESHhzi";
+const ACHORADAZOS_EVENTOS_TABLE = "tblTpDPaBRFN8JXOQ";
+
+async function listAchoradazosJuntes(): Promise<ExpenseJunte[]> {
+  const url = new URL(`https://api.airtable.com/v0/${ACHORADAZOS_BASE_ID}/${ACHORADAZOS_EVENTOS_TABLE}`);
+  url.searchParams.append("fields[]", "flddKJE5IuUKd6zvO");
+  url.searchParams.append("fields[]", "fldttLFD4KrNaEWQw");
+  url.searchParams.set("sort[0][field]", "Inicio");
+  url.searchParams.set("sort[0][direction]", "desc");
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${env.AIRTABLE_TOKEN}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`No pude consultar juntes: Airtable ${response.status}`);
+  const { records } = await response.json() as { records: Array<{ id: string; fields: Record<string, unknown> }> };
+  return records.map(record => ({
+    id: record.id,
+    nombre: String(record.fields.Name ?? record.fields.flddKJE5IuUKd6zvO ?? "Junte"),
+  }));
+}
 const BOA_CHECKIN_DIST =
   "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/boa-checkin/dist/index.js";
 
@@ -1062,7 +1082,7 @@ async function processMessage(
     // (navegación) o con mensaje sintético en lenguaje natural (acciones).
     if (cb.data?.startsWith("j:")) {
       log({ msg: "menu_callback", data: cb.data });
-      await handleMenuCallback(cb, env.COS_TELEGRAM_BOT_TOKEN, processMessage, payload.update_id);
+      await handleMenuCallback(cb, env.COS_TELEGRAM_BOT_TOKEN, processMessage, payload.update_id, listAchoradazosJuntes);
       return;
     }
 
@@ -1512,6 +1532,30 @@ async function processMessage(
       log({ msg: "no_text_after_preprocessing", chatId });
       discardWarm(warmPromise);
       return;
+    }
+
+    const cancelledExpenseJunte = !photo && !document && /^(cancelar|cancel|olvidalo|olvídalo)$/i.test(text.trim())
+      ? cancelExpenseJunteNameInput(chatId)
+      : false;
+    if (cancelledExpenseJunte) {
+      await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, "❌ Registro de gasto cancelado.", "HTML");
+      discardWarm(warmPromise);
+      return;
+    }
+
+    const namedExpenseJunte = !photo && !document ? consumeExpenseJunteNameInput(chatId, text) : undefined;
+    if (namedExpenseJunte !== undefined) {
+      const response = namedExpenseJunte
+        ? `✅ <b>Junte seleccionado</b>\n\nAdjunta el comprobante del gasto. Espero tu recibo.`
+        : "⚠️ No encontré ese junte. Vuelve a iniciar el registro de gasto y elige uno de la lista.";
+      await editMessage(env.COS_TELEGRAM_BOT_TOKEN, chatId, placeholderMsgId, response, "HTML");
+      discardWarm(warmPromise);
+      return;
+    }
+
+    const selectedExpenseJunte = photo || document ? consumeExpenseJunteSelection(chatId) : undefined;
+    if (selectedExpenseJunte) {
+      text = `Quiero registrar un gasto de Achoradazos para el junte que Cal eligió explícitamente: ${selectedExpenseJunte.nombre} (ID ${selectedExpenseJunte.id}). Datos del gasto o comprobante: ${text}. Usa ese junteId; no lo infieras ni lo reemplaces.`;
     }
 
     // Keyword-triggered TTS: prefijo 🎤 o frases de audio/voz en el texto

@@ -317,6 +317,7 @@ vi.mock("./kpi-ingest-notion.js", async (importOriginal) => {
     fillDerivedFields: vi.fn(),
     markPdfReportFailed: vi.fn(),
     clearPdfFailNote: vi.fn(),
+    markSelfServiceFallback: vi.fn(),
   };
 });
 vi.mock("./kpi-lending-notion.js", async (importOriginal) => {
@@ -360,12 +361,13 @@ import {
   downloadGmailAttachmentBuffer,
   archiveAndMarkRead,
 } from "./kpi-ingest-gmail.js";
-import { upsertKpiRow, fillDerivedFields, markPdfReportFailed, clearPdfFailNote } from "./kpi-ingest-notion.js";
+import { upsertKpiRow, fillDerivedFields, markPdfReportFailed, clearPdfFailNote, markSelfServiceFallback } from "./kpi-ingest-notion.js";
+import { nowInLaPaz } from "../journal-capture.js";
 import { upsertLendingRow, markLendingReportFailed, clearLendingFailNote, fillLendingDerivedFields } from "./kpi-lending-notion.js";
 import { sendCronMessage } from "./rich-send.js";
 import { checkKpiCardDaily } from "./kpi-card-daily.js";
 import { checkKpiCardLending } from "./kpi-card-lending-daily.js";
-import { checkKpiIngest } from "./kpi-ingest-check.js";
+import { checkKpiIngest, PDF_OWNED_RAW_PROPS } from "./kpi-ingest-check.js";
 import { LendingDateStore } from "./lending-date-confirm.js";
 
 const gmailCreds = { clientId: "c", clientSecret: "s", refreshToken: "r" };
@@ -420,7 +422,13 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
 
     await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
-    expect(upsertKpiRow).toHaveBeenCalledWith("n", "2026-07-20", expect.objectContaining({ Saldo: 100 }));
+    expect(upsertKpiRow).toHaveBeenCalledWith(
+      "n",
+      "2026-07-20",
+      expect.objectContaining({ Saldo: 100 }),
+      undefined,
+      { skipIfExisting: PDF_OWNED_RAW_PROPS },
+    );
     // Solo la fecha recién tocada — no recalcula todo el histórico en cada corrida.
     expect(fillDerivedFields).toHaveBeenCalledWith("n", ["2026-07-20"]);
     expect(sendCronMessage).toHaveBeenCalledTimes(1);
@@ -429,7 +437,7 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
     expect(state.pending.m1).toBeUndefined();
   });
 
-  it("NO escribe Afiliaciones diarias/TRX/Activos DAU aunque el CSV los traiga — son campos exclusivos del PDF", async () => {
+  it("pasa Afiliaciones diarias/TRX/Activos DAU a upsertKpiRow como respaldo, protegidos con skipIfExisting (el PDF no se pisa)", async () => {
     const oldTimestamp = Date.now() - 16 * 60 * 1000;
     writeFileSync(
       statePath,
@@ -450,11 +458,48 @@ describe("checkKpiIngest — pipeline CSV (Self-Service)", () => {
 
     await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
 
-    const [, , rawArg] = vi.mocked(upsertKpiRow).mock.calls[0];
+    const [, , rawArg, , optsArg] = vi.mocked(upsertKpiRow).mock.calls[0];
+    // check.ts ya no borra estos campos del raw — la exclusividad del PDF se resuelve DENTRO
+    // de upsertKpiRow vía skipIfExisting (solo entran si el PDF nunca los completó esa fecha).
+    expect(rawArg).toHaveProperty("TRX", 100);
+    expect(rawArg).toHaveProperty("Activos DAU", 50);
+    expect(rawArg).toHaveProperty("Afiliaciones diarias", 10);
+    expect(rawArg).toHaveProperty("Saldo", 999);
+    expect(optsArg).toEqual({ skipIfExisting: PDF_OWNED_RAW_PROPS });
+  });
+
+  it("para la fecha de HOY no usa el respaldo del CSV — el PDF puede llegar más tarde en el día", async () => {
+    const today = nowInLaPaz().slice(0, 10);
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    writeFileSync(
+      statePath,
+      JSON.stringify({ processed: [], pending: { m1: { receivedAt: oldTimestamp } }, lastErrorNotified: {} }),
+    );
+    vi.mocked(searchSelfServiceEmails).mockResolvedValue([{ id: "m1" }]);
+    vi.mocked(getGmailMessage).mockResolvedValue({
+      id: "m1",
+      internalDate: oldTimestamp,
+      attachments: [{ filename: "kpis.csv", mimeType: "text/csv", attachmentId: "a1" }],
+    });
+    vi.mocked(findCsvCandidates).mockReturnValue([{ filename: "kpis.csv", mimeType: "text/csv", attachmentId: "a1" }]);
+    vi.mocked(downloadGmailAttachment).mockResolvedValue(
+      `Fecha,TRX,Activos DAU,Afiliaciones diarias,Saldo\n${today},100,50,10,999\n`,
+    );
+    vi.mocked(upsertKpiRow).mockResolvedValue({ fecha: today, created: true, fieldsWritten: ["Saldo"] });
+    vi.mocked(fillDerivedFields).mockResolvedValue({ completados: [], noCalculables: [] });
+
+    await checkKpiIngest({ botToken: "t", chatId: 1, notionToken: "n", gmail: gmailCreds, lendingDateStore, statePath });
+
+    const [, , rawArg, , optsArg] = vi.mocked(upsertKpiRow).mock.calls[0];
+    // Mismo comportamiento que el código viejo para la fecha de hoy: se borran, no se ofrecen
+    // como respaldo — el CSV corre antes que el PDF en el mismo tick (ver comentario en el
+    // código), así que "todavía no está" no significa "nunca va a llegar".
     expect(rawArg).not.toHaveProperty("TRX");
     expect(rawArg).not.toHaveProperty("Activos DAU");
     expect(rawArg).not.toHaveProperty("Afiliaciones diarias");
     expect(rawArg).toHaveProperty("Saldo", 999);
+    expect(optsArg).toBeUndefined();
+    expect(markSelfServiceFallback).not.toHaveBeenCalled();
   });
 
   it("no reprocesa un mensaje ya marcado como processed", async () => {

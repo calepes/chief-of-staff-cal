@@ -123,7 +123,11 @@ const TOOL_MESSAGES: Record<string, string> = {
   // Achoradazos (Fraternidad Peruana)
   "mcp__achoradazos__searchFraterno":                  "🔍 Buscando fraterno en Airtable...",
   "mcp__achoradazos__listPendingPayments":              "📊 Consultando pagos pendientes...",
+  "mcp__achoradazos__listGrupoCobros":                  "💰 Consultando grupos de cobro...",
+  "mcp__achoradazos__listEventos":                      "📅 Consultando juntes...",
+  "mcp__achoradazos__listExpensesByEvento":             "💸 Consultando gastos del junte...",
   "mcp__achoradazos__registerDeposit":                 "💾 Registrando depósito en Airtable...",
+  "mcp__achoradazos__registerExpense":                 "💸 Registrando gasto en Airtable...",
   "mcp__achoradazos__uploadReceipt":                   "📤 Subiendo comprobante...",
   "mcp__achoradazos__getActiveConcepto":               "📋 Verificando concepto de cobro activo...",
   "mcp__achoradazos__getActiveEvento":                 "📅 Verificando evento activo...",

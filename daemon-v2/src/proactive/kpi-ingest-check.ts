@@ -24,6 +24,7 @@ import {
   fillDerivedFields,
   markPdfReportFailed,
   clearPdfFailNote,
+  markSelfServiceFallback,
   type DerivedFillReport,
   type UpsertResult,
 } from "./kpi-ingest-notion.js";
@@ -52,7 +53,7 @@ const MAX_CARD_SENT = 90;
 // El PDF ("Seguimiento Diario Yape Bolivia") es la fuente autoritativa de estos 3 campos —
 // el CSV ("Self-Service") ya no los escribe, para que no se pisen entre sí. Ver
 // Jano/CLAUDE.md sección "scheduleKpiIngestCheck" para el diseño completo.
-const PDF_OWNED_RAW_PROPS = ["Afiliaciones diarias", "TRX", "Activos DAU"];
+export const PDF_OWNED_RAW_PROPS = ["Afiliaciones diarias", "TRX", "Activos DAU"];
 
 export interface KpiIngestState {
   processed: string[];
@@ -437,11 +438,25 @@ async function processCsvMessage(id: string, state: KpiIngestState, opts: CheckK
 
     const ingestRows: CsvIngestRow[] = [];
     const touchedFechas: string[] = [];
+    // El CSV y el PDF de una misma fecha suelen llegar casi al mismo segundo (ver CLAUDE.md), y
+    // este pipeline (CSV) corre SIEMPRE antes que el de PDF dentro de checkKpiIngest — para la
+    // fecha de HOY, "el PDF todavía no llegó" no significa "falló", solo que este tick corrió
+    // primero. El respaldo de Self-Service solo aplica a fechas YA CERRADAS (estrictamente
+    // anteriores a hoy): ahí sí es seguro asumir que si el PDF no lo completó, no va a llegar.
+    const today = nowInLaPaz().slice(0, 10);
     for (const row of best!.rows) {
       if (!row.fecha) continue;
       const raw = applySundayRule(row.fecha, row.raw);
-      for (const prop of PDF_OWNED_RAW_PROPS) delete raw[prop];
-      const result = await upsertKpiRow(notionToken, row.fecha, raw);
+      let result: UpsertResult;
+      if (row.fecha < today) {
+        result = await upsertKpiRow(notionToken, row.fecha, raw, undefined, { skipIfExisting: PDF_OWNED_RAW_PROPS });
+        if (result.fallbackWritten && result.fallbackWritten.length > 0) {
+          await markSelfServiceFallback(notionToken, result.fecha);
+        }
+      } else {
+        for (const prop of PDF_OWNED_RAW_PROPS) delete raw[prop];
+        result = await upsertKpiRow(notionToken, row.fecha, raw);
+      }
       touchedFechas.push(result.fecha);
       ingestRows.push({
         fecha: result.fecha,

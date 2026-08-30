@@ -74,7 +74,7 @@ Cartelera + compra de entradas de los 3 cines de Santa Cruz (**Cinemark** Ventur
 - **Compra real end-to-end VALIDADA** (2026-07-26, Cal la corrió hasta el QR de pago y el código de retiro). Multicine y Cine Center siguen sin compra automatizada (Multicine se frena en un reCAPTCHA v2 del checkout; Cine Center tiene el modo invitado bugueado).
 - **Al mandar el mapa de asientos, mandá TAMBIÉN la lista `butacasLibres`** que devuelve `iniciarCompraCine` (agrupada por fila, ej. `Fila B: B1-B4, B6-B9`). El screenshot NO trae los números de butaca impresos, así que sin esa lista Cal adivina el código y pide asientos que no existen. En salas premier las butacas vienen de a pares pero **cada mitad es independiente**: para 2 personas juntas hay que pedir las dos (`['A1','A2']`). Detalle técnico del parser (dos renderizados según tipo de sala) en `mcp-servers/CLAUDE.md`, fila `cine` — no duplicar acá.
 
-### Libros (`tools/books.ts`) — gestión ampliada 2026-08-24/25
+### Libros (`tools/books.ts`) — gestión ampliada 2026-08-24/27
 
 DB de libros de Notion (135 libros al momento del análisis). A pedido de Cal ("análisis completo de la
 Bd. y qué tools debería tener Jano para gestión de libros desde el bot") se auditó la BD entera y se
@@ -124,6 +124,10 @@ lectura.
   la primera página y perdía resultados con más de 100 filas.
 - **`getReadingHistory` (nuevo)** — "cómo he ido leyendo": busca en TODA la biblioteca (`queryAllPages`)
   y trae el historial de sesiones de la Tracking DB ordenado por fecha para el libro que matchea.
+- **Salida de lectura enriquecida (2026-08-27):** `searchBooks` expone `Total Páginas` cuando existe;
+  `getReadingHistory` expone `Avance (pag)` por sesión y el total en el encabezado. Así Jano puede
+  responder avances recientes en páginas sin pedirle a Cal el total manualmente; si Notion no tiene
+  el valor, omite ese dato y conserva la respuesta en porcentajes.
 - **Bug de fecha UTC en `logReadingProgress`, encontrado construyendo el cron de libros (ver
   `scheduleBooksDailyReport` en "Automatización" abajo):** usaba `new Date().toISOString().slice(0,10)`
   en vez de `nowInLaPaz()` — sesiones de lectura registradas entre las 20:00 y medianoche hora La Paz
@@ -161,6 +165,19 @@ que suba y sobre eso decida qué hacer o pregunte. Ajustemos el prompt y quitemo
   `{type:"text",text}` — distintos modelos de OpenRouter devuelven formatos distintos en la misma API.
 - **`vision.test.ts` eliminado** — solo testeaba las 2 funciones removidas, sin lógica pura nueva que
   reemplazarlo.
+
+### Achoradazos — cobros, juntes y gastos (2026-08-27)
+
+El MCP `achoradazos` permite listar y crear grupos de cobro y juntes, registrar pagos y gastos, y
+consultar gastos por junte. Para registrar un gasto, Jano exige elegir el junte explícitamente desde
+el selector de Telegram antes de procesar el comprobante.
+
+- **Comprobantes:** `uploadReceipt` admite imágenes y PDF. Las imágenes se comprimen; el PDF se sube
+  sin conversión y retorna `{url, filename}`. `registerExpense` y `registerDeposit` reciben ambos
+  valores para que Airtable preserve el nombre y tipo del adjunto.
+- **Consulta:** `listExpensesByEvento({ junteId })` devuelve cantidad, total y detalle de los gastos
+  registrados del junte.
+- **Límite:** no hay validación automática de duplicados por decisión de Cal.
 
 ## Telegram Rich Messages (@cal/telegram) — migrado y activado 2026-08-06
 

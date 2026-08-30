@@ -53,6 +53,13 @@ corrupto.
 Implementación y detalle en código (ver "dónde vive qué"). Inventario:
 - **Custom (`cos-tools`):** getOutlookEvents · searchPlace · travelTime · requestUserLocation · getTokenUsage · getWhatsappContacts/saveWhatsappContact · pptWizardSave/Load · getFocoCalStatus/logFocoProgress · fetchAsUser · fetchAndSummarize · **Resumidor** (suite, ver abajo) · readPersistedOutput · readwiseGetDailyReview · **executeClings** (leer Things) · **thingsWrite** (escribir Things, URL scheme) · **executeRemctl** (Reminders, familia/mercado) · notionCli/notionPageMarkdown/notionUpdateBody · enviarArchivoNotion · **generarQrAduanaBolivia** (QR salida/ingreso Bolivia Form 250 vía POST HTTP → manda imagen al chat; identidad de `~/.Codex/datos-viaje.json`; flujo en `tools/qr-aduana.ts`) · **generarKpiCardYape** (tarjeta PNG diaria de KPIs Yape on-demand) · **reprocesarKpisDerivadosYape** (fuerza recálculo de derivados de "KPIs diarios", todo el histórico o fechas puntuales — ver sección "scheduleKpiIngestCheck" más abajo) · **consultarJournal** (LEER el Journal de reflexión; guardar NO pasa por el LLM — ver sección "Journal de reflexión" abajo) · **mapaBacklogs/leerBacklog/proponerItemBacklog** (leer y escribir los `BACKLOG.md` de los proyectos de Cal — ver sección "Backlogs de proyectos" abajo) · **guardarReferenciaDiseno** (capturar y guardar referencias visuales de diseño en `Personal/Referencias de Diseño/` — ver sección "Referencias de Diseño" abajo) · **listarProyectosClaude/abrirProyectoClaude** (abrir un proyecto de Cal en VS Code o cmux desde el chat — wrapper del mismo `Codex-launcher-helper.sh` que usa el skill `Codex-launcher` en sesión interactiva; flujo en `tools/Codex-launcher.ts`, guía en `system-prompt.ts` sección "Codex Launcher").
 
+### Libros (Notion)
+
+Las tools `searchBooks`, `getReadingHistory`, `addBook`, `updateBook`, `confirmCreateBookRelation`,
+`logReadingProgress` y `setBookCover` gestionan la biblioteca de Notion. `searchBooks` devuelve título,
+estado, avance, total de páginas cuando existe y enlace; `getReadingHistory` devuelve fecha,
+porcentajes y `Avance (pag)` exacto por sesión, permitiendo informar avances recientes en páginas.
+
 ### Resumidor (`tools/resumir.ts`) — checkpoint con tarjeta + colas
 Resumidor universal con checkpoint antes de guardar a Readwise. Reusa los scripts del skill `resumir` vía spawn (sin Bash); cookies Safari con `~/.Codex/bin/node-fda` (requiere FDA bajo launchd).
 - **Tools (`cos-tools`):** `resumirContenido` (link artículo/paywall/podcast/YouTube o título de libro → resumen en el idioma del contenido) · `guardarResumenReadwise` · `editarPropuestaResumen` (addTags/setTags/removeHighlights/retag, sin guardar) · `saltarResumen` · `detenerResumidor` (vacía colas) · `revisarPlaylistResumir` · `revisarStarredResumir` · `estadoResumidor`.
@@ -73,6 +80,18 @@ Cartelera + compra de entradas de los 3 cines de Santa Cruz (**Cinemark** Ventur
 - **Específico de Jano — allowlist:** `enviarFotoLocal` (`tools/telegram-files.ts`) acepta `cine-*.png` además de `boa-wallet-*` y `kpi-card-*`; el MCP devuelve PATHS en `tmpdir()` y el daemon los sube.
 - **Compra real end-to-end VALIDADA** (2026-07-26, Cal la corrió hasta el QR de pago y el código de retiro). Multicine y Cine Center siguen sin compra automatizada (Multicine se frena en un reCAPTCHA v2 del checkout; Cine Center tiene el modo invitado bugueado).
 - **Al mandar el mapa de asientos, mandá TAMBIÉN la lista `butacasLibres`** que devuelve `iniciarCompraCine` (agrupada por fila, ej. `Fila B: B1-B4, B6-B9`). El screenshot NO trae los números de butaca impresos, así que sin esa lista Cal adivina el código y pide asientos que no existen. En salas premier las butacas vienen de a pares pero **cada mitad es independiente**: para 2 personas juntas hay que pedir las dos (`['A1','A2']`). Detalle técnico del parser (dos renderizados según tipo de sala) en `mcp-servers/AGENTS.md`, fila `cine` — no duplicar acá.
+
+### Libros (`tools/books.ts`) — salida y gestión en Notion
+
+- `searchBooks` permite combinar filtros por estado, meta anual, rating, ISBN, páginas, fechas,
+  avance, última lectura, autor, tag y Big Theme; devuelve título, estado, avance, total de páginas
+  cuando existe y enlace.
+- `getReadingHistory` busca el libro en toda la biblioteca y devuelve cada sesión con fecha,
+  porcentaje inicial/final y `Avance (pag)` exacto cuando Notion lo calcula; el encabezado incluye
+  el total de páginas si está disponible. Esto permite responder avances recientes en páginas sin
+  pedirle a Cal el total manualmente.
+- `addBook`, `updateBook`, `logReadingProgress`, `setBookCover` y `confirmCreateBookRelation`
+  gestionan altas, cambios, progreso, covers y relaciones con gate de confirmación.
 
 ## Telegram Rich Messages (@cal/telegram) — migrado y activado 2026-08-06
 
@@ -592,6 +611,7 @@ Hay dos mecanismos de proactividad independientes:
 - `scheduleFlightCheckin()` — **DESACTIVADO 2026-06-17** (check-ins de vuelos, every 30min 7-22h).
 - `scheduleFocoCheckinsLocal()` — **DESACTIVADO 2026-06-17** (Foco CAL am/md/pm, `proactive/foco-check.ts`).
 - `scheduleHealthSyncCheck()` — **ACTIVO 2026-07-16** (pedido de Cal, ver gotcha "Detección de cortes de sync de Apple Health" arriba). Cron `0,30 7-22 * * *`, mecánico (sin LLM/`takeWarm`) — chequea `GET /status` del health-worker y avisa por Telegram si `hoursSinceLastIngest >= 4h`, con dedup en CF KV (TTL 24h) para no repetir el aviso mientras dure el mismo corte.
+- `scheduleBooksDailyReport()` — **ACTIVO 2026-08-25**. Cron `0 7 * * *`, mecánico (sin agente SDK) — informa la meta de libros 2026 agrupada por Estado y las páginas leídas el día anterior por libro, sumando `Avance (pag)` de la Tracking DB. Envía todos los días, incluso sin sesiones.
 - **`scheduleKpiCardDaily()` — ELIMINADO 2026-07-24** (cron fijo `0 10 * * *`, pedido de Cal). La tarjeta PNG (TRX + Activos DAU + % vs. semana anterior, `@napi-rs/canvas`, `enviarFotoLocal`) ya NO espera un horario fijo — se dispara sola desde el pipeline PDF de `scheduleKpiIngestCheck()` (ver abajo) apenas ese mail se procesa con éxito, porque los 4 campos que la tarjeta muestra son 100% del PDF (el CSV no le aporta nada). Idempotente por fecha vía `state.cardSent` en `kpi-ingest-state.json`; un fallo en la tarjeta no rompe el resto de la ingesta (try/catch propio) ni deja de marcar el mail como procesado. Sigue disponible **on-demand** sin cambios vía el tool `generarKpiCardYape` (chat con Jano) — la función `checkKpiCardDaily()` (`kpi-card-daily.ts`) no se tocó, solo cambió QUIÉN la llama y CUÁNDO.
   - **Bug visual, encontrado por Cal viendo la tarjeta real (2026-07-24): esquinas negras en vez de blancas.** `renderKpiCardImage()` (`kpi-card-image.ts`) crea el canvas (transparente por default) y solo pintaba blanco DENTRO del `roundRect()` (`ctx.fill()`) — los 4 triángulos de esquina que quedan AFUERA de la curva redondeada nunca se tocaban, quedaban transparentes, y Telegram los mostraba como negro sólido. **Fix:** `ctx.fillRect(0, 0, card.size, card.size)` con el mismo blanco ANTES de trazar el `roundRect` — pinta el canvas entero primero; el `roundRect` de abajo queda solo como borde decorativo (`stroke()`, ya no `fill()`). Test de regresión con `getImageData(0,0,1,1)` verificando que el píxel de esquina sea opaco y blanco (antes: alpha=0) — confirmado que reproduce el bug con el código viejo antes de aplicar el fix.
 - `scheduleJournalSweep()` — **ACTIVO 2026-07-27** (pedido de Cal, ver sección "Journal de reflexión" abajo). Cron `0 19 * * 0` (domingos 19:00 La Paz) — junta las entradas `Sin revisar` de los últimos 7 días de la DB Journal y manda un selector para destilarlas a Resonate Calendar. Dedup en CF KV (TTL 7 días). Es la **tercera excepción** a la arquitectura reactiva decidida el 2026-07-14.

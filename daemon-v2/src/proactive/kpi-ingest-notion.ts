@@ -74,6 +74,9 @@ export interface UpsertResult {
   fecha: string;
   created: boolean;
   fieldsWritten: string[];
+  /** Subconjunto de `fieldsWritten` que entró por `skipIfExisting` (el dueño habitual —el
+   * PDF— nunca lo escribió para esta fecha, así que se usó el valor de respaldo del caller). */
+  fallbackWritten?: string[];
 }
 
 export async function upsertKpiRow(
@@ -81,14 +84,23 @@ export async function upsertKpiRow(
   fecha: string,
   raw: Record<string, number | null | undefined>,
   fetchFn: typeof fetch = fetch,
+  opts?: { skipIfExisting?: readonly string[] },
 ): Promise<UpsertResult> {
   const existing = await findRowByFecha(notionToken, fecha, fetchFn);
 
   const properties: Record<string, unknown> = {};
   const fieldsWritten: string[] = [];
+  const fallbackWritten: string[] = [];
   for (const prop of RAW_PROPS) {
     const value = raw[prop];
     if (value === null || value === undefined) continue;
+    const isFallbackProp = opts?.skipIfExisting?.includes(prop) ?? false;
+    if (isFallbackProp) {
+      // El dueño habitual (PDF) ya escribió esta fecha — no pisarlo con el valor del caller
+      // (puede redondear distinto). Si el dueño nunca llegó (null/página nueva), sí se usa.
+      if (existing?.properties[prop]?.number != null) continue;
+      fallbackWritten.push(prop);
+    }
     properties[prop] = { number: value };
     fieldsWritten.push(prop);
   }
@@ -97,7 +109,7 @@ export async function upsertKpiRow(
     if (fieldsWritten.length > 0) {
       await notionRequest(notionToken, "PATCH", `/v1/pages/${existing.id}`, { properties }, fetchFn);
     }
-    return { fecha, created: false, fieldsWritten };
+    return { fecha, created: false, fieldsWritten, fallbackWritten };
   }
 
   properties["Fecha"] = { date: { start: fecha } };
@@ -109,27 +121,31 @@ export async function upsertKpiRow(
     { parent: { database_id: KPI_DB_ID }, properties },
     fetchFn,
   );
-  return { fecha, created: true, fieldsWritten };
+  return { fecha, created: true, fieldsWritten, fallbackWritten };
 }
 
 export const PDF_FAIL_NOTE =
   "⚠️ Reporte fallido (updated fail) — falta información, reintentar cuando llegue el reporte correcto";
 
+export const SELF_SERVICE_FALLBACK_NOTE =
+  "📋 Completado con Self-Service — el PDF de Seguimiento Diario nunca llegó para esta fecha";
+
 function readNotas(page: NotionPage): string {
   return (page.properties["Notas"]?.rich_text ?? []).map((t) => t.plain_text).join("");
 }
 
-/** Marca la Fecha como pendiente de reintento (PDF llegó con "updated fail"). No toca KPIs. */
-export async function markPdfReportFailed(
+/** Agrega `note` a Notas si todavía no está (crea la página si la fecha no existe). No duplica. */
+async function appendNotaIfMissing(
   notionToken: string,
   fecha: string,
+  note: string,
   fetchFn: typeof fetch = fetch,
 ): Promise<void> {
   const existing = await findRowByFecha(notionToken, fecha, fetchFn);
   if (existing) {
     const currentNotas = readNotas(existing);
-    if (currentNotas.includes(PDF_FAIL_NOTE)) return;
-    const merged = currentNotas ? `${currentNotas}\n${PDF_FAIL_NOTE}` : PDF_FAIL_NOTE;
+    if (currentNotas.includes(note)) return;
+    const merged = currentNotas ? `${currentNotas}\n${note}` : note;
     await notionRequest(
       notionToken,
       "PATCH",
@@ -148,11 +164,31 @@ export async function markPdfReportFailed(
       properties: {
         Fecha: { date: { start: fecha } },
         Registro: { title: [{ text: { content: fecha } }] },
-        Notas: { rich_text: [{ text: { content: PDF_FAIL_NOTE } }] },
+        Notas: { rich_text: [{ text: { content: note } }] },
       },
     },
     fetchFn,
   );
+}
+
+/** Marca la Fecha como pendiente de reintento (PDF llegó con "updated fail"). No toca KPIs. */
+export async function markPdfReportFailed(
+  notionToken: string,
+  fecha: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<void> {
+  await appendNotaIfMissing(notionToken, fecha, PDF_FAIL_NOTE, fetchFn);
+}
+
+/** Deja constancia de que los 3 campos "propiedad del PDF" se completaron con el valor del
+ * Self-Service (CSV) porque el PDF nunca llegó para esa fecha — ver `PDF_OWNED_RAW_PROPS` en
+ * kpi-ingest-check.ts y `opts.skipIfExisting` de `upsertKpiRow`. */
+export async function markSelfServiceFallback(
+  notionToken: string,
+  fecha: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<void> {
+  await appendNotaIfMissing(notionToken, fecha, SELF_SERVICE_FALLBACK_NOTE, fetchFn);
 }
 
 /** Borra la marca de "pendiente de reintento" tras un reintento exitoso. No toca nada si no estaba marcada. */
@@ -181,6 +217,9 @@ export interface KpiHistoryRow {
   trxVsSemana: number | null;
   dauVsSemana: number | null;
   afiliacionesVsSemana: number | null;
+  trxVsAyer: number | null;
+  dauVsAyer: number | null;
+  afiliacionesVsAyer: number | null;
 }
 
 export async function fetchKpiHistory(notionToken: string, fetchFn: typeof fetch = fetch): Promise<KpiHistoryRow[]> {
@@ -211,6 +250,9 @@ export async function fetchKpiHistory(notionToken: string, fetchFn: typeof fetch
         trxVsSemana: props["TRX vs. Sem. anterior (%)"]?.number ?? null,
         dauVsSemana: props["DAU vs. Sem. anterior (%)"]?.number ?? null,
         afiliacionesVsSemana: props["Afiliaciones vs. Sem. anterior (%)"]?.number ?? null,
+        trxVsAyer: props["TRX vs. Ayer (%)"]?.number ?? null,
+        dauVsAyer: props["DAU vs. Ayer (%)"]?.number ?? null,
+        afiliacionesVsAyer: props["Afiliaciones vs. Ayer (%)"]?.number ?? null,
       });
     }
     cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
@@ -244,32 +286,43 @@ export function computeAfiliados7d(rows: KpiHistoryRow[], index: number): Derive
   return { ok: true, value: Math.round(sum / count) };
 }
 
-function computeVsSemanaAnterior(
+function computeVsOffset(
   rows: KpiHistoryRow[],
   index: number,
   field: "trx" | "activosDau" | "afiliacionesDiarias",
+  offsetDays: number,
+  offsetLabel: string,
 ): DerivedOutcome {
   const row = rows[index];
-  const isoD7 = isoDaysBefore(row.fecha, 7);
-  const rowD7 = rows.find((r) => r.fecha === isoD7);
+  const isoOffset = isoDaysBefore(row.fecha, offsetDays);
+  const rowOffset = rows.find((r) => r.fecha === isoOffset);
 
   const valueD = row[field];
   if (valueD == null) return { ok: false, reason: `falta ${field} el ${row.fecha}` };
-  if (!rowD7) return { ok: false, reason: `no existe registro D-7 (${isoD7})` };
-  const valueD7 = rowD7[field];
-  if (valueD7 == null) return { ok: false, reason: `falta ${field} el ${isoD7}` };
-  if (valueD7 === 0) return { ok: false, reason: `${field} en D-7 (${isoD7}) es 0` };
-  return { ok: true, value: valueD / valueD7 - 1 };
+  if (!rowOffset) return { ok: false, reason: `no existe registro ${offsetLabel} (${isoOffset})` };
+  const valueOffset = rowOffset[field];
+  if (valueOffset == null) return { ok: false, reason: `falta ${field} el ${isoOffset}` };
+  if (valueOffset === 0) return { ok: false, reason: `${field} en ${offsetLabel} (${isoOffset}) es 0` };
+  return { ok: true, value: valueD / valueOffset - 1 };
 }
 
 export function computeTrxVsSemana(rows: KpiHistoryRow[], index: number): DerivedOutcome {
-  return computeVsSemanaAnterior(rows, index, "trx");
+  return computeVsOffset(rows, index, "trx", 7, "D-7");
 }
 export function computeDauVsSemana(rows: KpiHistoryRow[], index: number): DerivedOutcome {
-  return computeVsSemanaAnterior(rows, index, "activosDau");
+  return computeVsOffset(rows, index, "activosDau", 7, "D-7");
 }
 export function computeAfiliacionesVsSemana(rows: KpiHistoryRow[], index: number): DerivedOutcome {
-  return computeVsSemanaAnterior(rows, index, "afiliacionesDiarias");
+  return computeVsOffset(rows, index, "afiliacionesDiarias", 7, "D-7");
+}
+export function computeTrxVsAyer(rows: KpiHistoryRow[], index: number): DerivedOutcome {
+  return computeVsOffset(rows, index, "trx", 1, "D-1");
+}
+export function computeDauVsAyer(rows: KpiHistoryRow[], index: number): DerivedOutcome {
+  return computeVsOffset(rows, index, "activosDau", 1, "D-1");
+}
+export function computeAfiliacionesVsAyer(rows: KpiHistoryRow[], index: number): DerivedOutcome {
+  return computeVsOffset(rows, index, "afiliacionesDiarias", 1, "D-1");
 }
 
 export interface DerivedFillReport {
@@ -303,6 +356,24 @@ const DERIVED_SPECS: DerivedSpec[] = [
     notionProp: "Afiliaciones vs. Sem. anterior (%)",
     getExisting: (r) => r.afiliacionesVsSemana,
     compute: computeAfiliacionesVsSemana,
+  },
+  {
+    campo: "TRX vs. Ayer (%)",
+    notionProp: "TRX vs. Ayer (%)",
+    getExisting: (r) => r.trxVsAyer,
+    compute: computeTrxVsAyer,
+  },
+  {
+    campo: "DAU vs. Ayer (%)",
+    notionProp: "DAU vs. Ayer (%)",
+    getExisting: (r) => r.dauVsAyer,
+    compute: computeDauVsAyer,
+  },
+  {
+    campo: "Afiliaciones vs. Ayer (%)",
+    notionProp: "Afiliaciones vs. Ayer (%)",
+    getExisting: (r) => r.afiliacionesVsAyer,
+    compute: computeAfiliacionesVsAyer,
   },
 ];
 

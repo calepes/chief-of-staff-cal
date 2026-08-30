@@ -6,10 +6,15 @@ import {
   computeTrxVsSemana,
   computeDauVsSemana,
   computeAfiliacionesVsSemana,
+  computeTrxVsAyer,
+  computeDauVsAyer,
+  computeAfiliacionesVsAyer,
   fillDerivedFields,
   markPdfReportFailed,
   clearPdfFailNote,
+  markSelfServiceFallback,
   PDF_FAIL_NOTE,
+  SELF_SERVICE_FALLBACK_NOTE,
   type KpiHistoryRow,
 } from "./kpi-ingest-notion.js";
 
@@ -24,6 +29,9 @@ function row(overrides: Partial<KpiHistoryRow>): KpiHistoryRow {
     trxVsSemana: null,
     dauVsSemana: null,
     afiliacionesVsSemana: null,
+    trxVsAyer: null,
+    dauVsAyer: null,
+    afiliacionesVsAyer: null,
     ...overrides,
   };
 }
@@ -42,7 +50,7 @@ describe("upsertKpiRow", () => {
 
     const result = await upsertKpiRow("tok", "2026-07-20", { TRX: 1000, "Activos DAU": 500 }, fetchFn);
 
-    expect(result).toEqual({ fecha: "2026-07-20", created: true, fieldsWritten: ["TRX", "Activos DAU"] });
+    expect(result).toEqual({ fecha: "2026-07-20", created: true, fieldsWritten: ["TRX", "Activos DAU"], fallbackWritten: [] });
     const createCall = calls.find((c) => c.url.endsWith("/v1/pages"));
     expect(createCall?.body.properties.TRX).toEqual({ number: 1000 });
     expect(createCall?.body.properties.Fecha).toEqual({ date: { start: "2026-07-20" } });
@@ -58,7 +66,54 @@ describe("upsertKpiRow", () => {
 
     const result = await upsertKpiRow("tok", "2026-07-20", { TRX: 2000 }, fetchFn);
 
-    expect(result).toEqual({ fecha: "2026-07-20", created: false, fieldsWritten: ["TRX"] });
+    expect(result).toEqual({ fecha: "2026-07-20", created: false, fieldsWritten: ["TRX"], fallbackWritten: [] });
+  });
+
+  it("skipIfExisting: no pisa un prop que el dueño (PDF) ya escribió para esa fecha", async () => {
+    const calls: Array<{ method: string; url: string; body: any }> = [];
+    const fetchFn = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ method: init?.method ?? "GET", url: String(url), body });
+      if (String(url).includes("/query")) {
+        return new Response(
+          JSON.stringify({ results: [{ id: "existing-page", properties: { TRX: { number: 4400780 } } }] }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await upsertKpiRow("tok", "2026-08-25", { TRX: 999, Saldo: 100 }, fetchFn, {
+      skipIfExisting: ["TRX"],
+    });
+
+    expect(result.fieldsWritten).toEqual(["Saldo"]);
+    expect(result.fallbackWritten).toEqual([]);
+    const patchCall = calls.find((c) => c.method === "PATCH");
+    expect(patchCall?.body.properties.TRX).toBeUndefined();
+    expect(patchCall?.body.properties.Saldo).toEqual({ number: 100 });
+  });
+
+  it("skipIfExisting: SÍ usa el valor de respaldo si el dueño nunca lo escribió", async () => {
+    const calls: Array<{ method: string; url: string; body: any }> = [];
+    const fetchFn = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ method: init?.method ?? "GET", url: String(url), body });
+      if (String(url).includes("/query")) {
+        return new Response(
+          JSON.stringify({ results: [{ id: "existing-page", properties: { TRX: { number: null } } }] }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await upsertKpiRow("tok", "2026-08-22", { TRX: 4400780 }, fetchFn, { skipIfExisting: ["TRX"] });
+
+    expect(result.fieldsWritten).toEqual(["TRX"]);
+    expect(result.fallbackWritten).toEqual(["TRX"]);
+    const patchCall = calls.find((c) => c.method === "PATCH");
+    expect(patchCall?.body.properties.TRX).toEqual({ number: 4400780 });
   });
 
   it("no llama a PATCH si no hay campos raw con valor", async () => {
@@ -154,6 +209,59 @@ describe("markPdfReportFailed", () => {
     const content = calls[0].body.properties.Notas.rich_text[0].text.content;
     expect(content).toContain("nota manual de Cal");
     expect(content).toContain(PDF_FAIL_NOTE);
+  });
+});
+
+describe("markSelfServiceFallback", () => {
+  it("crea la fila con la nota de origen si no existía", async () => {
+    const calls: Array<{ method: string; url: string; body: any }> = [];
+    const fetchFn = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ method: init?.method ?? "GET", url: String(url), body });
+      if (String(url).includes("/query")) return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      return new Response(JSON.stringify({ id: "new-page" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await markSelfServiceFallback("tok", "2026-08-22", fetchFn);
+
+    const createCall = calls.find((c) => c.url.endsWith("/v1/pages"));
+    expect(createCall?.body.properties.Notas.rich_text[0].text.content).toBe(SELF_SERVICE_FALLBACK_NOTE);
+  });
+
+  it("no duplica la nota si ya estaba marcada", async () => {
+    const fetchFn = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/query")) {
+        return new Response(
+          JSON.stringify({
+            results: [{ id: "existing-page", properties: { Notas: { rich_text: [{ plain_text: SELF_SERVICE_FALLBACK_NOTE }] } } }],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error("no debería llamar a PATCH si ya estaba marcada");
+    }) as unknown as typeof fetch;
+
+    await markSelfServiceFallback("tok", "2026-08-22", fetchFn);
+  });
+
+  it("convive con PDF_FAIL_NOTE si ambas aplican a la misma fecha", async () => {
+    const calls: Array<{ body: any }> = [];
+    const fetchFn = vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes("/query")) {
+        return new Response(
+          JSON.stringify({ results: [{ id: "existing-page", properties: { Notas: { rich_text: [{ plain_text: PDF_FAIL_NOTE }] } } }] }),
+          { status: 200 },
+        );
+      }
+      calls.push({ body: init?.body ? JSON.parse(init.body as string) : {} });
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await markSelfServiceFallback("tok", "2026-08-22", fetchFn);
+
+    const content = calls[0].body.properties.Notas.rich_text[0].text.content;
+    expect(content).toContain(PDF_FAIL_NOTE);
+    expect(content).toContain(SELF_SERVICE_FALLBACK_NOTE);
   });
 });
 
@@ -317,6 +425,32 @@ describe("computeTrxVsSemana / computeDauVsSemana / computeAfiliacionesVsSemana"
     const withMissing = [rows[0], row({ fecha: "2026-07-20", trx: null })];
     const result = computeTrxVsSemana(withMissing, 1);
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("computeTrxVsAyer / computeDauVsAyer / computeAfiliacionesVsAyer", () => {
+  const rows: KpiHistoryRow[] = [
+    row({ fecha: "2026-08-24", trx: 1000, activosDau: 500, afiliacionesDiarias: 20 }),
+    row({ fecha: "2026-08-25", trx: 1100, activosDau: 550, afiliacionesDiarias: 22 }),
+  ];
+
+  it("calcula la variación % vs. el día anterior", () => {
+    const result = computeTrxVsAyer(rows, 1);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBeCloseTo(0.1);
+  });
+
+  it("no calculable si no existe registro D-1", () => {
+    const result = computeDauVsAyer([rows[1]], 0);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("D-1");
+  });
+
+  it("no calculable si D-1 es 0", () => {
+    const withZero = [row({ fecha: "2026-08-24", afiliacionesDiarias: 0 }), rows[1]];
+    const result = computeAfiliacionesVsAyer(withZero, 1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("0");
   });
 });
 

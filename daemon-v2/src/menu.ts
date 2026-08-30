@@ -30,6 +30,92 @@ export interface MenuPayload {
   keyboard: InlineKeyboardMarkup;
 }
 
+export interface ExpenseJunte {
+  id: string;
+  nombre: string;
+}
+
+const expenseJunteOptions = new Map<number, { juntes: ExpenseJunte[]; expiresAt: number }>();
+const expenseJuntePending = new Map<number, { junte: ExpenseJunte; expiresAt: number }>();
+const expenseJunteNameInput = new Set<number>();
+const EXPENSE_JUNTE_SELECTION_TTL_MS = 15 * 60_000;
+
+export function beginExpenseJunteSelection(chatId: number, juntes: ExpenseJunte[], now = Date.now()): void {
+  expenseJunteOptions.set(chatId, { juntes, expiresAt: now + EXPENSE_JUNTE_SELECTION_TTL_MS });
+  expenseJunteNameInput.delete(chatId);
+}
+
+export function selectExpenseJunte(chatId: number, junteId: string, now = Date.now()): boolean {
+  const options = expenseJunteOptions.get(chatId);
+  expenseJunteOptions.delete(chatId);
+  expenseJunteNameInput.delete(chatId);
+  const junte = options && options.expiresAt >= now ? options.juntes.find(item => item.id === junteId) : undefined;
+  if (!junte) return false;
+  expenseJuntePending.set(chatId, { junte, expiresAt: now + EXPENSE_JUNTE_SELECTION_TTL_MS });
+  return true;
+}
+
+export function beginExpenseJunteNameInput(chatId: number, now = Date.now()): boolean {
+  const options = expenseJunteOptions.get(chatId);
+  if (!options || options.expiresAt < now) {
+    expenseJunteOptions.delete(chatId);
+    return false;
+  }
+  expenseJunteNameInput.add(chatId);
+  return true;
+}
+
+export function consumeExpenseJunteNameInput(chatId: number, nombre: string, now = Date.now()): ExpenseJunte | null | undefined {
+  if (!expenseJunteNameInput.delete(chatId)) return undefined;
+  const normalized = nombre.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("es");
+  const options = expenseJunteOptions.get(chatId);
+  const junte = options && options.expiresAt >= now ? options.juntes.find(item =>
+    item.nombre.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("es") === normalized,
+  ) : undefined;
+  expenseJunteOptions.delete(chatId);
+  if (!junte) return null;
+  expenseJuntePending.set(chatId, { junte, expiresAt: now + EXPENSE_JUNTE_SELECTION_TTL_MS });
+  return junte;
+}
+
+export function cancelExpenseJunteNameInput(chatId: number): boolean {
+  if (!expenseJunteNameInput.delete(chatId)) return false;
+  expenseJunteOptions.delete(chatId);
+  return true;
+}
+
+export function consumeExpenseJunteSelection(chatId: number, now = Date.now()): ExpenseJunte | undefined {
+  const selection = expenseJuntePending.get(chatId);
+  expenseJuntePending.delete(chatId);
+  return selection && selection.expiresAt >= now ? selection.junte : undefined;
+}
+
+export function cancelExpenseJunteSelection(chatId: number): void {
+  expenseJunteOptions.delete(chatId);
+  expenseJuntePending.delete(chatId);
+  expenseJunteNameInput.delete(chatId);
+}
+
+export function buildExpenseJunteMenu(juntes: ExpenseJunte[]): MenuPayload {
+  return {
+    text: "📅 <b>¿A qué junte corresponde?</b>\nSelecciona el junte del gasto.",
+    keyboard: {
+      inline_keyboard: [
+        ...juntes.slice(0, 6).reduce<InlineKeyboardButton[][]>((rows, junte, index) => {
+          if (index % 2 === 0) rows.push([]);
+          const label = junte.nombre.length > 17 ? `${junte.nombre.slice(0, 16).trimEnd()}…` : junte.nombre;
+          rows.at(-1)!.push({ text: `📅 ${label}`, callback_data: `j:achoradazos:gasto:junte:${junte.id}` });
+          return rows;
+        }, []),
+        [
+          { text: "✏️ Otro", callback_data: "j:achoradazos:gasto:otro" },
+          { text: "❌ Cancelar", callback_data: "j:achoradazos:gasto:cancelar" },
+        ],
+      ],
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Menús
 // ---------------------------------------------------------------------------
@@ -57,6 +143,7 @@ export function buildMainMenu(): MenuPayload {
         [
           { text: "📋 Backlog", callback_data: "j:backlog" },
           { text: "📓 Journal", callback_data: "j:journal" },
+          { text: "🇵🇪 Achoradazos", callback_data: "j:achoradazos" },
         ],
       ],
     },
@@ -179,6 +266,29 @@ export function buildCambioMenu(): MenuPayload {
   };
 }
 
+export function buildAchoradazosMenu(): MenuPayload {
+  return {
+    text: "🇵🇪 <b>Achoradazos</b> — ¿qué gestionamos?",
+    keyboard: {
+      inline_keyboard: [
+        [
+          { text: "💰 Grupos de cobro", callback_data: "j:achoradazos:cobros" },
+          { text: "📅 Juntes", callback_data: "j:achoradazos:juntes" },
+        ],
+        [
+          { text: "🧾 Registrar pago", callback_data: "j:achoradazos:pago" },
+          { text: "➕ Nuevo grupo", callback_data: "j:achoradazos:nuevo-cobro" },
+        ],
+        [
+          { text: "💸 Registrar gasto", callback_data: "j:achoradazos:gasto" },
+          { text: "➕ Nuevo junte", callback_data: "j:achoradazos:nuevo-junte" },
+        ],
+        [{ text: "← Volver", callback_data: "j:menu" }],
+      ],
+    },
+  };
+}
+
 export function buildFlightsMenu(): MenuPayload {
   return {
     text: "✈️ <b>Vuelos</b> — ¿qué aeropuerto?",
@@ -233,6 +343,12 @@ export const ACTION_TEXT: Record<string, string> = {
   "j:fx:p2p": "¿Cuál es la tasa P2P de Binance ahora?",
   "j:fx:all": "Dame el tipo de cambio BCB oficial y P2P Binance",
   "j:fx:inversiones": "Dame el resumen de mi portafolio de inversiones",
+  "j:achoradazos:cobros": "Muéstrame los grupos de cobro de Achoradazos para elegir uno.",
+  "j:achoradazos:juntes": "Muéstrame los juntes de Achoradazos para elegir uno.",
+  "j:achoradazos:pago": "Quiero registrar un pago de Achoradazos. Pídeme el comprobante y, antes de registrarlo, muéstrame los grupos de cobro y juntes para que elija ambos explícitamente.",
+  "j:achoradazos:gasto": "Quiero registrar un gasto de Achoradazos. Pídeme proveedor, concepto, monto, fecha y comprobante; antes de registrarlo, muéstrame los juntes para que elija uno explícitamente.",
+  "j:achoradazos:nuevo-cobro": "Quiero crear un nuevo grupo de cobro de Achoradazos. Pregúntame nombre, monto por persona y cantidad.",
+  "j:achoradazos:nuevo-junte": "Quiero crear un nuevo junte de Achoradazos. Pregúntame nombre, fecha y lugar.",
   "j:fuel": "Muéstrame las gasolineras con combustible disponible en Santa Cruz",
   "j:tokens": "¿Cuánto presupuesto de Claude Max llevo hoy?",
   "j:launcher": "Muéstrame los proyectos del Claude Launcher",
@@ -273,6 +389,7 @@ export const NAV_MENUS: Record<string, () => MenuPayload> = {
   "j:viajes": buildViajesMenu,
   "j:yape": buildYapeMenu,
   "j:fx": buildCambioMenu,
+  "j:achoradazos": buildAchoradazosMenu,
   "j:flights": buildFlightsMenu,
   "j:flights:vvi": () => buildFlightsDirMenu("VVI", "Viru Viru (SCZ)"),
   "j:flights:lpb": () => buildFlightsDirMenu("LPB", "El Alto (LPZ)"),
@@ -299,13 +416,64 @@ export async function handleMenuCallback(
   token: string,
   processMessageFn: (payload: TelegramUpdate, queueWaitMs: number, opts?: { existingPlaceholderId?: number }) => Promise<void>,
   updateId: number,
+  listExpenseJuntes: () => Promise<ExpenseJunte[]>,
 ): Promise<void> {
   const data = cb.data ?? "";
   const chatId = cb.message?.chat.id;
   const messageId = cb.message?.message_id;
 
   // Siempre dismissar el spinner de Telegram
-  await answerCallbackQuery(token, cb.id);
+  void answerCallbackQuery(token, cb.id).catch(() => {});
+
+  if (data === "j:achoradazos:gasto") {
+    if (chatId == null || messageId == null) return;
+    try {
+      await editMessage(token, chatId, messageId, "⏳ Consultando juntes...", "HTML");
+      const juntes = await listExpenseJuntes();
+      if (juntes.length === 0) {
+        await editMessage(token, chatId, messageId, "⚠️ No hay juntes disponibles. Crea uno antes de registrar el gasto.", "HTML");
+        return;
+      }
+      beginExpenseJunteSelection(chatId, juntes);
+      const menu = buildExpenseJunteMenu(juntes);
+      await editMessage(token, chatId, messageId, menu.text, "HTML", menu.keyboard);
+    } catch {
+      await editMessage(token, chatId, messageId, "⚠️ No pude cargar los juntes. Inténtalo de nuevo.", "HTML", {
+        inline_keyboard: [
+          [{ text: "🔄 Reintentar", callback_data: "j:achoradazos:gasto" }],
+          [{ text: "❌ Cancelar", callback_data: "j:achoradazos:gasto:cancelar" }],
+        ],
+      });
+    }
+    return;
+  }
+
+  if (data.startsWith("j:achoradazos:gasto:junte:")) {
+    if (chatId == null || messageId == null) return;
+    const junteId = data.slice("j:achoradazos:gasto:junte:".length);
+    if (!selectExpenseJunte(chatId, junteId)) {
+      return;
+    }
+    await editMessage(token, chatId, messageId, "✅ <b>Junte seleccionado</b>\n\nAdjunta el comprobante del gasto. Espero tu recibo.", "HTML", { inline_keyboard: [] });
+    return;
+  }
+
+  if (data === "j:achoradazos:gasto:otro") {
+    if (chatId == null || messageId == null) return;
+    if (!beginExpenseJunteNameInput(chatId)) {
+      await editMessage(token, chatId, messageId, "⚠️ Esa selección venció. Vuelve a iniciar el registro de gasto.", "HTML", { inline_keyboard: [] });
+      return;
+    }
+    await editMessage(token, chatId, messageId, "✏️ <b>Otro junte</b>\n\nEscribe el nombre completo del junte.", "HTML", { inline_keyboard: [] });
+    return;
+  }
+
+  if (data === "j:achoradazos:gasto:cancelar") {
+    if (chatId == null || messageId == null) return;
+    cancelExpenseJunteSelection(chatId);
+    await editMessage(token, chatId, messageId, "❌ Registro de gasto cancelado.", "HTML", { inline_keyboard: [] });
+    return;
+  }
 
   // --- Navegación pura ---
   if (data in NAV_MENUS) {

@@ -1592,7 +1592,7 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "searchBooks",
-      "Busca libros en la BD de Notion de Cal. Todos los filtros son opcionales y combinables (AND) — devuelve lista con título, estado, % avance y link.",
+      "Busca libros en la BD de Notion de Cal. Todos los filtros son opcionales y combinables (AND) — devuelve lista con título, estado, % avance, total de páginas y link.",
       {
         query:             z.string().optional().describe("Texto a buscar en el título del libro"),
         estado:            z.enum(["Not started","Goal","Reading","Read","Focus","Stand-By","Reference","wish list","Por comprar"]).optional(),
@@ -1669,7 +1669,7 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "getReadingHistory",
-      "Trae el historial completo de sesiones de lectura de un libro (fecha + % inicial/final de cada sesión) — usar cuando Cal pregunte 'cómo he ido leyendo X' o pida el progreso detallado, no solo el % actual.",
+      "Trae el historial completo de sesiones de lectura de un libro (fecha + % inicial/final + páginas de cada sesión) — usar cuando Cal pregunte 'cómo he ido leyendo X' o pida el progreso detallado, no solo el % actual.",
       {
         query: z.string().describe("Texto a buscar en el título del libro"),
       },

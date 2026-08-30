@@ -25,6 +25,7 @@ export interface BookResult {
   estado?: string;
   rating?: string;
   avanceTracking?: number;
+  totalPaginas?: number;
   startDate?: string;
   isbn?: string;
 }
@@ -132,6 +133,7 @@ function pageToBookResult(page: NotionPage): BookResult {
     estado: props["Estado"]?.status?.name,
     rating: props["Rating"]?.select?.name,
     avanceTracking: props["Avance Tracking"]?.rollup?.number ?? undefined,
+    totalPaginas: props["Total Páginas"]?.number ?? undefined,
     startDate: props["Start Date"]?.date?.start,
     isbn: props["ISBN"]?.rich_text?.[0]?.plain_text,
   };
@@ -361,7 +363,8 @@ export async function searchBooks(params: SearchBooksParams = {}): Promise<strin
     const emoji = ESTADO_EMOJI[b.estado ?? ""] ?? "•";
     const rating = b.rating ? ` ${b.rating}` : "";
     const avance = b.avanceTracking != null ? ` · ${Math.round(b.avanceTracking * 100)}%` : "";
-    return `${emoji} <b>${esc(b.name)}</b>${rating}${avance}\n   <a href="${b.url}">ver →</a>`;
+    const paginas = b.totalPaginas != null ? ` · ${b.totalPaginas} págs` : "";
+    return `${emoji} <b>${esc(b.name)}</b>${rating}${avance}${paginas}\n   <a href="${b.url}">ver →</a>`;
   });
 
   const titulo = estado
@@ -742,19 +745,22 @@ export async function getReadingHistory(query: string): Promise<string> {
   }
 
   const lines = records.map((r) => {
-    const props = r.properties as Record<string, { number?: number; date?: { start: string } }>;
+    const props = r.properties as Record<string, { number?: number; date?: { start: string }; formula?: { number?: number } }>;
     const fecha = props["Fecha"]?.date?.start ?? "?";
     const pi = props["% Inicial"]?.number;
     const pf = props["% Final"]?.number;
+    const paginas = props["Avance (pag)"]?.formula?.number;
     const piPct = pi != null ? `${Math.round(pi * 100)}%` : "?";
     const pfPct = pf != null ? `${Math.round(pf * 100)}%` : "?";
-    return `${fecha}: ${piPct} → ${pfPct}`;
+    const paginasLine = paginas != null ? ` — ${paginas} págs` : "";
+    return `${fecha}: ${piPct} → ${pfPct}${paginasLine}`;
   });
 
   const currentPct = book.avanceTracking != null ? `${Math.round(book.avanceTracking * 100)}%` : null;
+  const totalPaginas = book.totalPaginas != null ? ` de ${book.totalPaginas} págs` : "";
   const sesiones = `${records.length} sesion${records.length !== 1 ? "es" : ""}`;
   const header = currentPct
-    ? `📖 <b>${esc(book.name)}</b> — ${currentPct} (${sesiones})`
+    ? `📖 <b>${esc(book.name)}</b> — ${currentPct}${totalPaginas} (${sesiones})`
     : `📖 <b>${esc(book.name)}</b> — ${sesiones}`;
 
   return `${header}\n\n${lines.join("\n")}`;

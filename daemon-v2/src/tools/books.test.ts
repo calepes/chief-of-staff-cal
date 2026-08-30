@@ -117,6 +117,7 @@ describe("searchBooks (formatting)", () => {
             Name: { title: [{ plain_text: "Leadership on the Line" }] },
             Estado: { status: { name: "Reading" } },
             "Avance Tracking": { rollup: { number: 0.1 } },
+            "Total Páginas": { number: 240 },
             Rating: { select: null },
             "Start Date": { date: null },
             ISBN: { rich_text: [] },
@@ -130,6 +131,7 @@ describe("searchBooks (formatting)", () => {
     const result = await searchBooks();
     expect(result).toContain("Leadership on the Line");
     expect(result).toContain("10%");
+    expect(result).toContain("240 págs");
     expect(result).toContain("📖");
   });
 
@@ -610,6 +612,7 @@ describe("getReadingHistory", () => {
               Name: { title: [{ plain_text: "Continuous Discovery Habits" }] },
               Estado: { status: { name: "Reading" } },
               "Avance Tracking": { rollup: { number: 0.59 } },
+              "Total Páginas": { number: 300 },
               Rating: { select: null }, "Start Date": { date: null }, ISBN: { rich_text: [] },
             },
           }],
@@ -620,8 +623,8 @@ describe("getReadingHistory", () => {
         status: 0,
         stdout: JSON.stringify({
           results: [
-            { properties: { Fecha: { date: { start: "2026-01-01" } }, "% Inicial": { number: 0 }, "% Final": { number: 0.2 } } },
-            { properties: { Fecha: { date: { start: "2026-01-07" } }, "% Inicial": { number: 0.2 }, "% Final": { number: 0.59 } } },
+            { properties: { Fecha: { date: { start: "2026-01-01" } }, "% Inicial": { number: 0 }, "% Final": { number: 0.2 }, "Avance (pag)": { formula: { number: 60 } } } },
+            { properties: { Fecha: { date: { start: "2026-01-07" } }, "% Inicial": { number: 0.2 }, "% Final": { number: 0.59 }, "Avance (pag)": { formula: { number: 117 } } } },
           ],
         }),
         stderr: "",
@@ -632,9 +635,10 @@ describe("getReadingHistory", () => {
 
     expect(result).toContain("Continuous Discovery Habits");
     expect(result).toContain("59%");
+    expect(result).toContain("59% de 300 págs");
     expect(result).toContain("2 sesiones");
-    expect(result).toContain("2026-01-01: 0% → 20%");
-    expect(result).toContain("2026-01-07: 20% → 59%");
+    expect(result).toContain("2026-01-01: 0% → 20% — 60 págs");
+    expect(result).toContain("2026-01-07: 20% → 59% — 117 págs");
   });
 
   it("asks which book when the query matches more than one", async () => {

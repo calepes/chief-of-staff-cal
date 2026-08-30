@@ -236,7 +236,11 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // Fraternidad Peruana (Achoradazos) — gestión de fraternos, eventos, pagos
   "mcp__achoradazos__searchFraterno",
   "mcp__achoradazos__listPendingPayments",
+  "mcp__achoradazos__listGrupoCobros",
+  "mcp__achoradazos__listEventos",
+  "mcp__achoradazos__listExpensesByEvento",
   "mcp__achoradazos__registerDeposit",
+  "mcp__achoradazos__registerExpense",
   "mcp__achoradazos__uploadReceipt",
   "mcp__achoradazos__createEvento",
   "mcp__achoradazos__createConceptoCobro",

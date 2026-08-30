@@ -113,10 +113,39 @@ describe("extractLendingFunnel", () => {
     expect(issues.some((i) => i.motivo.includes("sin ancla reconocible"))).toBe(true);
   });
 
-  it("reporta un issue si 'EN PROCESO' aparece una cantidad distinta de 2 veces", () => {
+  it("una sola 'EN PROCESO' deja la otra rama en null, sin issue propio (lo atrapa el chequeo de campos faltantes más arriba)", () => {
     const text = "DESEMBOLSO\n10\nEN PROCESO\n2\n";
-    const { issues } = extractLendingFunnel(text);
-    expect(issues.some((i) => i.motivo.includes("esperaba 2 ocurrencias"))).toBe(true);
+    const { fields, issues } = extractLendingFunnel(text);
+    expect(fields.enProcesoAgencia).toBe(2);
+    expect(fields.enProcesoDerivados).toBeNull();
+    expect(issues).toEqual([]);
+  });
+
+  it("reconoce 'TOTAL' como alias de 'LEADS' (rename de Power BI, 2026-08-19/20)", () => {
+    const text = "TOTAL\n29090\nVISTOS\n25527\n";
+    const { fields } = extractLendingFunnel(text);
+    expect(fields.leads).toBe(29090);
+  });
+
+  it("reconoce 'SIN VISITA' como alias directo de la rama Derivados→Agencia (rename de Power BI, 2026-08-19/20)", () => {
+    const text = "DERIVADOS\n705\nAGENCIA\n334\nSIN VISITA\n371\n";
+    const { fields, issues } = extractLendingFunnel(text);
+    expect(fields.enProcesoDerivados).toBe(371);
+    expect(issues).toEqual([]);
+  });
+
+  it("formato nuevo completo (TOTAL + SIN VISITA + un solo EN PROCESO) reconcilia sin issues — reproduce el PDF real del 2026-08-19", () => {
+    // Mismos números que el reporte real del 19/8 que rompía con el parser viejo.
+    const text =
+      "TOTAL\n29090\nVISTOS\n25527\nNO VISTOS\n3563\nME INTERESA\n2200\nNO ME INTERESA\n4000\n" +
+      "SIN INTERACCION\n19327\nCONTACTADO\n1200\nNO CONTACTADO\n1000\nDERIVADOS\n705\n" +
+      "NO DERIVADOS\n495\nAGENCIA\n334\nSIN VISITA\n371\nDESEMBOLSO\n200\nEN PROCESO\n100\nRECHAZADO\n34\n";
+    const { fields, issues } = extractLendingFunnel(text);
+    expect(issues).toEqual([]);
+    expect(fields.leads).toBe(29090);
+    expect(fields.enProcesoDerivados).toBe(371);
+    expect(fields.enProcesoAgencia).toBe(100);
+    expect(reconcileLendingFunnel(fields).ok).toBe(true);
   });
 
   it("nunca confunde 'NO VISTOS' con la label 'VISTOS' (residuo con letras se rechaza)", () => {
