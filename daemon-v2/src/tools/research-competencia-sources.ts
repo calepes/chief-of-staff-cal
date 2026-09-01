@@ -46,20 +46,24 @@ export async function fetchIosAppInfo(
   app: { trackId?: string; searchTerm?: string },
   fetchFn: typeof fetch = fetch,
 ): Promise<IosAppInfo | null> {
-  const url = app.trackId
-    ? `https://itunes.apple.com/lookup?id=${app.trackId}&country=bo`
-    : `https://itunes.apple.com/search?term=${encodeURIComponent(app.searchTerm ?? "")}&country=bo&entity=software&limit=1`;
-  const res = await fetchFn(url, { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) return null;
-  const data = (await res.json()) as { results?: Array<Record<string, unknown>> };
-  const r = data.results?.[0];
-  if (!r) return null;
-  return {
-    version: String(r.version ?? ""),
-    rating: typeof r.averageUserRating === "number" ? r.averageUserRating : null,
-    ratingCount: typeof r.userRatingCount === "number" ? r.userRatingCount : null,
-    releaseNotes: typeof r.releaseNotes === "string" ? r.releaseNotes : null,
-  };
+  try {
+    const url = app.trackId
+      ? `https://itunes.apple.com/lookup?id=${app.trackId}&country=bo`
+      : `https://itunes.apple.com/search?term=${encodeURIComponent(app.searchTerm ?? "")}&country=bo&entity=software&limit=1`;
+    const res = await fetchFn(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { results?: Array<Record<string, unknown>> };
+    const r = data.results?.[0];
+    if (!r) return null;
+    return {
+      version: String(r.version ?? ""),
+      rating: typeof r.averageUserRating === "number" ? r.averageUserRating : null,
+      ratingCount: typeof r.userRatingCount === "number" ? r.userRatingCount : null,
+      releaseNotes: typeof r.releaseNotes === "string" ? r.releaseNotes : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchAndroidAppInfo(

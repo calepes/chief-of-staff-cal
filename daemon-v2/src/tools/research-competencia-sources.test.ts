@@ -45,6 +45,11 @@ describe("fetchIosAppInfo", () => {
     const fetchFn = vi.fn(async () => ({ ok: false })) as unknown as typeof fetch;
     expect(await fetchIosAppInfo({ trackId: "123" }, fetchFn)).toBeNull();
   });
+
+  it("devuelve null si el fetch tira error (timeout, red, etc.)", async () => {
+    const fetchFn = vi.fn(async () => { throw new Error("timeout"); }) as unknown as typeof fetch;
+    expect(await fetchIosAppInfo({ trackId: "123" }, fetchFn)).toBeNull();
+  });
 });
 
 describe("fetchAndroidAppInfo", () => {
