@@ -625,11 +625,20 @@ export function buildSdkTools(deps: ToolDeps) {
         // como mensaje NUEVO al chatId capturado ahora, no dentro del .then() (el chat activo
         // puede cambiar antes de que termine).
         void runResearchCompetencia({ timeframeDias, entidadIds: entidades })
-          .then((result) => sendCronMessage(botToken, { chatId, text: formatSummaryHtml(result) }))
+          .then((result) =>
+            sendCronMessage(botToken, { chatId, text: formatSummaryHtml(result) }).catch((sendErr) => {
+              // El research SÍ funcionó (ya está en Notion) — el error es solo del envío del
+              // resumen, no lo mezcles con el catch de abajo (ese es de un fallo real del research).
+              void sendCronMessage(botToken, {
+                chatId,
+                text: `⚠️ El research de competencia terminó bien (informe: ${result.informeUrl ?? "ver Notion"}) pero falló mandarte el resumen: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`,
+              }).catch(() => {});
+            }),
+          )
           .catch((err) => {
             void sendCronMessage(botToken, {
               chatId,
-              text: `❌ Error corriendo el research de competencia (${String(err)}).`,
+              text: `❌ Error corriendo el research de competencia: ${err instanceof Error ? err.message : String(err)}`,
             }).catch(() => {});
           });
         return asText({
