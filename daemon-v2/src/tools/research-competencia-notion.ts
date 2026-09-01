@@ -118,7 +118,14 @@ export function buildInformeReportText(fecha: string, timeframeDias: number, ent
     if (e.error) {
       lines.push(`  Error en esta corrida: ${e.error}`);
     } else if (e.primeraCorrida) {
-      lines.push("  Primera corrida — se guardó el estado inicial, sin comparación.");
+      if (e.hallazgos.length === 0) {
+        lines.push("  Primera corrida — se guardó el estado inicial, sin comparación.");
+      } else {
+        lines.push("  Primera corrida — hallazgos iniciales (sin comparación con corridas futuras):");
+        for (const h of e.hallazgos) {
+          lines.push(`  [${h.dimension}] ${h.descripcion}${h.fuente ? ` (${h.fuente})` : ""}`);
+        }
+      }
     } else if (e.hallazgos.length === 0) {
       lines.push("  Sin novedades.");
     } else {

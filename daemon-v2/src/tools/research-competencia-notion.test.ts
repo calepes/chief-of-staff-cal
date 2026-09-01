@@ -16,6 +16,17 @@ describe("buildInformeReportText", () => {
     expect(text).toContain("Primera corrida");
   });
 
+  it("primera corrida con hallazgos los muestra igual, marcados como iniciales", () => {
+    const text = buildInformeReportText("2026-08-31", 7, [
+      entityResult({
+        primeraCorrida: true,
+        hallazgos: [{ dimension: "Hiring", descripcion: "Nuevo rol de UX abierto", fuente: "https://linkedin.com/x" }],
+      }),
+    ]);
+    expect(text).toContain("Primera corrida");
+    expect(text).toContain("[Hiring] Nuevo rol de UX abierto (https://linkedin.com/x)");
+  });
+
   it("marca sin novedades cuando no hay hallazgos", () => {
     const text = buildInformeReportText("2026-08-31", 7, [entityResult({})]);
     expect(text).toContain("Sin novedades");

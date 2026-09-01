@@ -70,7 +70,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
         entityId: entity.id,
         entityNombre: entity.nombre,
         primeraCorrida: baseline === null,
-        hallazgos: baseline === null ? [] : parsed.hallazgos,
+        hallazgos: parsed.hallazgos,
         snapshot,
       });
     } catch (err) {
@@ -89,7 +89,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
 
   for (const r of resultados) {
     if (r.error) continue;
-    if (r.hallazgos.length > 0) await appendCambios(r.entityId, r.hallazgos, informePageId, fecha);
+    if (!r.primeraCorrida && r.hallazgos.length > 0) await appendCambios(r.entityId, r.hallazgos, informePageId, fecha);
     await writeEntityState(r.entityId, r.snapshot, chunkText);
   }
 

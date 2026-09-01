@@ -39,7 +39,7 @@ describe("runResearchCompetencia", () => {
     expect(result.informeUrl).toBe("https://notion.so/page1");
   });
 
-  it("primera corrida (sin baseline) no genera hallazgos ni filas en Cambios, aunque el agente devuelva alguno", async () => {
+  it("primera corrida (sin baseline) no genera filas en Cambios, pero sí propaga los hallazgos del agente al resultado", async () => {
     mockReadState.mockResolvedValue(null);
     mockRunAgent.mockResolvedValue('{"hallazgos":[{"dimension":"Producto","descripcion":"x","fuente":""}],"notas":""}');
     mockParseJson.mockReturnValue({ hallazgos: [{ dimension: "Producto", descripcion: "x", fuente: "" }], notas: "" });
@@ -47,7 +47,7 @@ describe("runResearchCompetencia", () => {
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
 
     expect(result.entidades[0].primeraCorrida).toBe(true);
-    expect(result.entidades[0].hallazgos).toEqual([]);
+    expect(result.entidades[0].hallazgos).toEqual([{ dimension: "Producto", descripcion: "x", fuente: "" }]);
     expect(mockAppendCambios).not.toHaveBeenCalled();
     expect(mockWriteState).toHaveBeenCalledTimes(1);
   });
