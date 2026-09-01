@@ -68,7 +68,6 @@ import { analyzePhoto, analyzePdf, notaOcrParcial } from "./tools/vision.js";
 import { buildMainMenu, cancelExpenseJunteNameInput, consumeExpenseJunteNameInput, consumeExpenseJunteSelection, handleMenuCallback, type ExpenseJunte } from "./menu.js";
 
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
-loadEnv({ path: `${process.env.HOME}/.claude/secrets/apps.env` });
 
 function requireEnv(k: string): string {
   const v = process.env[k];

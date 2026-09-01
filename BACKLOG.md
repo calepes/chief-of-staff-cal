@@ -20,7 +20,6 @@
 - [ ] **Que el coaching de salud de Jano (getHealthSummary/getHealthTrend) incluya acciones concretas para subir el HRV cuando detecte que está bajo, no solo reportar el dato**
 
 ### Surgió en sesión 2026-08-08
-- [ ] **Migrar del Spark CLI al MCP de Gmail**
 
 Reorganizado por tema (antes agrupado por fecha/sesión de origen — ver anotaciones `(YYYY-MM-DD)` en cada ítem/sub-sección para la fecha original cuando no está ya en el texto).
 - [x] **Crear tool que aprenda qué tipo de artículos/contexto le interesa más a Cal (Feedbin/Reader) para sugerir qué leer y qué marcar como leído automáticamente** — ✅ HECHO 2026-08-25: `scheduleTopicsProfileRefresh()` (domingos 19:00, sintetiza el perfil desde shortlist Reader + starred/leídos Feedbin) + `scheduleFeedbinDailyReport()` (diario 08:00, recomienda qué abrir usando ese perfil — solo sugiere, nunca marca leído). Detalle completo: `CLAUDE.md` sección "Automatización — dos capas".

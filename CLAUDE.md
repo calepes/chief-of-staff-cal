@@ -265,17 +265,25 @@ compartidas: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md` y me
   antes" en la migración de librería; Rich Messages con tablas reales confirmado por Cal el mismo
   día).
 
-## .env / secrets — carga en runtime
+## .env / secrets — carga en runtime (migrado a 1Password 2026-08-30)
 Fuente: `daemon-v2/src/index.ts`.
-1. **dotenv first-wins:** `~/.cos-agent/.env` PRIMERO → `~/.claude/secrets/apps.env`. No-override → el del agente pisa al compartido.
-2. **Validación:** críticas con `requireEnv()` (throw si faltan): `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_*`. Opcionales → `""`.
-3. **MCPs custom:** cada uno spawneado con solo sus tokens vía `mcpServers[].env` (least-privilege).
+1. **`loadEnv({ path: ~/.cos-agent/.env })` es el ÚNICO `loadEnv()`.** El segundo (`~/.claude/secrets/apps.env`, fallback compartido) se sacó del código — ya no existe. `~/.cos-agent/.env` en sí ya no tiene secretos reales (solo `OPENROUTER_MODEL`, sin uso).
+2. **launchd arranca vía wrapper, no `node` directo:** `ProgramArguments` del plist (`~/Library/LaunchAgents/com.cal.cos-agent-v2.plist`) apunta a `~/.cos-agent/run-with-1password.sh`, que corre `op run --env-file=~/.cos-agent/apps-env.1password.tpl -- node dist/index.js` — inyecta las 30 variables (9 ítems compartidos con Vesta + 21 propios de Jano) desde el vault `Daemons` de 1Password ANTES de que Node arranque. Notifica a Telegram (cooldown 30 min) si `op run` falla — **fail-loud, verificado con prueba negativa real** (sin el token del Service Account, el daemon queda en `spawn scheduled`, nunca arranca en silencio con datos vacíos).
+3. **Validación:** críticas con `requireEnv()` (throw si faltan): `CF_*`, `COS_TELEGRAM_BOT_TOKEN`, `NOTION_*`. Opcionales → `""`.
+4. **MCPs custom:** cada uno spawneado con solo sus tokens vía `mcpServers[].env` (least-privilege).
 
 | Credencial | Origen en runtime |
 |---|---|
-| API keys de servicios + bot token + Notion token | `.env` files (dotenv) |
+| API keys de servicios + bot token + Notion token | 1Password (vault `Daemons`) vía el wrapper `op run` |
 | Auth Claude/Anthropic + MCPs heredados | OAuth Max en macOS Keychain |
 | Tokens por-MCP custom | inyectados en `mcpServers[].env` |
+
+Detalle completo (inventario de los 30 ítems, mapeo variable→ítem, gotchas encontrados —
+incluidas 2 variables REALMENTE ocultas que ningún audit anterior había listado,
+`YOUTUBE_OAUTH_REFRESH_TOKEN` y `GOOGLE_BOOKS_API_KEY`, que se leían con `process.env.X` directo
+fuera del bloque `env` de `index.ts`): `Personal/Agents/HANDOFF-1password-migration.md`, sección
+"Fase 1a — Jano". Para migrar otro daemon con el mismo mecanismo, ese doc tiene el checklist
+reusable.
 
 ## Gotchas del entorno
 - **Carrera de conexión MCP no-bloqueante (`alwaysLoad`, 2026-08-02):** desde Claude Code SDK
