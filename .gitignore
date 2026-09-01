@@ -13,3 +13,4 @@ dist/
 .superpowers/
 .wrangler/
 .vscode/
+.worktrees/
