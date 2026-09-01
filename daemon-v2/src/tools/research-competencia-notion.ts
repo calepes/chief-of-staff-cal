@@ -3,6 +3,15 @@ import { CAMBIOS_DB, INFORME_DB, STATUS_PAGE_IDS } from "./research-competencia-
 import { getEntity } from "./research-competencia-entities.js";
 import type { EntitySnapshot, Hallazgo, EntityRunResult } from "./research-competencia-types.js";
 
+// ponytail: callNtn es spawnSync — cada llamada bloquea el proceso Node ENTERO (single-thread),
+// no solo esta corrida. Una corrida completa hace ~20-50 de estas llamadas (6 entidades ×
+// read/write de estado + filas de Cambios + informe). Riesgo aceptado a propósito (decisión de
+// Cal, 2026-09-01): esto corre 1x/semana + on-demand ocasional, no es un hot path, y cada
+// llamada individual es rápida (sub-segundo típico). Si algún día se vuelve fricción real
+// (Jano tarda notablemente en responder otros chats durante una corrida), migrar callNtn de
+// shared/ntn.ts a execFile async — mismo patrón que ya usa consultarJson en tools/consultar-json.ts
+// por este mismo motivo.
+
 async function replacePageBody(pageId: string, blocks: unknown[]): Promise<void> {
   const listRes = callNtn(`v1/blocks/${pageId}/children?page_size=100`);
   if (listRes.ok) {
