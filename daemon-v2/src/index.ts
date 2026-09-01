@@ -1889,14 +1889,17 @@ function scheduleHealthSyncCheck(): void {
   log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
 }
 
+// 07:05, no 07:00 — scheduleBooksDailyReport (diario) y scheduleHealthSyncCheck (cada 30min
+// 7-22h) ya disparan justo a las 07:00; correr este lunes a la misma hora amontonaría 3
+// mensajes de Telegram en la misma ventana (este es el más pesado: agente SDK + Notion).
 function scheduleResearchCompetenciaWeekly(): void {
-  cron.schedule("0 7 * * 1", () => {
+  cron.schedule("5 7 * * 1", () => {
     void checkResearchCompetenciaWeekly({
       botToken: env.COS_TELEGRAM_BOT_TOKEN,
       chatId: ALERT_CHAT_ID,
     }).catch((err) => log({ msg: "research_competencia_weekly_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
-  log({ msg: "research_competencia_weekly_scheduled", interval: "monday 07:00" });
+  log({ msg: "research_competencia_weekly_scheduled", interval: "monday 07:05" });
 }
 
 function scheduleBooksDailyReport(): void {

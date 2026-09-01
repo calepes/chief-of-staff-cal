@@ -16,7 +16,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
   const fecha = nowInLaPaz().slice(0, 10);
 
   const resultados: EntityRunResult[] = [];
-  // Cada entidad dispara un agente SDK one-off (maxTurns:8, WebSearch) — en una prueba real gastó
+  // Cada entidad dispara un agente SDK one-off (maxTurns:12, WebSearch) — en una prueba real gastó
   // ~6 WebSearch + 2 WebFetch; con 6 entidades por corrida son ~48+ tool calls por corrida semanal.
   for (const entityId of targetIds) {
     let entity;
@@ -47,6 +47,10 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
       };
       const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
       const raw = await runEntityAgent(prompt);
+      // raw vacío = el agente cortó por maxTurns sin emitir result/success (nunca tiró
+      // excepción) — tratarlo como "sin hallazgos" lo confundiría con una semana sin
+      // novedades. Error explícito, para que se vea en "⚠️ Falló" en vez de perderse.
+      if (!raw.trim()) throw new Error("El agente no devolvió resultado (posible corte por maxTurns)");
       const parsed = parseAgentJson(raw);
 
       const snapshot = {

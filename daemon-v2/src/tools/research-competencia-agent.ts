@@ -64,16 +64,25 @@ export function parseAgentJson(text: string): AgentResponse {
   }
 }
 
+// maxTurns:12 (no 8) — una prueba real ya gastó 6 WebSearch + 2 WebFetch = 8 turnos exactos
+// para UNA entidad; sin margen, la próxima corrida que necesite una búsqueda más corta por
+// max-turns SIN emitir el evento result/success, y runEntityAgent devuelve "" en silencio
+// (ver research-competencia.ts: un raw vacío se trata como error explícito, no como "sin
+// hallazgos" — así este corte no se confunde con una semana tranquila).
 export async function runEntityAgent(prompt: string): Promise<string> {
   const handle = await startup({
-    options: { model: "claude-sonnet-5", maxTurns: 8, allowedTools: ["WebSearch"] },
+    options: { model: "claude-sonnet-5", maxTurns: 12, allowedTools: ["WebSearch"] },
   });
-  let result = "";
-  for await (const event of handle.query(prompt)) {
-    if ((event as { type?: string }).type === "result" && (event as { subtype?: string }).subtype === "success") {
-      result = (event as { result?: string }).result ?? "";
-      break;
+  try {
+    let result = "";
+    for await (const event of handle.query(prompt)) {
+      if ((event as { type?: string }).type === "result" && (event as { subtype?: string }).subtype === "success") {
+        result = (event as { result?: string }).result ?? "";
+        break;
+      }
     }
+    return result;
+  } finally {
+    handle.close();
   }
-  return result;
 }

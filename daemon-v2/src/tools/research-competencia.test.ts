@@ -74,6 +74,16 @@ describe("runResearchCompetencia", () => {
     expect(result.entidades[1].error).toBeUndefined();
   });
 
+  it("raw vacío del agente (corte por maxTurns) se marca como error, no como sin hallazgos", async () => {
+    mockRunAgent.mockResolvedValueOnce("");
+
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+
+    expect(result.entidades[0].error).toContain("maxTurns");
+    expect(result.entidades[0].hallazgos).toEqual([]);
+    expect(mockParseJson).not.toHaveBeenCalled();
+  });
+
   it("un id inválido en entidadIds no rompe la corrida completa, otras entidades sí se procesan", async () => {
     const result = await runResearchCompetencia({ entidadIds: ["ganadero", "takenos"] });
 
