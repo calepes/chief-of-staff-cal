@@ -8,11 +8,11 @@ interface DbCreateResult {
   data_sources: Array<{ id: string }>;
 }
 
-interface SearchResult {
-  object: string;
+interface ChildBlock {
   id: string;
-  parent?: { page_id?: string; type?: string };
-  title?: Array<{ plain_text?: string }>;
+  type: string;
+  child_database?: { title?: string };
+  child_page?: { title?: string };
 }
 
 function must<T>(res: { ok: boolean; data?: T; error?: string }, label: string): T {
@@ -23,33 +23,53 @@ function must<T>(res: { ok: boolean; data?: T; error?: string }, label: string):
   return res.data;
 }
 
-async function findExistingByTitle(title: string, objectType: "database" | "page"): Promise<SearchResult | null> {
-  const res = callNtn("v1/search", {
-    method: "POST",
-    body: {
-      query: title,
-      filter: { value: objectType, property: "object" },
-    },
-  });
-  const search = must<{ results: SearchResult[] }>(res, `buscar ${objectType} existente`);
+/**
+ * Lista los hijos directos de YAPE_BOLIVIA_PAGE_ID (paginado).
+ *
+ * Deliberadamente NO usa `/v1/search` para chequear idempotencia: el índice
+ * de búsqueda de Notion tiene demora real en indexar contenido recién creado
+ * (confirmado en vivo 2026-09-01 — un segundo run del script, segundos
+ * después del primero, no encontró nada por `search` y creó TODO duplicado).
+ * Listar los children de la página sí es consistente al instante — es una
+ * lectura directa del árbol de bloques, no un índice separado.
+ */
+async function listYapeBoliviaChildren(): Promise<ChildBlock[]> {
+  const children: ChildBlock[] = [];
+  let cursor: string | undefined;
+  do {
+    const path = cursor
+      ? `v1/blocks/${YAPE_BOLIVIA_PAGE_ID}/children?page_size=100&start_cursor=${cursor}`
+      : `v1/blocks/${YAPE_BOLIVIA_PAGE_ID}/children?page_size=100`;
+    const res = callNtn(path);
+    const page = must<{ results: ChildBlock[]; has_more: boolean; next_cursor: string | null }>(
+      res,
+      "listar hijos de la página Yape Bolivia",
+    );
+    children.push(...page.results);
+    cursor = page.has_more ? page.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  return children;
+}
 
-  // Filtrar por título exacto bajo YAPE_BOLIVIA_PAGE_ID
-  const match = search.results.find(
-    (r) =>
-      r.object === objectType &&
-      r.title?.[0]?.plain_text === title &&
-      (objectType === "database" || r.parent?.page_id === YAPE_BOLIVIA_PAGE_ID)
-  );
+async function findExistingDb(children: ChildBlock[], title: string): Promise<DbCreateResult | null> {
+  const match = children.find((c) => c.type === "child_database" && c.child_database?.title === title);
+  if (!match) return null;
+  return must<DbCreateResult>(callNtn(`v1/databases/${match.id}`), `releer DB existente (${title})`);
+}
 
-  return match || null;
+function findExistingPage(children: ChildBlock[], title: string): { id: string } | null {
+  const match = children.find((c) => c.type === "child_page" && c.child_page?.title === title);
+  return match ? { id: match.id } : null;
 }
 
 async function main(): Promise<void> {
+  const children = await listYapeBoliviaChildren();
+
   console.log("Procesando DB 'Competencia — Cambios'...");
   let cambios: DbCreateResult;
-  const existingCambios = await findExistingByTitle("Competencia — Cambios", "database");
+  const existingCambios = await findExistingDb(children, "Competencia — Cambios");
   if (existingCambios) {
-    cambios = must<DbCreateResult>(callNtn(`v1/databases/${existingCambios.id}`), "releer DB Cambios existente");
+    cambios = existingCambios;
     console.log(`↩️ Ya existe: db=${cambios.id} ds=${cambios.data_sources[0].id}`);
   } else {
     const cambiosRes = callNtn("v1/databases", {
@@ -76,9 +96,9 @@ async function main(): Promise<void> {
 
   console.log("Procesando DB 'Informe Análisis Competencia'...");
   let informe: DbCreateResult;
-  const existingInforme = await findExistingByTitle("Informe Análisis Competencia", "database");
+  const existingInforme = await findExistingDb(children, "Informe Análisis Competencia");
   if (existingInforme) {
-    informe = must<DbCreateResult>(callNtn(`v1/databases/${existingInforme.id}`), "releer DB Informe existente");
+    informe = existingInforme;
     console.log(`↩️ Ya existe: db=${informe.id} ds=${informe.data_sources[0].id}`);
   } else {
     const informeRes = callNtn("v1/databases", {
@@ -104,7 +124,7 @@ async function main(): Promise<void> {
   const statusPageIds: Record<string, string> = {};
   for (const entity of ENTITIES) {
     const pageTitle = `Estado — ${entity.nombre}`;
-    const existingPage = await findExistingByTitle(pageTitle, "page");
+    const existingPage = findExistingPage(children, pageTitle);
     if (existingPage) {
       console.log(`↩️ ${entity.nombre}: ${existingPage.id}`);
       statusPageIds[entity.id] = existingPage.id;
