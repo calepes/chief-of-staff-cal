@@ -42,6 +42,7 @@ import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
 import { checkKpiCardLending } from "./proactive/kpi-card-lending-daily.js";
 import { fillDerivedFields } from "./proactive/kpi-ingest-notion.js";
+import { runResearchCompetencia, formatSummaryHtml } from "./tools/research-competencia.js";
 import {
   searchBooks,
   addBook,
@@ -596,6 +597,29 @@ export function buildSdkTools(deps: ToolDeps) {
         } catch (err) {
           return asText({ status: "error", error: String(err) });
         }
+      },
+    ),
+    tool(
+      "investigarCompetencia",
+      [
+        "Corre el research de competencia de Yape Bolivia (apps, sitios, prensa y LinkedIn de Banco Sol/Altoke, Banco Ganadero/Yolo Pago, Banco Económico/ZAS, Takenos, Meru y Peso App) y guarda el resultado en Notion (changelog + snapshot de estado + informe completo por corrida).",
+        "Puede tardar 1-3 minutos (hace varias búsquedas web por entidad) — avisale a Cal que puede demorar antes de invocarla.",
+        "Úsalo cuando Cal pida el research de competencia on-demand: 'corre el research de los últimos N días', 'investigá a la competencia', 'quiero el análisis de competencia de esta semana', etc.",
+        "Args: { timeframeDias?: number (default 7), entidades?: string[] } — entidades es una lista de ids: bancosol-altoke, ganadero-yolopago, economico-zas, takenos, meru, peso-app. Sin especificar, corre las 6.",
+        "Tras invocar, mostrale a Cal el 'resumen' que devuelve la tool (ya viene formateado) y el link al informe completo — no inventes hallazgos que no estén en el resultado.",
+      ].join(" "),
+      {
+        timeframeDias: z.number().int().positive().max(90).optional(),
+        entidades: z.array(z.string()).optional(),
+      },
+      async ({ timeframeDias, entidades }) => {
+        const result = await runResearchCompetencia({ timeframeDias, entidadIds: entidades });
+        return asText({
+          status: "done",
+          totalHallazgos: result.totalHallazgos,
+          informeUrl: result.informeUrl,
+          resumen: formatSummaryHtml(result),
+        });
       },
     ),
     tool(

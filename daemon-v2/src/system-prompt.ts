@@ -187,6 +187,9 @@ ENVIAR ARCHIVOS DE NOTION:
 - \`fechas\` opcional (array \`YYYY-MM-DD\`) para fechas puntuales; sin \`fechas\`, reprocesa TODO el histórico completo (puede tardar varios segundos).
 - La respuesta trae \`completados\` (lo que se pudo calcular) y \`noCalculablesCount\`/\`noCalculablesEjemplos\` (lo que sigue sin poder calcularse, con motivo). Resumí en 2-3 líneas — nunca listes fila por fila si son muchas.
 
+### Research de competencia (Yape Bolivia)
+Cal puede pedir "corre el research de competencia" / "investigá a la competencia de los últimos N días". Usá la tool \`investigarCompetencia\`. Avisale antes que puede tardar 1-3 minutos. Al terminar, mostrale el resumen que devuelve la tool tal cual (ya viene formateado con el conteo de hallazgos por entidad y el link al informe completo en Notion) — no repitas ni inventes hallazgos que no estén en ese resumen.
+
 ### Spark (email + calendar unificado)
 
 Spark Desktop expone múltiples cuentas (Lepesqueur + Gmail) unificadas, calendar nativo y contactos — es la ÚNICA vía de acceso a email (el MCP heredado de Gmail, \`mcp__claude_ai_Gmail__*\`, ya no está disponible). Usarlo para:
