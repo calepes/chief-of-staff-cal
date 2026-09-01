@@ -39,6 +39,7 @@ import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
 import { checkBooksDailyReport } from "./proactive/books-daily-report.js";
+import { checkResearchCompetenciaWeekly } from "./proactive/research-competencia-weekly.js";
 import { checkFeedbinDailyReport } from "./proactive/feedbin-daily-report.js";
 import { refreshTopicsProfile } from "./proactive/topics-profile-refresh.js";
 import { checkLluvia } from "./proactive/lluvia-check.js";
@@ -1888,6 +1889,16 @@ function scheduleHealthSyncCheck(): void {
   log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
 }
 
+function scheduleResearchCompetenciaWeekly(): void {
+  cron.schedule("0 7 * * 1", () => {
+    void checkResearchCompetenciaWeekly({
+      botToken: env.COS_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_CHAT_ID,
+    }).catch((err) => log({ msg: "research_competencia_weekly_unhandled_error", err: String(err) }));
+  }, { timezone: "America/La_Paz" });
+  log({ msg: "research_competencia_weekly_scheduled", interval: "monday 07:00" });
+}
+
 function scheduleBooksDailyReport(): void {
   cron.schedule("0 7 * * *", () => {
     void checkBooksDailyReport({
@@ -2137,6 +2148,7 @@ async function loop(): Promise<void> {
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
   scheduleBooksDailyReport();
+  scheduleResearchCompetenciaWeekly();
   scheduleFeedbinDailyReport();
   scheduleTopicsProfileRefresh();
   scheduleLluviaCheck();
