@@ -11,14 +11,20 @@ async function replacePageBody(pageId: string, blocks: unknown[]): Promise<void>
       callNtn(`v1/blocks/${block.id}`, { method: "DELETE" });
     }
   }
-  callNtn(`v1/blocks/${pageId}/children`, { method: "PATCH", body: { children: blocks } });
+  const appendRes = callNtn(`v1/blocks/${pageId}/children`, { method: "PATCH", body: { children: blocks } });
+  if (!appendRes.ok) {
+    throw new Error(`No se pudo escribir el contenido de la página ${pageId}: ${appendRes.error}`);
+  }
 }
 
-function codeBlock(json: string): unknown {
+function codeBlock(json: string, chunkFn: (t: string, n: number) => string[]): unknown {
   return {
     object: "block",
     type: "code",
-    code: { language: "json", rich_text: [{ type: "text", text: { content: json.slice(0, 2000) } }] },
+    code: {
+      language: "json",
+      rich_text: chunkFn(json, 2000).map((chunk) => ({ type: "text", text: { content: chunk } })),
+    },
   };
 }
 
@@ -48,10 +54,14 @@ export async function readEntityState(entityId: string): Promise<EntitySnapshot 
   }
 }
 
-export async function writeEntityState(entityId: string, snapshot: EntitySnapshot): Promise<void> {
+export async function writeEntityState(
+  entityId: string,
+  snapshot: EntitySnapshot,
+  chunkFn: (t: string, n: number) => string[],
+): Promise<void> {
   const pageId = STATUS_PAGE_IDS[entityId];
   if (!pageId) throw new Error(`Sin página de estado para ${entityId}`);
-  await replacePageBody(pageId, [codeBlock(JSON.stringify(snapshot, null, 2))]);
+  await replacePageBody(pageId, [codeBlock(JSON.stringify(snapshot, null, 2), chunkFn)]);
 }
 
 export async function appendCambios(
@@ -61,8 +71,10 @@ export async function appendCambios(
   fecha: string,
 ): Promise<void> {
   const entity = getEntity(entityId);
+  const failures: string[] = [];
+  let written = 0;
   for (const h of hallazgos) {
-    callNtn("v1/pages", {
+    const res = callNtn("v1/pages", {
       method: "POST",
       body: {
         parent: { database_id: CAMBIOS_DB },
@@ -77,6 +89,16 @@ export async function appendCambios(
         },
       },
     });
+    if (!res.ok) {
+      failures.push(`"${h.descripcion.slice(0, 60)}": ${res.error}`);
+    } else {
+      written++;
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `appendCambios: ${written}/${hallazgos.length} hallazgos escritos, ${failures.length} fallaron — ${failures.join(" | ")}`,
+    );
   }
 }
 
