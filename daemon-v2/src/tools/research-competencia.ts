@@ -12,13 +12,27 @@ export interface RunOpts {
 
 export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunResult> {
   const timeframeDias = opts.timeframeDias ?? 7;
-  const targets = opts.entidadIds?.length ? opts.entidadIds.map((id) => getEntity(id)) : ENTITIES;
+  const targetIds = opts.entidadIds?.length ? opts.entidadIds : ENTITIES.map((e) => e.id);
   const fecha = nowInLaPaz().slice(0, 10);
 
   const resultados: EntityRunResult[] = [];
   // Cada entidad dispara un agente SDK one-off (maxTurns:8, WebSearch) — en una prueba real gastó
   // ~6 WebSearch + 2 WebFetch; con 6 entidades por corrida son ~48+ tool calls por corrida semanal.
-  for (const entity of targets) {
+  for (const entityId of targetIds) {
+    let entity;
+    try {
+      entity = getEntity(entityId);
+    } catch (err) {
+      resultados.push({
+        entityId,
+        entityNombre: entityId,
+        primeraCorrida: false,
+        hallazgos: [],
+        snapshot: { entityId, updatedAt: new Date().toISOString() },
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
     try {
       const baseline = await readEntityState(entity.id);
       const [ios, android, siteText] = await Promise.all([
@@ -88,6 +102,10 @@ export function formatSummaryHtml(result: RunResult): string {
     for (const e of result.entidades) {
       if (e.hallazgos.length > 0) lines.push(`• <b>${e.entityNombre}</b> — ${e.hallazgos.length}`);
     }
+  }
+  const primeraCorrida = result.entidades.filter((e) => e.primeraCorrida);
+  if (primeraCorrida.length > 0) {
+    lines.push(`🆕 ${primeraCorrida.length} primera corrida — sin comparación todavía: ${primeraCorrida.map((e) => e.entityNombre).join(", ")}`);
   }
   const errores = result.entidades.filter((e) => e.error);
   if (errores.length > 0) lines.push(`⚠️ Falló: ${errores.map((e) => e.entityNombre).join(", ")}`);

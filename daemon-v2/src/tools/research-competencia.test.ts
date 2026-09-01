@@ -73,6 +73,16 @@ describe("runResearchCompetencia", () => {
     expect(result.entidades[0].error).toBe("boom");
     expect(result.entidades[1].error).toBeUndefined();
   });
+
+  it("un id inválido en entidadIds no rompe la corrida completa, otras entidades sí se procesan", async () => {
+    const result = await runResearchCompetencia({ entidadIds: ["ganadero", "takenos"] });
+
+    expect(result.entidades).toHaveLength(2);
+    expect(result.entidades[0].entityId).toBe("ganadero");
+    expect(result.entidades[0].error).toContain("Entidad desconocida: ganadero");
+    expect(result.entidades[1].entityId).toBe("takenos");
+    expect(result.entidades[1].error).toBeUndefined();
+  });
 });
 
 describe("formatSummaryHtml", () => {
@@ -84,5 +94,18 @@ describe("formatSummaryHtml", () => {
   it("incluye el link al informe cuando existe", () => {
     const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, informeUrl: "https://notion.so/x" });
     expect(html).toContain("https://notion.so/x");
+  });
+
+  it("distingue primera corrida (sin comparación) de sin novedades", () => {
+    const html = formatSummaryHtml({
+      fecha: "2026-08-31",
+      timeframeDias: 7,
+      totalHallazgos: 0,
+      entidades: [
+        { entityId: "takenos", entityNombre: "Takenos", primeraCorrida: true, hallazgos: [], snapshot: { entityId: "takenos", updatedAt: "" } },
+      ],
+    });
+    expect(html).toContain("primera corrida");
+    expect(html).toContain("Takenos");
   });
 });
