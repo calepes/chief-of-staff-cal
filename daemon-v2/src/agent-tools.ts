@@ -43,6 +43,7 @@ import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
 import { checkKpiCardLending } from "./proactive/kpi-card-lending-daily.js";
 import { fillDerivedFields } from "./proactive/kpi-ingest-notion.js";
 import { runResearchCompetencia, formatSummaryHtml } from "./tools/research-competencia.js";
+import { sendCronMessage } from "./proactive/rich-send.js";
 import {
   searchBooks,
   addBook,
@@ -602,23 +603,38 @@ export function buildSdkTools(deps: ToolDeps) {
     tool(
       "investigarCompetencia",
       [
-        "Corre el research de competencia de Yape Bolivia (apps, sitios, prensa y LinkedIn de Banco Sol/Altoke, Banco Ganadero/Yolo Pago, Banco Económico/ZAS, Takenos, Meru y Peso App) y guarda el resultado en Notion (changelog + snapshot de estado + informe completo por corrida).",
-        "Puede tardar 1-3 minutos (hace varias búsquedas web por entidad) — avisale a Cal que puede demorar antes de invocarla.",
+        "ARRANCA en background el research de competencia de Yape Bolivia (apps, sitios, prensa y LinkedIn de Banco Sol/Altoke, Banco Ganadero/Yolo Pago, Banco Económico/ZAS, Takenos, Meru y Peso App) y guarda el resultado en Notion (changelog + snapshot de estado + informe completo por corrida).",
+        "Tarda 1-3 minutos (varias búsquedas web por entidad) — por eso esta tool devuelve YA MISMO, sin esperar el resultado. El resumen (con conteo de hallazgos por entidad y el link al informe completo) le llega a Cal solo, como MENSAJE NUEVO, cuando termine.",
         "Úsalo cuando Cal pida el research de competencia on-demand: 'corre el research de los últimos N días', 'investigá a la competencia', 'quiero el análisis de competencia de esta semana', etc.",
         "Args: { timeframeDias?: number (default 7), entidades?: string[] } — entidades es una lista de ids: bancosol-altoke, ganadero-yolopago, economico-zas, takenos, meru, peso-app. Sin especificar, corre las 6.",
-        "Tras invocar, mostrale a Cal el 'resumen' que devuelve la tool (ya viene formateado) y el link al informe completo — no inventes hallazgos que no estén en el resultado.",
+        "Tras invocar (status:'started'), confirmá a Cal en UNA línea que el research arrancó y que el resumen le llega en 1-3 min. NO esperes ni inventes resultados en este turno — el resumen real (o el error, si algo falla) llega solo, después, como mensaje aparte.",
       ].join(" "),
       {
         timeframeDias: z.number().int().positive().max(90).optional(),
-        entidades: z.array(z.string()).optional(),
+        entidades: z
+          .array(z.enum(["bancosol-altoke", "ganadero-yolopago", "economico-zas", "takenos", "meru", "peso-app"]))
+          .optional(),
       },
       async ({ timeframeDias, entidades }) => {
-        const result = await runResearchCompetencia({ timeframeDias, entidadIds: entidades });
+        const chatId = deps.getCurrentChatId?.();
+        const botToken = deps.botToken;
+        if (!chatId || !botToken) return asText({ status: "error", error: "No chatId/token disponible" });
+        // Fire-and-forget: la corrida tarda 1-3 min (varias búsquedas web por entidad) y
+        // awaitearla acá congelaría el loop secuencial del daemon (todos los chats) — mismo
+        // patrón que resumirContenido en tools/resumir.ts. El resultado (o el error) se manda
+        // como mensaje NUEVO al chatId capturado ahora, no dentro del .then() (el chat activo
+        // puede cambiar antes de que termine).
+        void runResearchCompetencia({ timeframeDias, entidadIds: entidades })
+          .then((result) => sendCronMessage(botToken, { chatId, text: formatSummaryHtml(result) }))
+          .catch((err) => {
+            void sendCronMessage(botToken, {
+              chatId,
+              text: `❌ Error corriendo el research de competencia (${String(err)}).`,
+            }).catch(() => {});
+          });
         return asText({
-          status: "done",
-          totalHallazgos: result.totalHallazgos,
-          informeUrl: result.informeUrl,
-          resumen: formatSummaryHtml(result),
+          status: "started",
+          message: "Research de competencia arrancado en background; el resumen le llega a Cal en 1-3 min como mensaje nuevo.",
         });
       },
     ),
