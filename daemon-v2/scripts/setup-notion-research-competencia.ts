@@ -62,6 +62,27 @@ function findExistingPage(children: ChildBlock[], title: string): { id: string }
   return match ? { id: match.id } : null;
 }
 
+/**
+ * Agrega/renombra properties sobre una data source YA creada.
+ *
+ * Descubierto en vivo el 2026-09-01, con la Notion real de Cal: el modelo
+ * multi-data-source de la API de Notion IGNORA en silencio (sin error) el
+ * campo `properties` tanto en `POST /v1/databases` (creación) como en
+ * `PATCH /v1/databases/{id}` — las columnas reales de una DB viven en el
+ * objeto `data_source`, no en el objeto `database`. Solo `PATCH
+ * /v1/data_sources/{ds_id}` con `properties` funciona. Confirmado creando
+ * "Competencia — Cambios"/"Informe Análisis Competencia" con properties
+ * inline (0 de 6/5 quedaron, solo el título default "Name" sobrevivió) y
+ * arreglándolo después con este mismo mecanismo.
+ *
+ * Para renombrar el título default ("Name") se usa el nombre ACTUAL como key
+ * con un `name` nuevo — no se puede crear una SEGUNDA property `title`.
+ */
+function patchDataSourceProperties(dsId: string, properties: Record<string, unknown>, label: string): void {
+  const res = callNtn(`v1/data_sources/${dsId}`, { method: "PATCH", body: { properties } });
+  must(res, `agregar properties a ${label}`);
+}
+
 async function main(): Promise<void> {
   const children = await listYapeBoliviaChildren();
 
@@ -78,19 +99,23 @@ async function main(): Promise<void> {
         parent: { type: "page_id", page_id: YAPE_BOLIVIA_PAGE_ID },
         is_inline: false,
         title: [{ type: "text", text: { content: "Competencia — Cambios" } }],
-        properties: {
-          Hallazgo: { title: {} },
-          Entidad: { select: { options: ENTITIES.map((e) => ({ name: e.nombre })) } },
-          "Dimensión": {
-            select: { options: [{ name: "Producto" }, { name: "Estrategia" }, { name: "GTM" }, { name: "Hiring" }] },
-          },
-          Fecha: { date: {} },
-          "Descripción": { rich_text: {} },
-          Fuente: { url: {} },
-        },
       },
     });
     cambios = must<DbCreateResult>(cambiosRes, "crear DB Cambios");
+    patchDataSourceProperties(
+      cambios.data_sources[0].id,
+      {
+        Name: { name: "Hallazgo" },
+        Entidad: { select: { options: ENTITIES.map((e) => ({ name: e.nombre })) } },
+        "Dimensión": {
+          select: { options: [{ name: "Producto" }, { name: "Estrategia" }, { name: "GTM" }, { name: "Hiring" }] },
+        },
+        Fecha: { date: {} },
+        "Descripción": { rich_text: {} },
+        Fuente: { url: {} },
+      },
+      "Competencia — Cambios",
+    );
     console.log(`✅ Cambios: db=${cambios.id} ds=${cambios.data_sources[0].id}`);
   }
 
@@ -107,18 +132,30 @@ async function main(): Promise<void> {
         parent: { type: "page_id", page_id: YAPE_BOLIVIA_PAGE_ID },
         is_inline: false,
         title: [{ type: "text", text: { content: "Informe Análisis Competencia" } }],
-        properties: {
-          Informe: { title: {} },
-          Fecha: { date: {} },
-          "Timeframe (días)": { number: {} },
-          "Entidades incluidas": { rich_text: {} },
-          Hallazgos: { number: {} },
-        },
       },
     });
     informe = must<DbCreateResult>(informeRes, "crear DB Informe");
+    patchDataSourceProperties(
+      informe.data_sources[0].id,
+      {
+        Name: { name: "Informe" },
+        Fecha: { date: {} },
+        "Timeframe (días)": { number: {} },
+        "Entidades incluidas": { rich_text: {} },
+        Hallazgos: { number: {} },
+      },
+      "Informe Análisis Competencia",
+    );
     console.log(`✅ Informe: db=${informe.id} ds=${informe.data_sources[0].id}`);
   }
+
+  console.log("Asegurando relation 'Corrida' (Cambios → Informe)...");
+  patchDataSourceProperties(
+    cambios.data_sources[0].id,
+    { Corrida: { relation: { data_source_id: informe.data_sources[0].id, type: "dual_property", dual_property: {} } } },
+    "relation Corrida",
+  );
+  console.log("✅ Corrida lista");
 
   console.log("Procesando 6 páginas de estado...");
   const statusPageIds: Record<string, string> = {};
