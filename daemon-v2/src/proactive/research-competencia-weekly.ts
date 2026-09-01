@@ -7,11 +7,18 @@ export interface ResearchCompetenciaWeeklyOpts {
 }
 
 export async function checkResearchCompetenciaWeekly(opts: ResearchCompetenciaWeeklyOpts): Promise<void> {
+  let result;
   try {
-    const result = await runResearchCompetencia({ timeframeDias: 7 });
+    result = await runResearchCompetencia({ timeframeDias: 7 });
+  } catch (err) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_weekly_run_failed", err: String(err) }));
+    return;
+  }
+
+  try {
     await sendCronMessage(opts.botToken, { chatId: opts.chatId, text: formatSummaryHtml(result) });
     console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_weekly_sent", totalHallazgos: result.totalHallazgos }));
   } catch (err) {
-    console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_weekly_failed", err: String(err) }));
+    console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_weekly_send_failed", err: String(err) }));
   }
 }
