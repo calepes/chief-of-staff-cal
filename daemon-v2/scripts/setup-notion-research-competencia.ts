@@ -49,8 +49,8 @@ async function main(): Promise<void> {
   let cambios: DbCreateResult;
   const existingCambios = await findExistingByTitle("Competencia — Cambios", "database");
   if (existingCambios) {
-    console.log(`↩️ Ya existe: db=${existingCambios.id}`);
-    cambios = existingCambios as DbCreateResult;
+    cambios = must<DbCreateResult>(callNtn(`v1/databases/${existingCambios.id}`), "releer DB Cambios existente");
+    console.log(`↩️ Ya existe: db=${cambios.id} ds=${cambios.data_sources[0].id}`);
   } else {
     const cambiosRes = callNtn("v1/databases", {
       method: "POST",
@@ -78,8 +78,8 @@ async function main(): Promise<void> {
   let informe: DbCreateResult;
   const existingInforme = await findExistingByTitle("Informe Análisis Competencia", "database");
   if (existingInforme) {
-    console.log(`↩️ Ya existe: db=${existingInforme.id}`);
-    informe = existingInforme as DbCreateResult;
+    informe = must<DbCreateResult>(callNtn(`v1/databases/${existingInforme.id}`), "releer DB Informe existente");
+    console.log(`↩️ Ya existe: db=${informe.id} ds=${informe.data_sources[0].id}`);
   } else {
     const informeRes = callNtn("v1/databases", {
       method: "POST",
