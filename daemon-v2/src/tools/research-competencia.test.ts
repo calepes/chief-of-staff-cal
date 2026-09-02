@@ -42,7 +42,11 @@ describe("runResearchCompetencia", () => {
   it("primera corrida (sin baseline) no genera filas en Cambios, pero sí propaga los hallazgos del agente al resultado", async () => {
     mockReadState.mockResolvedValue(null);
     mockRunAgent.mockResolvedValue('{"hallazgos":[{"dimension":"Producto","descripcion":"x","fuente":""}],"notas":""}');
-    mockParseJson.mockReturnValue({ hallazgos: [{ dimension: "Producto", descripcion: "x", fuente: "" }], notas: "" });
+    mockParseJson.mockReturnValue({
+      hallazgos: [{ dimension: "Producto", descripcion: "x", fuente: "" }],
+      notas: "",
+      battlecard: { resumen: "", fortalezas: [], debilidades: [], amenaza: "media" },
+    });
 
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
 
@@ -55,13 +59,18 @@ describe("runResearchCompetencia", () => {
   it("corrida normal (con baseline) sí propaga los hallazgos del agente", async () => {
     mockReadState.mockResolvedValue({ entityId: "takenos", updatedAt: "2026-08-01T00:00:00Z" });
     mockRunAgent.mockResolvedValue('{"hallazgos":[{"dimension":"GTM","descripcion":"promo nueva","fuente":"https://x.com"}],"notas":""}');
-    mockParseJson.mockReturnValue({ hallazgos: [{ dimension: "GTM", descripcion: "promo nueva", fuente: "https://x.com" }], notas: "" });
+    mockParseJson.mockReturnValue({
+      hallazgos: [{ dimension: "GTM", descripcion: "promo nueva", fuente: "https://x.com" }],
+      notas: "",
+      battlecard: { resumen: "Crece rápido", fortalezas: [{ texto: "multi-moneda", fuente: "https://x.com" }], debilidades: [], amenaza: "alta" },
+    });
 
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
 
     expect(result.entidades[0].hallazgos).toHaveLength(1);
     expect(mockAppendCambios).toHaveBeenCalledWith("takenos", result.entidades[0].hallazgos, "page1", result.fecha);
     expect(result.totalHallazgos).toBe(1);
+    expect(result.entidades[0].snapshot.battlecard).toEqual({ resumen: "Crece rápido", fortalezas: [{ texto: "multi-moneda", fuente: "https://x.com" }], debilidades: [], amenaza: "alta" });
   });
 
   it("una entidad que falla no interrumpe a las demás", async () => {

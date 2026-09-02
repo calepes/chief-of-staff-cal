@@ -1,7 +1,31 @@
 import { callNtn } from "../shared/ntn.js";
 import { CAMBIOS_DB, INFORME_DB, STATUS_PAGE_IDS } from "./research-competencia-ids.js";
 import { getEntity } from "./research-competencia-entities.js";
-import type { EntitySnapshot, Hallazgo, EntityRunResult } from "./research-competencia-types.js";
+import type { BattlecardPunto, EntitySnapshot, Hallazgo, EntityRunResult } from "./research-competencia-types.js";
+
+// Igual patrón que hallazgoBullet: si el punto trae fuente, aparece como hipervínculo real —
+// permite verificar de dónde salió cada fortaleza/debilidad en vez de confiar a ciegas.
+function puntoBullet(p: BattlecardPunto): unknown {
+  const rich_text: unknown[] = [{ type: "text", text: { content: p.texto } }];
+  if (p.fuente) {
+    rich_text.push({ type: "text", text: { content: " " } });
+    rich_text.push({ type: "text", text: { content: "(fuente)", link: { url: p.fuente } } });
+  }
+  return { object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text } };
+}
+
+function amenazaParagraph(amenaza: string): unknown {
+  return {
+    object: "block",
+    type: "paragraph",
+    paragraph: {
+      rich_text: [
+        { type: "text", text: { content: "Amenaza: " }, annotations: { bold: true } },
+        { type: "text", text: { content: amenaza } },
+      ],
+    },
+  };
+}
 
 // ponytail: callNtn es spawnSync — cada llamada bloquea el proceso Node ENTERO (single-thread),
 // no solo esta corrida. Una corrida completa hace ~20-50 de estas llamadas (6 entidades ×
@@ -37,18 +61,44 @@ function codeBlock(json: string, chunkFn: (t: string, n: number) => string[]): u
   };
 }
 
-function paragraphBlocks(text: string, chunkFn: (t: string, n: number) => string[]): unknown[] {
-  return chunkFn(text, 1900).map((chunk) => ({
+function paragraphBlock(text: string, italic = false): unknown {
+  return {
     object: "block",
     type: "paragraph",
-    paragraph: { rich_text: [{ type: "text", text: { content: chunk } }] },
-  }));
+    paragraph: { rich_text: [{ type: "text", text: { content: text }, annotations: { italic } }] },
+  };
+}
+
+function headingBlock(text: string): unknown {
+  return {
+    object: "block",
+    type: "heading_3",
+    heading_3: { rich_text: [{ type: "text", text: { content: text } }] },
+  };
+}
+
+// Cada hallazgo es un bullet con la dimensión en negrita y la fuente como hipervínculo real
+// (no una URL pegada como texto) — pedido de Cal 2026-09-01 tras ver el informe como texto plano.
+function hallazgoBullet(h: Hallazgo): unknown {
+  const rich_text: unknown[] = [
+    { type: "text", text: { content: `${h.dimension}: ` }, annotations: { bold: true } },
+    { type: "text", text: { content: h.descripcion.slice(0, 1900) } },
+  ];
+  if (h.fuente) {
+    rich_text.push({ type: "text", text: { content: " " } });
+    rich_text.push({ type: "text", text: { content: "(fuente)", link: { url: h.fuente } } });
+  }
+  return { object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text } };
 }
 
 export async function readEntityState(entityId: string): Promise<EntitySnapshot | null> {
   const pageId = STATUS_PAGE_IDS[entityId];
   if (!pageId) throw new Error(`Sin página de estado para ${entityId}`);
-  const res = callNtn(`v1/blocks/${pageId}/children?page_size=10`);
+  // page_size=100 (no 10): el battlecard antepone varios bloques (heading/paragraphs/bullets)
+  // antes del code block con el JSON real — con page_size=10 el code block podía quedar fuera
+  // de la primera página y el baseline se perdía en silencio (encontrado 2026-09-01, una entidad
+  // con baseline real volvió a reportar "primera corrida").
+  const res = callNtn(`v1/blocks/${pageId}/children?page_size=100`);
   if (!res.ok) return null;
   const data = res.data as {
     results?: Array<{ type?: string; code?: { rich_text?: Array<{ plain_text?: string }> } }>;
@@ -63,6 +113,24 @@ export async function readEntityState(entityId: string): Promise<EntitySnapshot 
   }
 }
 
+// Resumen ejecutivo legible arriba del JSON crudo (que se mantiene para el diff de la próxima
+// corrida) — pedido de Cal 2026-09-01: la página de estado era ilegible como battlecard.
+export function buildBattlecardBlocks(snapshot: EntitySnapshot): unknown[] {
+  const bc = snapshot.battlecard;
+  if (!bc) return [];
+  const blocks: unknown[] = [headingBlock("Battlecard"), amenazaParagraph(bc.amenaza)];
+  if (bc.resumen) blocks.push(paragraphBlock(bc.resumen));
+  if (bc.fortalezas.length > 0) {
+    blocks.push(headingBlock("Fortalezas"));
+    for (const f of bc.fortalezas) blocks.push(puntoBullet(f));
+  }
+  if (bc.debilidades.length > 0) {
+    blocks.push(headingBlock("Debilidades"));
+    for (const d of bc.debilidades) blocks.push(puntoBullet(d));
+  }
+  return blocks;
+}
+
 export async function writeEntityState(
   entityId: string,
   snapshot: EntitySnapshot,
@@ -70,7 +138,7 @@ export async function writeEntityState(
 ): Promise<void> {
   const pageId = STATUS_PAGE_IDS[entityId];
   if (!pageId) throw new Error(`Sin página de estado para ${entityId}`);
-  await replacePageBody(pageId, [codeBlock(JSON.stringify(snapshot, null, 2), chunkFn)]);
+  await replacePageBody(pageId, [...buildBattlecardBlocks(snapshot), codeBlock(JSON.stringify(snapshot, null, 2), chunkFn)]);
 }
 
 export async function appendCambios(
@@ -111,38 +179,32 @@ export async function appendCambios(
   }
 }
 
-export function buildInformeReportText(fecha: string, timeframeDias: number, entidades: EntityRunResult[]): string {
-  const lines: string[] = [`Informe de análisis de competencia — ${fecha} (últimos ${timeframeDias} días)`, ""];
+export function buildInformeBlocks(entidades: EntityRunResult[]): unknown[] {
+  const blocks: unknown[] = [];
   for (const e of entidades) {
-    lines.push(`— ${e.entityNombre} —`);
+    blocks.push(headingBlock(e.entityNombre));
     if (e.error) {
-      lines.push(`  Error en esta corrida: ${e.error}`);
+      blocks.push(paragraphBlock(`Error en esta corrida: ${e.error}`, true));
     } else if (e.primeraCorrida) {
       if (e.hallazgos.length === 0) {
-        lines.push("  Primera corrida — se guardó el estado inicial, sin comparación.");
+        blocks.push(paragraphBlock("Primera corrida — se guardó el estado inicial, sin comparación.", true));
       } else {
-        lines.push("  Primera corrida — hallazgos iniciales (sin comparación con corridas futuras):");
-        for (const h of e.hallazgos) {
-          lines.push(`  [${h.dimension}] ${h.descripcion}${h.fuente ? ` (${h.fuente})` : ""}`);
-        }
+        blocks.push(paragraphBlock("Primera corrida — hallazgos iniciales (sin comparación con corridas futuras):", true));
+        for (const h of e.hallazgos) blocks.push(hallazgoBullet(h));
       }
     } else if (e.hallazgos.length === 0) {
-      lines.push("  Sin novedades.");
+      blocks.push(paragraphBlock("Sin novedades.", true));
     } else {
-      for (const h of e.hallazgos) {
-        lines.push(`  [${h.dimension}] ${h.descripcion}${h.fuente ? ` (${h.fuente})` : ""}`);
-      }
+      for (const h of e.hallazgos) blocks.push(hallazgoBullet(h));
     }
-    lines.push("");
   }
-  return lines.join("\n").trim();
+  return blocks;
 }
 
 export async function createInformePage(
   fecha: string,
   timeframeDias: number,
   entidades: EntityRunResult[],
-  chunkFn: (t: string, n: number) => string[],
 ): Promise<{ pageId: string; url: string }> {
   const totalHallazgos = entidades.reduce((sum, e) => sum + e.hallazgos.length, 0);
   const nombres = entidades.map((e) => e.entityNombre).join(", ");
@@ -163,7 +225,6 @@ export async function createInformePage(
     throw new Error(`No se pudo crear la página de informe: ${createRes.error}`);
   }
   const page = createRes.data as { id: string; url: string };
-  const reportText = buildInformeReportText(fecha, timeframeDias, entidades);
-  await replacePageBody(page.id, paragraphBlocks(reportText, chunkFn));
+  await replacePageBody(page.id, buildInformeBlocks(entidades));
   return { pageId: page.id, url: page.url };
 }

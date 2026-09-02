@@ -64,6 +64,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
           : undefined,
         siteSnippet: siteText?.slice(0, 3000),
         notas: parsed.notas,
+        battlecard: parsed.battlecard,
       };
 
       resultados.push({
@@ -85,7 +86,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     }
   }
 
-  const { pageId: informePageId, url: informeUrl } = await createInformePage(fecha, timeframeDias, resultados, chunkText);
+  const { pageId: informePageId, url: informeUrl } = await createInformePage(fecha, timeframeDias, resultados);
 
   for (const r of resultados) {
     if (r.error) continue;

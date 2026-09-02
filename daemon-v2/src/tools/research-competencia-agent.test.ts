@@ -23,6 +23,25 @@ describe("buildEntityPrompt", () => {
     const prompt = buildEntityPrompt(entity, baseline, { ios: null, android: null, siteText: null }, 7);
     expect(prompt).toContain("vio rol de Growth");
   });
+
+  it("pide un battlecard con nivel de amenaza para Yape", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    expect(prompt).toContain("battlecard");
+    expect(prompt).toContain("amenaza");
+  });
+
+  it("exige que el battlecard nunca quede vacío aunque no haya hallazgos nuevos", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    expect(prompt).toContain("NUNCA deben quedar vacíos");
+  });
+
+  it("pide repetir del baseline las fortalezas/debilidades que siguen vigentes, sin re-verificar", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    expect(prompt).toContain("REPETILAS tal cual");
+  });
 });
 
 describe("parseAgentJson", () => {
@@ -45,6 +64,28 @@ describe("parseAgentJson", () => {
 
   it("devuelve vacío si no hay JSON parseable", () => {
     const result = parseAgentJson("no hay nada acá");
-    expect(result).toEqual({ hallazgos: [], notas: "" });
+    expect(result).toEqual({ hallazgos: [], notas: "", battlecard: { resumen: "", fortalezas: [], debilidades: [], amenaza: "media" } });
+  });
+
+  it("parsea el battlecard cuando viene completo, con fuente por cada punto", () => {
+    const result = parseAgentJson(
+      '{"hallazgos":[],"notas":"","battlecard":{"resumen":"Crece rápido en LatAm","fortalezas":[{"texto":"multi-moneda","fuente":"https://x.com"}],"debilidades":[{"texto":"poca marca en Bolivia","fuente":""}],"amenaza":"alta"}}',
+    );
+    expect(result.battlecard).toEqual({
+      resumen: "Crece rápido en LatAm",
+      fortalezas: [{ texto: "multi-moneda", fuente: "https://x.com" }],
+      debilidades: [{ texto: "poca marca en Bolivia", fuente: "" }],
+      amenaza: "alta",
+    });
+  });
+
+  it("descarta puntos de fortalezas/debilidades sin campo texto", () => {
+    const result = parseAgentJson('{"hallazgos":[],"notas":"","battlecard":{"fortalezas":[{"fuente":"https://x.com"}],"debilidades":[],"amenaza":"media"}}');
+    expect(result.battlecard.fortalezas).toEqual([]);
+  });
+
+  it("si el battlecard viene inválido o ausente, usa defaults seguros (amenaza 'media')", () => {
+    const result = parseAgentJson('{"hallazgos":[],"notas":"","battlecard":{"amenaza":"catastrófica"}}');
+    expect(result.battlecard).toEqual({ resumen: "", fortalezas: [], debilidades: [], amenaza: "media" });
   });
 });
