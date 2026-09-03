@@ -21,4 +21,24 @@ describe("research-competencia-entities", () => {
   it("getEntity tira si el id no existe", () => {
     expect(() => getEntity("no-existe")).toThrow("Entidad desconocida: no-existe");
   });
+
+  describe("handles sociales", () => {
+    it("altoke tiene las 2 cuentas de Instagram (billetera y banco) y su TikTok", () => {
+      const e = getEntity("bancosol-altoke");
+      expect(e.social?.instagram).toEqual(["altoke.bo", "bancosol_bolivia"]);
+      expect(e.social?.tiktok).toEqual(["altoke.bo"]);
+      expect(e.social?.x).toEqual(["bancosol"]);
+    });
+
+    it("toda entidad tiene al menos una cuenta de Instagram", () => {
+      for (const e of ENTITIES) {
+        expect(e.social?.instagram?.length ?? 0).toBeGreaterThan(0);
+      }
+    });
+
+    it("las entidades sin cuenta confirmada en una plataforma no la declaran", () => {
+      expect(getEntity("peso-app").social?.x ?? []).toEqual([]);
+      expect(getEntity("takenos").social?.facebook ?? []).toEqual([]);
+    });
+  });
 });
