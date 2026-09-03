@@ -18,7 +18,7 @@ delete process.env.ANTHROPIC_API_KEY;
 import { runResearchCompetencia, formatSummaryHtml } from "../src/tools/research-competencia.js";
 import { stripHtmlTags } from "../src/proactive/rich-send.js";
 import { makeResearchCompetenciaCookiesProvider } from "../src/tools/research-competencia-cookies.js";
-import { sendNotifySummary, wantsNoNotify } from "./research-competencia-notify.js";
+import { sendNotifySummary, notifyFatalError, wantsNoNotify } from "./research-competencia-notify.js";
 import { findMissingEnvVars, formatMissingEnvError } from "./research-competencia-env.js";
 
 /**
@@ -84,7 +84,16 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error("Error:", err);
+  // BLOQUEANTE 1 (revisión de salud, 2026-09-03): antes esto era solo console.error — bajo un cron
+  // desatendido de launchd nadie lee ese log, así que una excepción no capturada (fuera del
+  // try/catch por entidad de runResearchCompetencia, ej. un bug en createInformePage) dejaba a Cal
+  // sin resumen NI aviso de que el research falló. Ver notifyFatalError (research-competencia-notify.ts).
+  const sent = await notifyFatalError(err).catch((notifyErr) => ({
+    ok: false as const,
+    reason: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+  }));
+  if (!sent.ok) console.error(`Además, no pude avisar por Telegram: ${sent.reason}`);
   process.exit(1);
 });

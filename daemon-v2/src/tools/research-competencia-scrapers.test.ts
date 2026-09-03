@@ -64,8 +64,18 @@ describe("parseInstagramPosts", () => {
 
     const posts = parseInstagramPosts(nodos, "altoke.bo");
 
+    // Orden más-reciente-primero (IMPORTANTE 4): DEF456 es un día más nuevo que ABC123 aunque
+    // venga segundo en el array de nodos crudos — sale primero.
     expect(posts).toHaveLength(2);
     expect(posts[0]).toMatchObject({
+      platform: "instagram",
+      handle: "altoke.bo",
+      esVideo: true,
+      mediaUrls: ["https://cdn.instagram.com/reel.mp4"],
+      caption: "",
+    });
+    expect(posts[0].fecha).toBe("2026-09-02");
+    expect(posts[1]).toMatchObject({
       platform: "instagram",
       handle: "altoke.bo",
       url: "https://www.instagram.com/p/ABC123/",
@@ -73,14 +83,89 @@ describe("parseInstagramPosts", () => {
       esVideo: false,
       mediaUrls: ["https://cdn.instagram.com/foto.jpg"],
     });
-    expect(posts[0].fecha).toBe("2026-09-01");
-    expect(posts[1].esVideo).toBe(true);
-    expect(posts[1].mediaUrls).toEqual(["https://cdn.instagram.com/reel.mp4"]);
-    expect(posts[1].caption).toBe("");
+    expect(posts[1].fecha).toBe("2026-09-01");
   });
 
   it("ignora nodos sin shortcode en vez de romper", () => {
     expect(parseInstagramPosts([{ is_video: false }], "altoke.bo")).toEqual([]);
+  });
+
+  it("ordena más-reciente-primero aunque los nodos crudos vengan desordenados (IMPORTANTE 4)", () => {
+    const posts = parseInstagramPosts(
+      [
+        { shortcode: "VIEJO", taken_at_timestamp: 1700000000, is_video: false, display_url: "https://cdn/viejo.jpg" },
+        { shortcode: "NUEVO", taken_at_timestamp: 1700259200, is_video: false, display_url: "https://cdn/nuevo.jpg" }, // +3 días
+      ],
+      "altoke.bo",
+    );
+    expect(posts.map((p) => p.url)).toEqual([
+      "https://www.instagram.com/p/NUEVO/",
+      "https://www.instagram.com/p/VIEJO/",
+    ]);
+  });
+
+  it("conserva los posts sin fecha parseable, pero al final del orden (IMPORTANTE 4)", () => {
+    const posts = parseInstagramPosts(
+      [
+        { shortcode: "SINFECHA" }, // sin taken_at_timestamp
+        { shortcode: "CONFECHA", taken_at_timestamp: 1700000000, is_video: false, display_url: "https://cdn/x.jpg" },
+      ],
+      "altoke.bo",
+    );
+    expect(posts.map((p) => p.url)).toEqual([
+      "https://www.instagram.com/p/CONFECHA/",
+      "https://www.instagram.com/p/SINFECHA/",
+    ]);
+  });
+
+  it("MENOR 5: extrae todas las slides de un carrusel (edge_sidecar_to_children)", () => {
+    const nodos = [
+      {
+        shortcode: "CARR1",
+        taken_at_timestamp: 1700000000,
+        is_video: false,
+        display_url: "https://cdn.instagram.com/portada.jpg",
+        edge_media_to_caption: { edges: [{ node: { text: "Promo con condiciones en las slides 2 y 3" } }] },
+        edge_sidecar_to_children: {
+          edges: [
+            { node: { display_url: "https://cdn.instagram.com/slide1.jpg" } },
+            { node: { display_url: "https://cdn.instagram.com/slide2.jpg" } },
+            { node: { display_url: "https://cdn.instagram.com/slide3.jpg" } },
+          ],
+        },
+      },
+    ];
+
+    const posts = parseInstagramPosts(nodos, "altoke.bo");
+
+    expect(posts[0].mediaUrls).toEqual([
+      "https://cdn.instagram.com/slide1.jpg",
+      "https://cdn.instagram.com/slide2.jpg",
+      "https://cdn.instagram.com/slide3.jpg",
+    ]);
+  });
+
+  it("sin edge_sidecar_to_children, sigue usando el único display_url/video_url de siempre", () => {
+    const posts = parseInstagramPosts(
+      [{ shortcode: "SOLO1", is_video: false, display_url: "https://cdn.instagram.com/x.jpg" }],
+      "altoke.bo",
+    );
+    expect(posts[0].mediaUrls).toEqual(["https://cdn.instagram.com/x.jpg"]);
+  });
+
+  it("edge_sidecar_to_children vacío o con forma inesperada no rompe — cae al comportamiento single-media", () => {
+    const posts = parseInstagramPosts(
+      [
+        {
+          shortcode: "RARO1",
+          is_video: false,
+          display_url: "https://cdn.instagram.com/x.jpg",
+          edge_sidecar_to_children: { edges: [] },
+        },
+      ],
+      "altoke.bo",
+    );
+    expect(posts[0].mediaUrls).toEqual(["https://cdn.instagram.com/x.jpg"]);
   });
 });
 
@@ -186,6 +271,20 @@ describe("parseTikTokPosts", () => {
   it("usa string vacío de caption si falta desc, y mediaUrls vacío si falta el video", () => {
     const posts = parseTikTokPosts([{ id: "1" }], "altoke.bo");
     expect(posts[0]).toMatchObject({ caption: "", mediaUrls: [], esVideo: true });
+  });
+
+  it("ordena más-reciente-primero aunque los items crudos vengan desordenados (IMPORTANTE 4)", () => {
+    const posts = parseTikTokPosts(
+      [
+        { id: "viejo", createTime: 1700000000 },
+        { id: "nuevo", createTime: 1700259200 }, // +3 días
+      ],
+      "altoke.bo",
+    );
+    expect(posts.map((p) => p.url)).toEqual([
+      "https://www.tiktok.com/@altoke.bo/video/nuevo",
+      "https://www.tiktok.com/@altoke.bo/video/viejo",
+    ]);
   });
 });
 
@@ -414,6 +513,15 @@ describe("parseDomPosts", () => {
       { url: "https://x.com/bancosol/status/1", texto: "post nocturno", fechaIso: "2026-09-02T02:00:00.000Z", imagenes: [], videos: [], autor: "bancosol" },
     ];
     expect(parseDomPosts(crudos, "x", "bancosol")[0].fecha).toBe("2026-09-01");
+  });
+
+  it("ordena más-reciente-primero aunque los posts crudos vengan desordenados (IMPORTANTE 4)", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/bancosol/status/1", texto: "viejo", fechaIso: "2026-09-01T10:00:00.000Z", imagenes: [], videos: [], autor: "bancosol" },
+      { url: "https://x.com/bancosol/status/2", texto: "nuevo", fechaIso: "2026-09-03T10:00:00.000Z", imagenes: [], videos: [], autor: "bancosol" },
+    ];
+    const posts = parseDomPosts(crudos, "x", "bancosol");
+    expect(posts.map((p) => p.caption)).toEqual(["nuevo", "viejo"]);
   });
 });
 

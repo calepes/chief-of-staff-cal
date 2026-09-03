@@ -30,9 +30,49 @@ export function isoDateFromUnix(ts: unknown): string | null {
 }
 
 /**
+ * Ordena más-reciente-primero — orden que `enrichPosts` (research-competencia-social.ts) asume
+ * vía `slice(0, MAX_POSTS_PER_ACCOUNT)` pero que ningún scraper garantizaba explícitamente
+ * (IMPORTANTE 4 de la revisión de salud, 2026-09-03): Instagram/TikTok devuelven el orden
+ * estructural del JSON embebido, Facebook/X el orden del DOM — ninguno de los 4 es "más reciente
+ * primero" por contrato, solo por casualidad de cómo cada plataforma arma su timeline hoy. Sin
+ * probar contra páginas reales todavía, ese contrato podía romperse en la primera corrida sin
+ * ningún error visible (se quedaría con los 8 posts equivocados, en silencio) — por eso se ordena
+ * ACÁ, en las funciones puras de parseo que ya comparten los 4 scrapers, en vez de confiar en que
+ * cada uno lo haga bien por su cuenta.
+ *
+ * Los posts SIN fecha parseable se CONSERVAN (decisión ya tomada, ver `filterPostsByTimeframe`/
+ * `warnIfOrderViolated` en research-competencia-social.ts) pero van al FINAL, después de todos los
+ * que sí tienen fecha — no hay forma de saber si son más viejos o más nuevos, así que no pueden
+ * competir por una posición en el orden por fecha; entre sí conservan su orden relativo original
+ * (sort estable de V8, ES2019+).
+ *
+ * `warnIfOrderViolated` deja de ser la única defensa y pasa a red de seguridad: con esto, el
+ * `slice` de `enrichPosts` ya no depende del orden implícito de cada scraper.
+ */
+function sortPostsByFechaDesc(posts: SocialPost[]): SocialPost[] {
+  const conFecha = posts.filter((p) => p.fecha !== null);
+  const sinFecha = posts.filter((p) => p.fecha === null);
+  conFecha.sort((a, b) => (b.fecha as string).localeCompare(a.fecha as string));
+  return [...conFecha, ...sinFecha];
+}
+
+/**
  * Parsea los nodos crudos del timeline de Instagram (extraídos del JSON embebido en un <script>
  * de la página de perfil) a `SocialPost`. Función pura — sin red — para que sea testeable sin
  * levantar un browser.
+ *
+ * MENOR 5 (revisión de salud, 2026-09-03): el carrusel de Instagram (`edge_sidecar_to_children`,
+ * hasta 10-20 slides) nunca se materializaba — solo se leía `display_url`/`video_url`, un único
+ * media por post. Importa porque las promos bancarias suelen publicarse como carrusel, con las
+ * condiciones/tarifas en las slides 2 y 3, no en la portada — se perdían en silencio.
+ * `edge_sidecar_to_children.edges[].node.display_url` es el nombre de campo tal como lo documenta
+ * el payload público de Instagram para este caso, pero **no está verificado contra producción
+ * todavía** (esta tarea no navega a Instagram real) — por eso la extracción es defensiva: si el
+ * campo no existe o no matchea la forma esperada, `sidecarUrls` queda vacío y cae al comportamiento
+ * de siempre (un único `display_url`/`video_url`). Pendiente: confirmar el nombre exacto en la
+ * primera corrida real y ajustar si hace falta. `MAX_IMAGES_PER_POST`
+ * (research-competencia-social.ts) sigue recortando esto aguas abajo, en `enrichPosts` — acá no
+ * hace falta topear, solo entregar las slides en el orden que Instagram las manda.
  */
 export function parseInstagramPosts(nodos: unknown[], handle: string): SocialPost[] {
   const posts: SocialPost[] = [];
@@ -44,21 +84,25 @@ export function parseInstagramPosts(nodos: unknown[], handle: string): SocialPos
       display_url?: string;
       video_url?: string;
       edge_media_to_caption?: { edges?: Array<{ node?: { text?: string } }> };
+      edge_sidecar_to_children?: { edges?: Array<{ node?: { display_url?: string } }> };
     };
     if (!n.shortcode) continue;
     const esVideo = n.is_video === true;
     const media = esVideo ? n.video_url : n.display_url;
+    const sidecarUrls = (n.edge_sidecar_to_children?.edges ?? [])
+      .map((e) => e.node?.display_url)
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
     posts.push({
       platform: "instagram",
       handle,
       url: `https://www.instagram.com/p/${n.shortcode}/`,
       fecha: isoDateFromUnix(n.taken_at_timestamp),
       caption: n.edge_media_to_caption?.edges?.[0]?.node?.text ?? "",
-      mediaUrls: media ? [media] : [],
+      mediaUrls: sidecarUrls.length > 0 ? sidecarUrls : media ? [media] : [],
       esVideo,
     });
   }
-  return posts;
+  return sortPostsByFechaDesc(posts);
 }
 
 // Tope de profundidad del recorrido recursivo de `extractNodes`. Instagram/TikTok anidan el JSON
@@ -314,7 +358,7 @@ export function parseTikTokPosts(items: unknown[], handle: string): SocialPost[]
       esVideo: true,
     });
   }
-  return posts;
+  return sortPostsByFechaDesc(posts);
 }
 
 export interface TikTokExtraction {
@@ -456,7 +500,7 @@ export function parseDomPosts(crudos: RawDomPost[], platform: SocialPlatform, ha
       esVideo,
     });
   }
-  return posts;
+  return sortPostsByFechaDesc(posts);
 }
 
 /** Forma cruda que devuelve `collectDomPosts` — sin `autor`, a diferencia de `RawDomPost`: acá

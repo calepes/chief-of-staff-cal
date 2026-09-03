@@ -255,17 +255,29 @@ const HOSTNAMES: Record<SocialPlatform, string> = {
 
 // Presupuesto de tiempo por ENTIDAD (no por handle) — sin esto, la multiplicación ya documentada
 // abajo (topes por cuenta × N handles) puede correr sin techo si varias cuentas seguidas encadenan
-// llamadas legítimas pero lentas (ej. varios videos pesados de fila). 10 minutos es generoso a
-// propósito: enrichPosts ya documenta que UN SOLO handle con videos puede tardar "decenas de
-// minutos" en el peor caso, y cortar antes de eso perdería trabajo real sin necesidad — el research
-// corre standalone (`scripts/research-competencia-now.ts`, disparado por un cron externo de
-// launchd, fuera del proceso de Jano), así que nadie queda bloqueado esperando este tiempo. Es un
-// corte ENTRE handles, no una cancelación real
-// de un await ya en curso (eso exigiría enhebrar AbortController hasta los scrapers de Playwright y
-// hasta research-competencia-media.ts — fuera de alcance acá): si UNA sola llamada se cuelga sin
-// tirar nunca, este chequeo no la interrumpe; sí evita arrancar handles NUEVOS una vez pasado el
-// presupuesto, acotando el peor caso de una entidad con muchos handles a un techo conocido.
-const PER_ENTITY_BUDGET_MS = 10 * 60 * 1000;
+// llamadas legítimas pero lentas (ej. varios videos pesados de fila). Es un corte ENTRE handles, no
+// una cancelación real de un await ya en curso (eso exigiría enhebrar AbortController hasta los
+// scrapers de Playwright y hasta research-competencia-media.ts — fuera de alcance acá): si UNA sola
+// llamada se cuelga sin tirar nunca, este chequeo no la interrumpe; sí evita arrancar handles
+// NUEVOS una vez pasado el presupuesto, acotando el peor caso de una entidad con muchos handles a
+// un techo conocido.
+//
+// IMPORTANTE 3 (revisión de salud, 2026-09-03): este valor tiene que ser MENOR que
+// `SOCIAL_TIMEOUT_MS` (research-competencia.ts) con margen real — los dos NO son independientes.
+// `SOCIAL_TIMEOUT_MS` es un `Promise.race` EXTERNO que abandona la entidad entera si
+// `fetchSocialText` no resuelve a tiempo; este presupuesto es el corte INTERNO que le da a
+// `fetchSocialText` la chance de terminar prolijo (romper el loop, formatear el texto, devolver)
+// antes de que el externo lo mate. Con el valor viejo (10 min interno vs. 8 min externo) el
+// externo SIEMPRE disparaba primero — el interno nunca llegaba a tener efecto, y como Node no
+// cancela promesas de verdad, cada vez que el externo abandonaba una entidad dejaba corriendo en
+// background el Chromium + ffmpeg de ese handle, compitiendo por CPU/red con la entidad siguiente
+// (en el peor caso, hasta 6 cadenas simultáneas si las 6 entidades vencían el deadline). 7 minutos
+// acá, contra 10 en `SOCIAL_TIMEOUT_MS`, deja 3 minutos de margen real: tiempo de sobra para que
+// el `break platformLoop` interno + `formatSocialText` (trabajo síncrono, milisegundos) terminen
+// antes del hachazo externo — no elimina el leak de fondo si un solo handle se cuelga
+// indefinidamente en un `await` (eso sigue siendo un límite conocido, ver el comentario de
+// `SOCIAL_TIMEOUT_MS`), pero cubre el caso común: varios handles lentos pero no colgados.
+const PER_ENTITY_BUDGET_MS = 7 * 60 * 1000;
 
 /**
  * Reparte los posts recolectados en round-robin por plataforma (instagram/tiktok/facebook/x),

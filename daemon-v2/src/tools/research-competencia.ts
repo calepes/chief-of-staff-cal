@@ -21,13 +21,42 @@ export interface RunOpts {
 // 30-120s), que sí. Un cuelgue de red en cualquiera de los dos dejaría la promesa sin resolver
 // NI rechazar para siempre: el try/catch por entidad nunca dispara, la entidad traba el `for`
 // secuencial de las 6, y con ella el informe de Notion y el mensaje de Telegram de la semana
-// entera. 8 minutos porque una entidad con varios handles y videos puede tardar legítimamente
+// entera. 10 minutos porque una entidad con varios handles y videos puede tardar legítimamente
 // varios minutos (enrichPosts documenta hasta "decenas de minutos" en el peor caso combinando
 // descarga+ffmpeg+visión por post en research-competencia-social.ts) — tiene que cubrir ese caso
 // real sin ser efectivamente infinito. Al vencer, la entidad sigue con socialText:null (logueado);
 // el scraping abandonado sigue corriendo en background (Node no cancela promesas de verdad), pero
 // nunca puede tirar sin capturar — va completo detrás de su propio `.catch()`.
-const SOCIAL_TIMEOUT_MS = 8 * 60 * 1000;
+//
+// IMPORTANTE 3 (revisión de salud, 2026-09-03): tiene que ser MAYOR que `PER_ENTITY_BUDGET_MS`
+// (research-competencia-social.ts) con margen real — ver el comentario ahí para la relación
+// completa entre los dos. Subido de 8 a 10 min al mismo tiempo que `PER_ENTITY_BUDGET_MS` bajó de
+// 10 a 7: antes el interno (10 min) NUNCA llegaba a dispararse porque este externo (8 min) siempre
+// abandonaba la entidad primero — ahora el interno tiene 3 minutos reales para cortar prolijo
+// antes de este hachazo. Exportado para que el test de este archivo (`research-competencia.test.ts`)
+// no hardcodee el valor por separado y quede sincronizado si vuelve a ajustarse.
+export const SOCIAL_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Deadline duro del agente LLM (`runEntityAgent`, research-competencia-agent.ts) — mismo motivo y
+// mismo patrón (`Promise.race` contra un timer) que `SOCIAL_TIMEOUT_MS` de arriba. `runEntityAgent`
+// solo tiene `maxTurns:20` como límite, y eso es un presupuesto de TURNOS que el SDK chequea ENTRE
+// pasos — no protege contra un evento final que nunca llega (un WebSearch colgado, una partición
+// de red, un deadlock del SDK): en ese caso el `for await (const event of handle.query(...))` de
+// `runEntityAgent` espera indefinidamente y su `finally { handle.close() }` nunca corre. Como las
+// 6 entidades corren secuencialmente, una sola atascada cuelga el proceso ENTERO para siempre, sin
+// recuperación ni aviso — el mismo riesgo que el scraping social, sin la misma protección.
+//
+// 5 minutos: a diferencia del scraping social (descargas + ffmpeg + visión, minutos por post),
+// `runEntityAgent` solo usa WebSearch — sin descargas pesadas ni transcripción. Una corrida real
+// completó bien con más turnos de los que tenía el límite viejo del agente (12→20, ver el
+// comentario de `runEntityAgent`), y una llamada de WebSearch individual no debería tardar
+// minutos — 5 min da margen generoso sobre ese caso normal (varias búsquedas + una respuesta final)
+// sin dejar una entidad trabada indefinidamente si el evento final nunca llega. Al vencer se trata
+// igual que un `raw` vacío: error explícito de la entidad (el `Promise.race` rechaza, lo captura el
+// try/catch de la entidad más abajo), nunca "sin hallazgos". Igual que el timeout social, esto NO
+// cancela el `handle.query()` en curso — el proceso del SDK abandonado sigue corriendo en
+// background hasta que él mismo termine o falle (Node no cancela promesas de verdad).
+const AGENT_TIMEOUT_MS = 5 * 60 * 1000;
 
 // Guard en proceso contra corridas superpuestas dentro del MISMO proceso de Node — dos llamadas
 // a runResearchCompetencia() en el mismo proceso escribirían sobre las mismas páginas de estado
@@ -123,7 +152,18 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
           socialText,
         };
         const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
-        const raw = await runEntityAgent(prompt);
+        // BLOQUEANTE 2 (revisión de salud, 2026-09-03): deadline externo contra `AGENT_TIMEOUT_MS`
+        // (ver su comentario) — sin esto, un `runEntityAgent` colgado (evento final que nunca
+        // llega) trababa el proceso entero para siempre. El rechazo de este `Promise.race` cae en
+        // el `catch` de la entidad más abajo, mismo tratamiento que cualquier otro error.
+        const raw = await Promise.race([
+          runEntityAgent(prompt),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`El agente no respondió en ${AGENT_TIMEOUT_MS / 1000}s (timeout — posible cuelgue de WebSearch o del SDK)`));
+            }, AGENT_TIMEOUT_MS);
+          }),
+        ]);
         // raw vacío = el agente cortó por maxTurns sin emitir result/success (nunca tiró
         // excepción) — tratarlo como "sin hallazgos" lo confundiría con una semana sin
         // novedades. Error explícito, para que se vea en "⚠️ Falló" en vez de perderse.
@@ -165,10 +205,25 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
 
     const { pageId: informePageId, url: informeUrl } = await createInformePage(fecha, timeframeDias, resultados);
 
+    // BLOQUEANTE 1 (revisión de salud, 2026-09-03): try/catch POR ENTIDAD, mismo patrón que el
+    // loop principal de arriba — era el único paso del pipeline sin aislamiento. Sin esto, un solo
+    // fallo de Notion (rate limit, blip de red, un PATCH que excede un límite) en, por ejemplo, la
+    // entidad 3 de 6 rechazaba la promesa de runResearchCompetencia() sin catch intermedio: el
+    // script caía al main().catch() genérico (console.error + exit(1)), Cal no recibía NI el
+    // resumen NI un aviso de error, y las entidades 4-6 — cuyo research ya había corrido bien y
+    // estaba en memoria — nunca se escribían, perdiendo su battlecard y su baseline de esa semana
+    // en silencio. Marcar `r.error` acá (aunque la entidad ya hubiera generado hallazgos con
+    // éxito) hace que `formatSummaryHtml` la liste bajo "⚠️ Falló" — Cal se entera de que ESE
+    // research se perdió, no que fue una semana tranquila.
     for (const r of resultados) {
       if (r.error) continue;
-      if (!r.primeraCorrida && r.hallazgos.length > 0) await appendCambios(r.entityId, r.hallazgos, informePageId, fecha);
-      await writeEntityState(r.entityId, r.snapshot, chunkText);
+      try {
+        if (!r.primeraCorrida && r.hallazgos.length > 0) await appendCambios(r.entityId, r.hallazgos, informePageId, fecha);
+        await writeEntityState(r.entityId, r.snapshot, chunkText);
+      } catch (err) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_notion_write_error", entityId: r.entityId, err: String(err) }));
+        r.error = err instanceof Error ? err.message : String(err);
+      }
     }
 
     const totalHallazgos = resultados.reduce((sum, r) => sum + r.hallazgos.length, 0);

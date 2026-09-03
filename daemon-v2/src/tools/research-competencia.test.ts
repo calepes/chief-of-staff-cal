@@ -24,7 +24,7 @@ vi.mock("./research-competencia-social.js", () => ({
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
 import { buildEntityPrompt, runEntityAgent, parseAgentJson } from "./research-competencia-agent.js";
 import { fetchSocialText } from "./research-competencia-social.js";
-import { runResearchCompetencia, formatSummaryHtml } from "./research-competencia.js";
+import { runResearchCompetencia, formatSummaryHtml, SOCIAL_TIMEOUT_MS } from "./research-competencia.js";
 
 const mockReadState = vi.mocked(readEntityState);
 const mockWriteState = vi.mocked(writeEntityState);
@@ -97,6 +97,54 @@ describe("runResearchCompetencia", () => {
     expect(mockParseJson).not.toHaveBeenCalled();
   });
 
+  it("BLOQUEANTE 2: un runEntityAgent colgado no traba el proceso — corta al deadline y marca error explícito", async () => {
+    vi.useFakeTimers();
+    try {
+      mockRunAgent.mockImplementationOnce(() => new Promise(() => {})); // nunca resuelve
+      const resultPromise = runResearchCompetencia({ entidadIds: ["takenos", "meru"] });
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+      const result = await resultPromise;
+
+      expect(result.entidades[0].error).toMatch(/timeout|no respondió/i);
+      // La segunda entidad se procesa igual — el timeout de la primera no aborta la corrida.
+      expect(result.entidades[1].entityId).toBe("meru");
+      expect(result.entidades[1].error).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("BLOQUEANTE 1: un fallo de writeEntityState en el loop de escritura de Notion marca esa entidad como error y sigue con las demás", async () => {
+    mockWriteState.mockRejectedValueOnce(new Error("Notion caído"));
+
+    const result = await runResearchCompetencia({ entidadIds: ["takenos", "meru"] });
+
+    expect(result.entidades[0].entityId).toBe("takenos");
+    expect(result.entidades[0].error).toBe("Notion caído");
+    // La segunda entidad igual llega a escribirse — el fallo de la primera no aborta el loop.
+    expect(mockWriteState).toHaveBeenCalledTimes(2);
+    expect(result.entidades[1].error).toBeUndefined();
+  });
+
+  it("BLOQUEANTE 1: un fallo de appendCambios también se captura y marca la entidad, sin abortar la corrida", async () => {
+    mockReadState.mockResolvedValueOnce({ entityId: "takenos", updatedAt: "2026-08-01T00:00:00Z" });
+    mockRunAgent.mockResolvedValueOnce('{"hallazgos":[{"dimension":"GTM","descripcion":"x","fuente":""}],"notas":""}');
+    mockParseJson.mockReturnValueOnce({
+      hallazgos: [{ dimension: "GTM", descripcion: "x", fuente: "" }],
+      notas: "",
+      battlecard: { resumen: "", fortalezas: [], debilidades: [], amenaza: "media" },
+    });
+    mockAppendCambios.mockRejectedValueOnce(new Error("Notion rate limit"));
+
+    const result = await runResearchCompetencia({ entidadIds: ["takenos", "meru"] });
+
+    expect(result.entidades[0].error).toBe("Notion rate limit");
+    // writeEntityState NUNCA corre para takenos — el throw de appendCambios corta antes; sí corre
+    // para meru (1 sola llamada total).
+    expect(mockWriteState).toHaveBeenCalledTimes(1);
+    expect(result.entidades[1].error).toBeUndefined();
+  });
+
   it("un id inválido en entidadIds no rompe la corrida completa, otras entidades sí se procesan", async () => {
     const result = await runResearchCompetencia({ entidadIds: ["ganadero", "takenos"] });
 
@@ -161,7 +209,7 @@ describe("runResearchCompetencia", () => {
     try {
       vi.mocked(fetchSocialText).mockImplementationOnce(() => new Promise(() => {})); // nunca resuelve
       const resultPromise = runResearchCompetencia({ entidadIds: ["takenos"] });
-      await vi.advanceTimersByTimeAsync(8 * 60 * 1000 + 1);
+      await vi.advanceTimersByTimeAsync(SOCIAL_TIMEOUT_MS + 1);
       const result = await resultPromise;
 
       expect(result.entidades[0].error).toBeUndefined();

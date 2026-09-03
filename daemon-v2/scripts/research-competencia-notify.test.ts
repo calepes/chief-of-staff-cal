@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { sendNotifySummary, NOTIF_CHAT_ID, wantsNoNotify } from "./research-competencia-notify.js";
+import { sendNotifySummary, notifyFatalError, NOTIF_CHAT_ID, wantsNoNotify } from "./research-competencia-notify.js";
 
 describe("wantsNoNotify", () => {
   it("detecta el flag --no-notify entre los args", () => {
@@ -55,5 +55,41 @@ describe("sendNotifySummary", () => {
     const result = await sendNotifySummary("<b>hola</b>", { token: "tok123", fetchFn: fetchFn as unknown as typeof fetch });
 
     expect(result).toEqual({ ok: false, reason: "chat not found" });
+  });
+});
+
+describe("notifyFatalError (bloqueante 1: catch defensivo del main())", () => {
+  it("manda un aviso mínimo con el mensaje del Error, escapado para HTML", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, result: { message_id: 1 } }),
+    });
+
+    const result = await notifyFatalError(new Error("Notion <caído> & sin responder"), {
+      token: "tok123",
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    expect(result).toEqual({ ok: true });
+    const [, init] = fetchFn.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.parse_mode).toBe("HTML");
+    expect(body.text).toContain("Research de competencia falló");
+    expect(body.text).toContain("Notion &lt;caído&gt; &amp; sin responder");
+  });
+
+  it("acepta un valor lanzado que no es un Error (String() de fallback)", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+
+    await notifyFatalError("boom crudo", { token: "tok123", fetchFn: fetchFn as unknown as typeof fetch });
+
+    const [, init] = fetchFn.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.text).toContain("boom crudo");
+  });
+
+  it("nunca lanza aunque falte el token — no depende de haber previsto el 100% de los casos", async () => {
+    const result = await notifyFatalError(new Error("x"), { token: undefined });
+    expect(result.ok).toBe(false);
   });
 });
