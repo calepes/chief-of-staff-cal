@@ -23,7 +23,7 @@ import { stripHtmlTags, editCronMessage } from "./proactive/rich-send.js";
 import { checkKpiCardLending } from "./proactive/kpi-card-lending-daily.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick, handleCookieJarConfirm } from "./tools/resumir.js";
-import { COOKIE_JAR_NAMESPACE_ID, makeSocialCookiesProvider } from "./tools/cookie-jar.js";
+import { COOKIE_JAR_NAMESPACE_ID } from "./tools/cookie-jar.js";
 import { JournalStore } from "./journal-store.js";
 import { captureThought, nowInLaPaz } from "./journal-capture.js";
 import { applyPendingEdit, handleJournalCallback, isJournalCallback } from "./journal-callbacks.js";
@@ -39,7 +39,6 @@ import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
 import { checkHealthSync } from "./proactive/health-sync-check.js";
 import { checkBooksDailyReport } from "./proactive/books-daily-report.js";
-import { checkResearchCompetenciaWeekly } from "./proactive/research-competencia-weekly.js";
 import { checkFeedbinDailyReport } from "./proactive/feedbin-daily-report.js";
 import { refreshTopicsProfile } from "./proactive/topics-profile-refresh.js";
 import { checkLluvia } from "./proactive/lluvia-check.js";
@@ -210,12 +209,6 @@ const cookieJarKv = new CfKv({
   namespaceId: COOKIE_JAR_NAMESPACE_ID,
   apiToken: env.CF_API_TOKEN,
 });
-// Proveedor de cookies del Cookie Broker para el research de competencia (fase 2 — redes
-// sociales), usado por el cron semanal de acá abajo. La tool on-demand `investigarCompetencia`
-// (agent-tools.ts) NO reusa esta instancia — construye la suya propia con
-// `makeSocialCookiesProvider(deps.cookieJarKv)` sobre el MISMO `cookieJarKv`, porque ese archivo
-// no tiene visibilidad de esta constante de módulo.
-const getSocialCookies = makeSocialCookiesProvider(cookieJarKv);
 const state = new ConversationState(kv, compactHistory);
 const journalStore = new JournalStore(kv);
 const backlogStore = new BacklogStore(kv);
@@ -1895,20 +1888,6 @@ function scheduleHealthSyncCheck(): void {
   log({ msg: "health_sync_check_scheduled", interval: "every 30min 7-22h", thresholdHours: 4 });
 }
 
-// 07:05, no 07:00 — scheduleBooksDailyReport (diario) y scheduleHealthSyncCheck (cada 30min
-// 7-22h) ya disparan justo a las 07:00; correr este lunes a la misma hora amontonaría 3
-// mensajes de Telegram en la misma ventana (este es el más pesado: agente SDK + Notion).
-function scheduleResearchCompetenciaWeekly(): void {
-  cron.schedule("5 7 * * 1", () => {
-    void checkResearchCompetenciaWeekly({
-      botToken: env.COS_TELEGRAM_BOT_TOKEN,
-      chatId: ALERT_CHAT_ID,
-      getCookies: getSocialCookies,
-    }).catch((err) => log({ msg: "research_competencia_weekly_unhandled_error", err: String(err) }));
-  }, { timezone: "America/La_Paz" });
-  log({ msg: "research_competencia_weekly_scheduled", interval: "monday 07:05" });
-}
-
 function scheduleBooksDailyReport(): void {
   cron.schedule("0 7 * * *", () => {
     void checkBooksDailyReport({
@@ -2158,7 +2137,6 @@ async function loop(): Promise<void> {
   // para este caso: avisa si Health Auto Export lleva >4h sin mandar data (ver Health/CLAUDE.md).
   scheduleHealthSyncCheck();
   scheduleBooksDailyReport();
-  scheduleResearchCompetenciaWeekly();
   scheduleFeedbinDailyReport();
   scheduleTopicsProfileRefresh();
   scheduleLluviaCheck();

@@ -29,21 +29,18 @@ export interface RunOpts {
 // nunca puede tirar sin capturar — va completo detrás de su propio `.catch()`.
 const SOCIAL_TIMEOUT_MS = 8 * 60 * 1000;
 
-// Guard en proceso contra corridas superpuestas — el cron semanal (checkResearchCompetenciaWeekly)
-// y la tool `investigarCompetencia` viven en el MISMO daemon, así que un flag de módulo alcanza:
-// las dos escriben sobre las mismas páginas de estado de Notion, y con el scraping social la
-// corrida puede extenderse mucho más que en Fase 1 (minutos → potencialmente decenas de minutos),
-// agrandando la ventana real de que Cal dispare una corrida on-demand mientras el cron sigue
-// andando. NO cubre el script standalone `research:now` (`scripts/research-competencia-now.ts`) —
-// corre en OTRO proceso de Node, sin este módulo cargado en memoria. Si algún día hace falta
-// exclusión cross-proceso, upgrade a un lock real (archivo/KV), no este flag.
+// Guard en proceso contra corridas superpuestas dentro del MISMO proceso de Node — dos llamadas
+// a runResearchCompetencia() en el mismo proceso escribirían sobre las mismas páginas de estado
+// de Notion. Este módulo corre hoy SOLO dentro del script standalone `research:now`
+// (`scripts/research-competencia-now.ts`, invocado por un cron externo de launchd) — ya no vive
+// dentro del daemon de Jano (ver `docs/superpowers/plans/` sobre la salida del research del
+// daemon). El flag no cubre exclusión cross-proceso (dos corridas del script en paralelo); si
+// algún día hace falta eso, upgrade a un lock real (archivo/KV), no este flag.
 let researchInFlight = false;
 
-// Chequeo SÍNCRONO para que un caller (la tool `investigarCompetencia`) pueda mirar el estado
-// ANTES de arrancar, en vez de enterarse recién en el `.catch()` de la promesa rechazada — sin
-// esto, la tool devolvía `status:"started"` (el LLM le decía a Cal "arrancó") y un instante
-// después llegaba un ❌ contradictorio con el mensaje de este guard. `runResearchCompetencia`
-// sigue siendo la fuente de verdad (esto es una LECTURA del mismo flag, no reemplaza el guard).
+// Chequeo SÍNCRONO para que un caller externo pueda mirar el estado ANTES de arrancar, en vez de
+// enterarse recién en el `.catch()` de la promesa rechazada. `runResearchCompetencia` sigue
+// siendo la fuente de verdad (esto es una LECTURA del mismo flag, no reemplaza el guard).
 export function isResearchCompetenciaInFlight(): boolean {
   return researchInFlight;
 }

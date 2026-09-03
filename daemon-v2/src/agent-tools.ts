@@ -25,7 +25,7 @@ import {
   type FocoSection,
 } from "./tools/foco-cal.js";
 import { fetchAsUser } from "./tools/fetch-as-user.js";
-import { addDomainAndSync, getStructuredCookies, makeSocialCookiesProvider } from "./tools/cookie-jar.js";
+import { addDomainAndSync, getStructuredCookies } from "./tools/cookie-jar.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { consultarJson } from "./tools/consultar-json.js";
 import { formatLearning } from "./learning-file.js";
@@ -42,8 +42,6 @@ import { addDigestSource, type DigestSection } from "./tools/digest.js";
 import { checkKpiCardDaily } from "./proactive/kpi-card-daily.js";
 import { checkKpiCardLending } from "./proactive/kpi-card-lending-daily.js";
 import { fillDerivedFields } from "./proactive/kpi-ingest-notion.js";
-import { runResearchCompetencia, formatSummaryHtml, isResearchCompetenciaInFlight } from "./tools/research-competencia.js";
-import { sendCronMessage } from "./proactive/rich-send.js";
 import {
   searchBooks,
   addBook,
@@ -598,65 +596,6 @@ export function buildSdkTools(deps: ToolDeps) {
         } catch (err) {
           return asText({ status: "error", error: String(err) });
         }
-      },
-    ),
-    tool(
-      "investigarCompetencia",
-      [
-        "ARRANCA en background el research de competencia de Yape Bolivia (apps, sitios, prensa y LinkedIn de Banco Sol/Altoke, Banco Ganadero/Yolo Pago, Banco Económico/ZAS, Takenos, Meru y Peso App) y guarda el resultado en Notion (changelog + snapshot de estado + informe completo por corrida).",
-        "Tarda entre 10 y 45 minutos (varias búsquedas web por entidad, más el scraping de redes sociales de cada una) — por eso esta tool devuelve YA MISMO, sin esperar el resultado. El resumen (con conteo de hallazgos por entidad y el link al informe completo) le llega a Cal solo, como MENSAJE NUEVO, cuando termine.",
-        "Úsalo cuando Cal pida el research de competencia on-demand: 'corre el research de los últimos N días', 'investigá a la competencia', 'quiero el análisis de competencia de esta semana', etc.",
-        "Args: { timeframeDias?: number (default 7), entidades?: string[] } — entidades es una lista de ids: bancosol-altoke, ganadero-yolopago, economico-zas, takenos, meru, peso-app. Sin especificar, corre las 6.",
-        "Tras invocar (status:'started'), confirmá a Cal en UNA línea que el research arrancó y que el resumen puede tardar hasta 45 minutos en llegarle. NO esperes ni inventes resultados en este turno — el resumen real (o el error, si algo falla) llega solo, después, como mensaje aparte.",
-        "Si devuelve status:'already_running', NO digas que arrancó uno nuevo — avisá a Cal que ya hay un research corriendo y que hay que esperar a que termine.",
-      ].join(" "),
-      {
-        timeframeDias: z.number().int().positive().max(90).optional(),
-        entidades: z
-          .array(z.enum(["bancosol-altoke", "ganadero-yolopago", "economico-zas", "takenos", "meru", "peso-app"]))
-          .optional(),
-      },
-      async ({ timeframeDias, entidades }) => {
-        const chatId = deps.getCurrentChatId?.();
-        const botToken = deps.botToken;
-        if (!chatId || !botToken) return asText({ status: "error", error: "No chatId/token disponible" });
-        // Chequeo síncrono ANTES de arrancar — sin esto, `runResearchCompetencia` rechaza su
-        // promesa recién en el próximo tick (es una función async, el `throw` interno del guard
-        // se vuelve un `.catch()`), así que la tool ya había devuelto `status:"started"` al LLM
-        // ("arrancó") un instante antes de que llegara el ❌ de "ya hay uno en curso" — Cal veía
-        // dos mensajes contradictorios seguidos.
-        if (isResearchCompetenciaInFlight()) {
-          return asText({
-            status: "already_running",
-            message: "Ya hay un research de competencia corriendo — esperá a que termine antes de arrancar otro.",
-          });
-        }
-        // Fire-and-forget: la corrida tarda entre 10 y 45 min (varias búsquedas web por entidad,
-        // más el scraping de redes sociales) y awaitearla acá congelaría el loop secuencial del
-        // daemon (todos los chats) — mismo patrón que resumirContenido en tools/resumir.ts. El
-        // resultado (o el error) se manda como mensaje NUEVO al chatId capturado ahora, no dentro
-        // del .then() (el chat activo puede cambiar antes de que termine).
-        void runResearchCompetencia({ timeframeDias, entidadIds: entidades, getCookies: makeSocialCookiesProvider(deps.cookieJarKv) })
-          .then((result) =>
-            sendCronMessage(botToken, { chatId, text: formatSummaryHtml(result) }).catch((sendErr) => {
-              // El research SÍ funcionó (ya está en Notion) — el error es solo del envío del
-              // resumen, no lo mezcles con el catch de abajo (ese es de un fallo real del research).
-              void sendCronMessage(botToken, {
-                chatId,
-                text: `⚠️ El research de competencia terminó bien (informe: ${result.informeUrl ?? "ver Notion"}) pero falló mandarte el resumen: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`,
-              }).catch(() => {});
-            }),
-          )
-          .catch((err) => {
-            void sendCronMessage(botToken, {
-              chatId,
-              text: `❌ Error corriendo el research de competencia: ${err instanceof Error ? err.message : String(err)}`,
-            }).catch(() => {});
-          });
-        return asText({
-          status: "started",
-          message: "Research de competencia arrancado en background; el resumen le llega a Cal como mensaje nuevo, puede tardar hasta 45 minutos.",
-        });
       },
     ),
     tool(

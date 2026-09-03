@@ -258,9 +258,9 @@ const HOSTNAMES: Record<SocialPlatform, string> = {
 // llamadas legítimas pero lentas (ej. varios videos pesados de fila). 10 minutos es generoso a
 // propósito: enrichPosts ya documenta que UN SOLO handle con videos puede tardar "decenas de
 // minutos" en el peor caso, y cortar antes de eso perdería trabajo real sin necesidad — el research
-// corre fire-and-forget (confirmado: `investigarCompetencia` en agent-tools.ts hace
-// `void runResearchCompetencia(...)`, nunca lo awaitea desde el loop de mensajes de Jano), así que
-// nadie queda bloqueado esperando este tiempo. Es un corte ENTRE handles, no una cancelación real
+// corre standalone (`scripts/research-competencia-now.ts`, disparado por un cron externo de
+// launchd, fuera del proceso de Jano), así que nadie queda bloqueado esperando este tiempo. Es un
+// corte ENTRE handles, no una cancelación real
 // de un await ya en curso (eso exigiría enhebrar AbortController hasta los scrapers de Playwright y
 // hasta research-competencia-media.ts — fuera de alcance acá): si UNA sola llamada se cuelga sin
 // tirar nunca, este chequeo no la interrumpe; sí evita arrancar handles NUEVOS una vez pasado el
