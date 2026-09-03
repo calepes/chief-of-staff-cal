@@ -3,12 +3,14 @@ import {
   filterPostsByTimeframe,
   formatSocialText,
   enrichPosts,
+  fetchSocialText,
   MAX_POSTS_PER_ACCOUNT,
   MAX_VIDEOS_PER_ACCOUNT,
   MAX_IMAGES_PER_POST,
   type SocialPost,
   type EnrichedPost,
 } from "./research-competencia-social.js";
+import { getEntity } from "./research-competencia-entities.js";
 
 function post(overrides: Partial<SocialPost> = {}): SocialPost {
   return {
@@ -225,5 +227,65 @@ describe("enrichPosts", () => {
     const logged = spy.mock.calls.some(([line]) => String(line).includes("order_violation"));
     spy.mockRestore();
     expect(logged).toBe(false);
+  });
+});
+
+describe("fetchSocialText", () => {
+  const scrapersOk = {
+    instagram: async (h: string) => [post({ platform: "instagram", handle: h, caption: `IG de ${h}` })],
+    tiktok: async (h: string) => [post({ platform: "tiktok", handle: h, caption: `TikTok de ${h}` })],
+    facebook: async (h: string) => [post({ platform: "facebook", handle: h, caption: `FB de ${h}` })],
+    x: async (h: string) => [post({ platform: "x", handle: h, caption: `X de ${h}` })],
+  };
+  const deps = {
+    scrapers: scrapersOk,
+    getCookies: async () => [],
+    enrichFn: async (posts: SocialPost[]) => posts.map((p) => ({ ...p, imagenes: [] })),
+  };
+
+  it("recorre todas las plataformas y handles declarados de la entidad", async () => {
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, deps);
+    expect(text).toContain("IG de altoke.bo");
+    expect(text).toContain("IG de bancosol_bolivia");
+    expect(text).toContain("TikTok de altoke.bo");
+    expect(text).toContain("X de bancosol");
+  });
+
+  it("una plataforma que falla no corta las demás", async () => {
+    const scrapers = { ...scrapersOk, tiktok: async () => { throw new Error("bloqueado"); } };
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, scrapers });
+    expect(text).toContain("IG de altoke.bo");
+    expect(text).not.toContain("TikTok");
+  });
+
+  it("loguea plataforma y handle cuando un scraper falla — diagnosticable en un cron desatendido", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const scrapers = { ...scrapersOk, tiktok: async () => { throw new Error("bloqueado"); } };
+    await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, scrapers });
+    const logged = spy.mock.calls.some(([line]) => {
+      const s = String(line);
+      return s.includes("research_competencia_social_fetch_error") && s.includes("tiktok") && s.includes("altoke.bo");
+    });
+    spy.mockRestore();
+    expect(logged).toBe(true);
+  });
+
+  it("devuelve null si la entidad no declara ninguna cuenta", async () => {
+    const sinSocial = { ...getEntity("meru"), social: undefined };
+    expect(await fetchSocialText(sinSocial, 7, deps)).toBeNull();
+  });
+
+  it("devuelve null si ninguna plataforma trajo posts", async () => {
+    const scrapers = { instagram: async () => [], tiktok: async () => [], facebook: async () => [], x: async () => [] };
+    expect(await fetchSocialText(getEntity("takenos"), 7, { ...deps, scrapers })).toBeNull();
+  });
+
+  it("pide las cookies UNA VEZ por plataforma, no por handle repetido en la misma red", async () => {
+    let calls = 0;
+    const getCookies = async () => { calls++; return []; };
+    await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, getCookies });
+    // bancosol-altoke: instagram×2, tiktok×1, facebook×2, x×1 = 6 handles, 4 plataformas con
+    // handles. Sin cachear por plataforma esto daría 6 llamadas (una por handle).
+    expect(calls).toBe(4);
   });
 });

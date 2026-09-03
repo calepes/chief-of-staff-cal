@@ -1,4 +1,7 @@
 import { describeImage, analyzeVideo, type VideoAnalysis } from "./research-competencia-media.js";
+import type { EntityConfig } from "./research-competencia-entities.js";
+import type { StructuredCookie } from "./cookie-jar.js";
+import { scrapeInstagram, scrapeTikTok, scrapeFacebook, scrapeX } from "./research-competencia-scrapers.js";
 
 export type SocialPlatform = "instagram" | "tiktok" | "facebook" | "x";
 
@@ -220,4 +223,91 @@ export function formatSocialText(posts: EnrichedPost[]): string {
   return texto.length > MAX_TOTAL_CHARS
     ? `${texto.slice(0, MAX_TOTAL_CHARS)}\n\n[...truncado — se alcanzó el límite de ${MAX_TOTAL_CHARS} caracteres]`
     : texto;
+}
+
+export type ScraperFn = (handle: string, cookies: StructuredCookie[]) => Promise<SocialPost[]>;
+
+export interface FetchSocialDeps {
+  scrapers?: Record<SocialPlatform, ScraperFn>;
+  getCookies?: (hostname: string) => Promise<StructuredCookie[]>;
+  enrichFn?: (posts: SocialPost[]) => Promise<EnrichedPost[]>;
+  ahora?: Date;
+}
+
+const DEFAULT_SCRAPERS: Record<SocialPlatform, ScraperFn> = {
+  instagram: scrapeInstagram,
+  tiktok: scrapeTikTok,
+  facebook: scrapeFacebook,
+  x: scrapeX,
+};
+
+const HOSTNAMES: Record<SocialPlatform, string> = {
+  instagram: "instagram.com",
+  tiktok: "tiktok.com",
+  facebook: "facebook.com",
+  x: "x.com",
+};
+
+/**
+ * Recorre todas las plataformas y handles declarados de una entidad, aplica el filtro de
+ * timeframe, enriquece la media y devuelve un bloque de texto listo para el prompt. Devuelve null
+ * si la entidad no declara cuentas o si nada trajo contenido.
+ *
+ * Aislamiento por cuenta: try/catch POR HANDLE — una plataforma bloqueada (ej. TikTok con captcha)
+ * o un handle caído no cortan a los demás. El catch loguea plataforma+handle: sin eso, un fallo acá
+ * (cron desatendido, sin nadie mirando la consola) es indistinguible de "esa cuenta no publicó
+ * nada esta semana" — mismo criterio del resto del módulo (ver enrichPosts).
+ *
+ * Los topes de enrichPosts (MAX_POSTS_PER_ACCOUNT/MAX_VIDEOS_PER_ACCOUNT) son POR CUENTA, y acá
+ * enrichFn se llama una vez por HANDLE (no una vez por entidad con todos los posts juntos) — es la
+ * semántica correcta del spec ("8 posts por cuenta, 4 videos por cuenta"), pero implica que el
+ * volumen total por ENTIDAD escala con la cantidad de handles: bancosol-altoke declara 6 handles
+ * (2 Instagram + 1 TikTok + 2 Facebook + 1 X), así que en el peor caso puede acumular 6×8=48 posts
+ * enriquecidos para una sola entidad, no 8. Es la decisión correcta igual: cada cuenta es una
+ * fuente independiente (ej. la cuenta corporativa vs. la de producto), y compartir un tope entre
+ * cuentas escondería contenido real de la secundaria detrás del volumen de la principal.
+ */
+export async function fetchSocialText(
+  entity: EntityConfig,
+  timeframeDias: number,
+  deps: FetchSocialDeps = {},
+): Promise<string | null> {
+  if (!entity.social) return null;
+  const social = entity.social;
+  const scrapers = deps.scrapers ?? DEFAULT_SCRAPERS;
+  const getCookies = deps.getCookies ?? (async () => []);
+  const enrichFn = deps.enrichFn ?? ((posts: SocialPost[]) => enrichPosts(posts));
+
+  const todos: EnrichedPost[] = [];
+  for (const platform of Object.keys(HOSTNAMES) as SocialPlatform[]) {
+    const handles = social[platform];
+    if (handles.length === 0) continue;
+
+    // Cookies UNA VEZ por plataforma, reusadas por todos sus handles — no una vez por handle.
+    // bancosol-altoke tiene 2 cuentas de Instagram: pedir la cookie por handle dispararía 2
+    // lookups idénticos al mismo hostname (mismo dominio en el Cookie Broker, mismo resultado).
+    // Si getCookies pega contra el KV real (a diferencia del stub gratis que usan los tests), eso
+    // es un round-trip desperdiciado por cada handle extra de la misma red — cachear por
+    // plataforma lo evita sin que el caller tenga que preocuparse.
+    let cookies: StructuredCookie[];
+    try {
+      cookies = await getCookies(HOSTNAMES[platform]);
+    } catch (err) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_cookies_error", platform, err: String(err) }));
+      cookies = [];
+    }
+
+    for (const handle of handles) {
+      try {
+        const posts = await scrapers[platform](handle, cookies);
+        const enVentana = filterPostsByTimeframe(posts, timeframeDias, deps.ahora);
+        todos.push(...(await enrichFn(enVentana)));
+      } catch (err) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_fetch_error", platform, handle, err: String(err) }));
+      }
+    }
+  }
+
+  const texto = formatSocialText(todos);
+  return texto || null;
 }
