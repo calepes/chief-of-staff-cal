@@ -61,6 +61,14 @@ describe("buildEntityPrompt", () => {
     const reglaDura = prompt.split("REGLA DURA sobre fuentes")[1];
     expect(reglaDura).toContain("post de RRSS");
   });
+
+  it("no duplica el texto de RRSS: aparece una sola vez en todo el prompt", () => {
+    const entity = getEntity("takenos");
+    const marca = "[instagram @takenosapp.bo · 2026-09-01] https://instagram.com/p/x — Caption única de esta corrida";
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: marca }, 7);
+    const ocurrencias = prompt.split(marca).length - 1;
+    expect(ocurrencias).toBe(1);
+  });
 });
 
 describe("parseAgentJson", () => {
