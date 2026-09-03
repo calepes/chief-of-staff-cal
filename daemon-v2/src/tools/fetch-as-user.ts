@@ -56,6 +56,14 @@ function stripHtml(html: string): string {
 // (minúsculas) y por SEGMENTO de path, no substring — evita que "/messages-de-prensa" bloquee de más
 // y que "/MESSAGES", "//messages" o "/./messages" esquiven el filtro (WHATWG URL ya colapsa
 // dot-segments y normaliza el hostname a minúsculas al parsear).
+//
+// Revisión adversarial (2026-09-03) encontró 4 vectores explotables HOY contra x.com/instagram.com
+// (ya whitelisteados con cookies reales) — los 4 quedan cerrados acá, con test de regresión:
+// 1) percent-encoding en el segmento ("dire%63t"→"direct") — decodificamos antes de comparar.
+// 2) hostname con punto final ("facebook.com.") — normalizamos sacando el trailing dot.
+// 3) "%2Fmessages"/barra encodeada — mismo fix que (1), decodeURIComponent la resuelve.
+// 4) el chequeo de entrada no sobrevive a un redirect (fetch conserva Cookie en redirects del mismo
+//    origen) — ver el chequeo post-fetch sobre res.url en fetchAsUser más abajo.
 interface MessagingRule {
   domain: string;
   // Segmento exacto de path que bloquea (ej. "messages"). null = dominio entero es mensajería.
@@ -71,6 +79,25 @@ const MESSAGING_RULES: MessagingRule[] = [
   { domain: "tiktok.com", segment: "messages" },
 ];
 
+// Hostname normalizado: minúsculas + sin punto(s) final(es) — "facebook.com." es DNS-equivalente
+// a "facebook.com" en casi cualquier resolver, pero como string no matchea ni la igualdad exacta
+// ni el endsWith(".facebook.com") de abajo.
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/, "");
+}
+
+// Primer segmento de path, decodificado y en minúsculas. null = percent-encoding malformado
+// (%zz, un "%" suelto) — el caller trata null como fail-closed, nunca como "sin segmento".
+function firstPathSegment(pathname: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  return decoded.toLowerCase().split("/").find((s) => s.length > 0) ?? "";
+}
+
 export function isPrivateMessagingUrl(url: string): boolean {
   let parsed: URL;
   try {
@@ -79,28 +106,26 @@ export function isPrivateMessagingUrl(url: string): boolean {
     return true; // fail-closed: si no parsea, no confiamos en él
   }
 
-  const hostname = parsed.hostname.toLowerCase();
-  const firstSegment = parsed.pathname
-    .toLowerCase()
-    .split("/")
-    .find((s) => s.length > 0);
+  const hostname = normalizeHostname(parsed.hostname);
+  const segment = firstPathSegment(parsed.pathname);
+  if (segment === null) return true; // fail-closed: percent-encoding malformado en el path
 
   for (const rule of MESSAGING_RULES) {
     const matchesDomain = hostname === rule.domain || hostname.endsWith(`.${rule.domain}`);
     if (!matchesDomain) continue;
     if (rule.segment === null) return true;
-    if (firstSegment === rule.segment) return true;
+    if (segment === rule.segment) return true;
   }
   return false;
 }
 
 function logBlockedMessagingUrl(url: string): void {
   let hostname = "(no parseable)";
-  let segment = "";
+  let segment = "(no parseable)";
   try {
     const parsed = new URL(url);
-    hostname = parsed.hostname.toLowerCase();
-    segment = parsed.pathname.toLowerCase().split("/").find((s) => s.length > 0) ?? "";
+    hostname = normalizeHostname(parsed.hostname);
+    segment = firstPathSegment(parsed.pathname) ?? "(percent-encoding malformado)";
   } catch {
     // hostname/segment quedan con el default — nunca logueamos el URL crudo (puede traer tokens)
   }
@@ -181,6 +206,32 @@ export async function fetchAsUser(
       signal: AbortSignal.timeout(timeoutMs),
       redirect: "follow",
     });
+
+    // El chequeo de ENTRADA no alcanza: con redirect:"follow", fetch puede terminar en una ruta de
+    // mensajería sin que la URL pedida lo fuera — y conserva el header Cookie en redirects del mismo
+    // origen, así que la sesión real de Cal viajaría igual. Elegimos revalidar la URL FINAL después
+    // del fetch (en vez de redirect:"manual" + validar cada salto) porque lo que de verdad hay que
+    // cerrar es que el LLM vea contenido de mensajería — acá cortamos ANTES de leer el body (nunca
+    // se llama res.text()), así que el contenido nunca llega a texto ni a log ni al caller. El
+    // request de red al host real ya salió (no se puede deshacer sin redirect:"manual"), pero eso
+    // es aceptable: es la propia sesión de Cal pegándole a su propia cuenta, no una fuga a un
+    // tercero — lo que importa es que el LLM no reciba ni un byte de esa respuesta.
+    // `res.url || url`: fetch real siempre popula `url` (igual al pedido si no hubo redirect); el
+    // fallback es solo para mocks/tests que no lo setean.
+    const finalUrl = res.url || url;
+    if (isPrivateMessagingUrl(finalUrl)) {
+      logBlockedMessagingUrl(finalUrl);
+      return {
+        ok: false,
+        status: 0,
+        url,
+        cookiesUsed,
+        text: "",
+        title: "",
+        error: "Bloqueado por seguridad: el fetch terminó (vía redirect) en una ruta de mensajería privada (Messenger/DMs).",
+        domainWhitelisted,
+      };
+    }
 
     const contentType = res.headers.get("content-type") ?? "";
     const raw = await res.text();

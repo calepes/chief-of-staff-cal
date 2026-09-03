@@ -52,6 +52,35 @@ describe("isPrivateMessagingUrl", () => {
     // dominio que contiene "facebook.com" como substring pero no como sufijo real
     expect(isPrivateMessagingUrl("https://notfacebook.com/messages")).toBe(false);
   });
+
+  // --- Regresión: 4 vectores de bypass encontrados por revisión adversarial 2026-09-03,
+  // reproducidos contra x.com/instagram.com (ya whitelisteados con cookies reales) ---
+
+  it("vector 1 — bloquea percent-encoding alfanumérico en el segmento de path", () => {
+    expect(isPrivateMessagingUrl("https://instagram.com/dire%63t")).toBe(true); // %63 = 'c'
+    expect(isPrivateMessagingUrl("https://facebook.com/me%73sages")).toBe(true); // %73 = 's'
+    expect(isPrivateMessagingUrl("https://x.com/mes%73ages")).toBe(true);
+  });
+
+  it("vector 2 — bloquea hostname con punto final (FQDN notation)", () => {
+    expect(isPrivateMessagingUrl("https://facebook.com./messages")).toBe(true);
+    expect(isPrivateMessagingUrl("https://x.com./messages")).toBe(true);
+    expect(isPrivateMessagingUrl("https://www.instagram.com./direct")).toBe(true);
+  });
+
+  it("vector 3 — bloquea barra encodeada (%2F) en el path", () => {
+    // "/%2Fmessages" decodifica a "//messages" → primer segmento real "messages"
+    expect(isPrivateMessagingUrl("https://x.com/%2Fmessages")).toBe(true);
+    // "/messages%2Ft%2F123" decodifica a "/messages/t/123" → primer segmento "messages"
+    // (sin decodificar, el segmento crudo "messages%2Ft%2F123" NO matchearía "messages" exacto —
+    // esto demuestra que el decode es lo que cierra el bypass, no una coincidencia)
+    expect(isPrivateMessagingUrl("https://facebook.com/messages%2Ft%2F123")).toBe(true);
+  });
+
+  it("percent-encoding malformado en el path falla cerrado (bloquea, sin tirar excepción)", () => {
+    expect(isPrivateMessagingUrl("https://elpais.com/articulo%")).toBe(true);
+    expect(isPrivateMessagingUrl("https://elpais.com/%zz")).toBe(true);
+  });
 });
 
 describe("fetchAsUser — bloqueo de mensajería privada", () => {
@@ -80,5 +109,31 @@ describe("fetchAsUser — bloqueo de mensajería privada", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(true);
+  });
+
+  it("vector 4 — revalida la URL final tras un redirect y bloquea si termina en mensajería", async () => {
+    // Simula un redirect del mismo host: se pide una URL pública, el servidor redirige a /messages.
+    // fetch() real hace esto transparente vía redirect:"follow" y conserva el header Cookie en
+    // redirects same-origin — por eso el chequeo de ENTRADA sobre "https://x.com/public-link" no
+    // alcanza; hay que revalidar res.url.
+    const fakeRes = {
+      ok: true,
+      status: 200,
+      url: "https://x.com/messages/t/1",
+      headers: { get: () => "text/html" },
+      text: vi.fn(async () => "<html><title>DMs</title>contenido privado de mensajería</html>"),
+    } as unknown as Response;
+    const fetchSpy = vi.fn().mockResolvedValue(fakeRes);
+
+    const result = await fetchAsUser("https://x.com/public-link", fakeKv, 15000, fetchSpy);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // el fetch de red sí ocurrió (redirect real del server)
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(0);
+    expect(result.text).toBe("");
+    expect(result.error).toBeTruthy();
+    expect(result.error).toMatch(/mensajería privada/i);
+    // el body NUNCA se lee — el contenido de mensajería no debe llegar a texto ni a log
+    expect((fakeRes as unknown as { text: ReturnType<typeof vi.fn> }).text).not.toHaveBeenCalled();
   });
 });
