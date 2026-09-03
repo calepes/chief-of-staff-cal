@@ -186,10 +186,16 @@ export async function getStructuredCookies(hostname: string, kv: CfKv): Promise<
 /**
  * Envuelve getStructuredCookies como el `getCookies` que espera runResearchCompetencia (research
  * de competencia, fase 2 — redes sociales). Devuelve solo las cookies, pero antes deja explícito
- * en el log POR QUÉ vinieron vacías: dominio no whitelisteado (los 4 dominios sociales todavía no
- * lo están — ver tarea 13) vs. whitelisteado pero sin cookie sincronizada. Sin este log las dos
- * causas se ven idénticas desde afuera ("el scraping corrió sin sesión"), y el tercer caso (hubo
- * cookies pero 0 posts) ya queda visible por los logs propios de research-competencia-social.ts.
+ * en el log POR QUÉ vinieron vacías: dominio no whitelisteado vs. whitelisteado pero sin cookie
+ * sincronizada. Sin este log las dos causas se ven idénticas desde afuera ("el scraping corrió sin
+ * sesión"), y el tercer caso (hubo cookies pero 0 posts) ya queda visible por los logs propios de
+ * research-competencia-social.ts.
+ *
+ * Estado real de la whitelist (`~/.claude/config/cookie-jar-domains.json`) al cablear esto:
+ * `x.com`/`twitter.com`/`instagram.com` YA ESTÁN whitelisteados (excepción de
+ * guardarReferenciaDiseno, autorizada por Cal 2026-07-31) — el scraping de X e Instagram corre con
+ * la sesión real de Cal apenas esto llegue a producción, no en no-op. Solo `tiktok.com` y
+ * `facebook.com` faltan (decisión de seguridad pendiente de Cal, tarea 13 — NO agregarlos acá).
  */
 export function makeSocialCookiesProvider(kv: CfKv): (hostname: string) => Promise<StructuredCookie[]> {
   return async (hostname: string) => {

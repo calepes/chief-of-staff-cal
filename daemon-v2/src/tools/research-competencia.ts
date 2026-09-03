@@ -39,6 +39,15 @@ const SOCIAL_TIMEOUT_MS = 8 * 60 * 1000;
 // exclusión cross-proceso, upgrade a un lock real (archivo/KV), no este flag.
 let researchInFlight = false;
 
+// Chequeo SÍNCRONO para que un caller (la tool `investigarCompetencia`) pueda mirar el estado
+// ANTES de arrancar, en vez de enterarse recién en el `.catch()` de la promesa rechazada — sin
+// esto, la tool devolvía `status:"started"` (el LLM le decía a Cal "arrancó") y un instante
+// después llegaba un ❌ contradictorio con el mensaje de este guard. `runResearchCompetencia`
+// sigue siendo la fuente de verdad (esto es una LECTURA del mismo flag, no reemplaza el guard).
+export function isResearchCompetenciaInFlight(): boolean {
+  return researchInFlight;
+}
+
 export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunResult> {
   if (researchInFlight) {
     throw new Error("Ya hay un research de competencia en curso — esperá a que termine antes de arrancar otro.");

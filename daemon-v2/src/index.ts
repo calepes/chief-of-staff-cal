@@ -211,7 +211,10 @@ const cookieJarKv = new CfKv({
   apiToken: env.CF_API_TOKEN,
 });
 // Proveedor de cookies del Cookie Broker para el research de competencia (fase 2 — redes
-// sociales) — reusado por el cron semanal y por la tool on-demand `investigarCompetencia`.
+// sociales), usado por el cron semanal de acá abajo. La tool on-demand `investigarCompetencia`
+// (agent-tools.ts) NO reusa esta instancia — construye la suya propia con
+// `makeSocialCookiesProvider(deps.cookieJarKv)` sobre el MISMO `cookieJarKv`, porque ese archivo
+// no tiene visibilidad de esta constante de módulo.
 const getSocialCookies = makeSocialCookiesProvider(cookieJarKv);
 const state = new ConversationState(kv, compactHistory);
 const journalStore = new JournalStore(kv);

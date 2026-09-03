@@ -1,3 +1,7 @@
+import { config as loadEnv } from "dotenv";
+loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
+loadEnv({ path: `${process.env.HOME}/.claude/secrets/apps.env` });
+
 // Fuerza auth OAuth Max (Keychain) — sin esto, si hay una API key de Tier 1 en el
 // entorno, el SDK la usa y tira 429. index.ts hace esto una vez por el daemon;
 // este script es un proceso aparte, así que lo repite acá.
@@ -34,7 +38,7 @@ async function main(): Promise<void> {
   const timeframeDias = Number.isFinite(timeframeDiasRaw) ? timeframeDiasRaw : undefined;
   const entidadIds = entidadesArg ? entidadesArg.split("=")[1].split(",").map((s) => s.trim()) : undefined;
 
-  console.log("Corriendo research de competencia... (puede tardar 1-3 minutos)");
+  console.log("Corriendo research de competencia... (puede tardar entre 10 y 45 minutos)");
   const result = await runResearchCompetencia({ timeframeDias, entidadIds, getCookies });
   console.log(stripHtmlTags(formatSummaryHtml(result)));
 }
