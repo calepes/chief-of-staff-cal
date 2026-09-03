@@ -79,6 +79,13 @@ function sanitizeField(s: string, max: number): string {
 
 export const MAX_POSTS_PER_ACCOUNT = 8;
 export const MAX_VIDEOS_PER_ACCOUNT = 4;
+// Tope de imágenes por post — un carrusel de Instagram admite hasta 10-20 slides, y sin este
+// tope UN post dispara 10-20 llamadas de visión. Las primeras 4 ya cubren lo que aporta valor
+// competitivo real (flyer/oferta principal + 1-2 variantes); el resto de un carrusel largo suele
+// ser relleno (mismo producto desde otro ángulo, detalles menores) con retorno marginal decreciente
+// para el análisis. Con MAX_POSTS_PER_ACCOUNT=8 el peor caso por cuenta queda en 32 llamadas de
+// visión (8 posts × 4 imágenes) en vez de hasta 160 (8 × 20) sin este tope.
+export const MAX_IMAGES_PER_POST = 4;
 
 export interface EnrichDeps {
   describeImageFn?: (url: string) => Promise<string | null>;
@@ -86,9 +93,34 @@ export interface EnrichDeps {
 }
 
 /**
+ * Chequeo best-effort de que `posts` viene más-reciente-primero — el contrato del que depende el
+ * `slice(0, MAX_POSTS_PER_ACCOUNT)` de `enrichPosts` (ver su comentario). Un scraper futuro que
+ * cambie el orden haría que ese slice se quede con los 8 posts equivocados EN SILENCIO, en un cron
+ * desatendido — esto no lo arregla (no reordena, no descarta), solo deja la señal. Compara pares
+ * consecutivos con fecha parseable únicamente: los posts sin fecha o con fecha no parseable no
+ * participan del contrato de orden (mismo criterio que `filterPostsByTimeframe`), así que se
+ * ignoran en vez de disparar falsos positivos. Un solo pase O(n), corta en la primera violación —
+ * una señal alcanza para saber que hay que mirar el scraper, no hace falta contar cuántas hay.
+ */
+function warnIfOrderViolated(posts: SocialPost[]): void {
+  let prev: Date | null = null;
+  for (const p of posts) {
+    if (!p.fecha) continue;
+    const d = parseFechaLaPaz(p.fecha);
+    if (d === null) continue;
+    if (prev !== null && d.getTime() > prev.getTime()) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_enrich_order_violation", url: p.url, fecha: p.fecha }));
+      return;
+    }
+    prev = d;
+  }
+}
+
+/**
  * Descarga y analiza la media de los posts, respetando los topes por cuenta del spec.
  * Los videos que exceden MAX_VIDEOS_PER_ACCOUNT se conservan como post (caption incluido)
- * pero sin análisis de video — el caption sigue teniendo valor.
+ * pero sin análisis de video — el caption sigue teniendo valor. Ídem las imágenes que exceden
+ * MAX_IMAGES_PER_POST dentro de un mismo carrusel.
  *
  * El tope de posts (`slice`) NO reordena — toma los primeros N tal cual llegan. El spec pide
  * quedarse con "los más recientes de la ventana", pero acá no hay forma confiable de ordenar:
@@ -96,10 +128,27 @@ export interface EnrichDeps {
  * así que un sort por `fecha` dejaría indeterminado dónde caen esos posts sin castigar el caso común.
  * Responsabilidad del caller (el scraper, `research-competencia-scrapers.ts`): entregar los posts
  * ya en orden más-reciente-primero, que es el orden natural en que las 4 plataformas listan un feed.
+ * `warnIfOrderViolated` es la red de seguridad barata contra que ese contrato se rompa sin avisar.
+ *
+ * ponytail: el pipeline es 100% secuencial (un `await` atrás del otro, sin `Promise.all` ni
+ * concurrencia) para posts, imágenes y videos. El scraping previo tiene su propia razón para ser
+ * secuencial (huella de automatización); acá las llamadas van a APIs propias de Cal (OpenRouter/
+ * ElevenLabs vía research-competencia-media.ts), donde ese argumento no aplica — es una decisión de
+ * simplicidad, no de necesidad, tomada porque el tope de MAX_IMAGES_PER_POST de arriba ya acota
+ * bastante el volumen y sumar paralelismo ahora es riesgo sin necesidad probada. Techo conocido:
+ * con MAX_VIDEOS_PER_ACCOUNT=4 (cada uno hasta ~120s de descarga + hasta 120s de ffmpeg audio +
+ * hasta 120s de ffmpeg frames + una llamada de visión por frame, ver los timeouts en
+ * research-competencia-media.ts) más hasta 4 posts de imagen restantes (MAX_IMAGES_PER_POST=4
+ * c/u), el peor caso de UNA cuenta puede llegar a decenas de minutos. Upgrade si esto llega a
+ * doler: paralelizar imágenes/frames DENTRO de un post con `Promise.all` (los posts entre sí
+ * pueden seguir secuenciales — más simple) o un límite de concurrencia (`p-limit`) sobre las
+ * llamadas de video, que son las más caras.
  */
 export async function enrichPosts(posts: SocialPost[], deps: EnrichDeps = {}): Promise<EnrichedPost[]> {
   const describeImageFn = deps.describeImageFn ?? describeImage;
   const analyzeVideoFn = deps.analyzeVideoFn ?? analyzeVideo;
+
+  warnIfOrderViolated(posts);
 
   const acotados = posts.slice(0, MAX_POSTS_PER_ACCOUNT);
   const enriched: EnrichedPost[] = [];
@@ -110,20 +159,37 @@ export async function enrichPosts(posts: SocialPost[], deps: EnrichDeps = {}): P
     try {
       if (p.esVideo) {
         if (videosAnalizados < MAX_VIDEOS_PER_ACCOUNT && p.mediaUrls[0]) {
-          const analisis = await analyzeVideoFn(p.mediaUrls[0]);
-          if (analisis) item.video = analisis;
+          // Incrementa ANTES de llamar a analyzeVideoFn — cuenta el INTENTO, no el éxito. Si
+          // contara solo tras un `await` resuelto sin tirar, un analyzeVideoFn que TIRA (posible
+          // vía la dep inyectable, aunque el analyzeVideo real de research-competencia-media.ts
+          // nunca tira) saltaría directo al catch sin incrementar, y ese intento saldría gratis
+          // contra el tope — el tope dejaría de depender de MAX_VIDEOS_PER_ACCOUNT y pasaría a
+          // depender de un detalle de implementación ajeno a este archivo.
           videosAnalizados++;
+          try {
+            const analisis = await analyzeVideoFn(p.mediaUrls[0]);
+            if (analisis) item.video = analisis;
+          } catch (err) {
+            console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_enrich_video_error", url: p.mediaUrls[0], err: String(err) }));
+          }
         }
       } else {
-        for (const url of p.mediaUrls) {
-          const desc = await describeImageFn(url);
-          if (desc) item.imagenes.push(desc);
+        // Try/catch POR URL — sin esto, una imagen rota en medio de un carrusel de 10 aborta el
+        // `for` ahí mismo: las imágenes siguientes NUNCA se intentan, y el resultado es
+        // indistinguible de "esas imágenes no tenían nada que decir" (silencioso, sin log).
+        for (const url of p.mediaUrls.slice(0, MAX_IMAGES_PER_POST)) {
+          try {
+            const desc = await describeImageFn(url);
+            if (desc) item.imagenes.push(desc);
+          } catch (err) {
+            console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_enrich_image_error", url, err: String(err) }));
+          }
         }
       }
     } catch (err) {
-      // Un post cuyo análisis falla se conserva igual (caption + URL siguen sirviendo) — pero
-      // esto corre en un cron desatendido, así que la falla queda logueada (mismo criterio que
-      // describeImage/analyzeVideo en research-competencia-media.ts).
+      // Red de seguridad general — con los try/catch puntuales de arriba (por imagen, por video)
+      // este nivel no debería dispararse en la práctica, pero esto corre en un cron desatendido:
+      // mejor un log de más que un post entero perdido en silencio por un error inesperado.
       console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_enrich_post_error", url: p.url, err: String(err) }));
     }
     enriched.push(item);

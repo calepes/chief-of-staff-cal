@@ -5,6 +5,7 @@ import {
   enrichPosts,
   MAX_POSTS_PER_ACCOUNT,
   MAX_VIDEOS_PER_ACCOUNT,
+  MAX_IMAGES_PER_POST,
   type SocialPost,
   type EnrichedPost,
 } from "./research-competencia-social.js";
@@ -162,5 +163,67 @@ describe("enrichPosts", () => {
     expect(enriched).toHaveLength(2);
     expect(enriched[0].imagenes).toEqual([]);
     expect(enriched[1].imagenes).toEqual(["Descripción de imagen"]);
+  });
+
+  it("una imagen que falla en medio de un carrusel no corta las que siguen (mismo post)", async () => {
+    const p = post({ mediaUrls: ["https://cdn/1.jpg", "https://cdn/roto.jpg", "https://cdn/3.jpg"] });
+    const describeImageFn = async (url: string) => {
+      if (url.includes("roto")) throw new Error("boom");
+      return `desc:${url}`;
+    };
+    const enriched = await enrichPosts([p], { ...deps, describeImageFn });
+    expect(enriched[0].imagenes).toEqual(["desc:https://cdn/1.jpg", "desc:https://cdn/3.jpg"]);
+  });
+
+  it("aplica el tope de imágenes por post", async () => {
+    const mediaUrls = Array.from({ length: MAX_IMAGES_PER_POST + 3 }, (_, i) => `https://cdn/${i}.jpg`);
+    let calls = 0;
+    const describeImageFn = async () => { calls++; return "desc"; };
+    const enriched = await enrichPosts([post({ mediaUrls })], { ...deps, describeImageFn });
+    expect(calls).toBe(MAX_IMAGES_PER_POST);
+    expect(enriched[0].imagenes).toHaveLength(MAX_IMAGES_PER_POST);
+  });
+
+  it("el tope de videos cuenta el INTENTO aunque analyzeVideoFn resuelva null", async () => {
+    const posts = Array.from({ length: MAX_VIDEOS_PER_ACCOUNT + 2 }, (_, i) =>
+      post({ url: `https://instagram.com/p/${i}`, esVideo: true, mediaUrls: ["https://cdn/v.mp4"] }));
+    let calls = 0;
+    const analyzeVideoFn = async () => { calls++; return null; };
+    await enrichPosts(posts, { ...deps, analyzeVideoFn });
+    expect(calls).toBe(MAX_VIDEOS_PER_ACCOUNT);
+  });
+
+  it("el tope de videos cuenta el INTENTO aunque analyzeVideoFn tire", async () => {
+    const posts = Array.from({ length: MAX_VIDEOS_PER_ACCOUNT + 2 }, (_, i) =>
+      post({ url: `https://instagram.com/p/${i}`, esVideo: true, mediaUrls: ["https://cdn/v.mp4"] }));
+    let calls = 0;
+    const analyzeVideoFn = async () => { calls++; throw new Error("boom"); };
+    const enriched = await enrichPosts(posts, { ...deps, analyzeVideoFn });
+    expect(calls).toBe(MAX_VIDEOS_PER_ACCOUNT);
+    expect(enriched).toHaveLength(posts.length);
+  });
+
+  it("loguea un warning si los posts no vienen más-reciente-primero", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const posts = [
+      post({ url: "https://instagram.com/p/1", fecha: "2026-08-01" }),
+      post({ url: "https://instagram.com/p/2", fecha: "2026-08-05" }),
+    ];
+    await enrichPosts(posts, deps);
+    const logged = spy.mock.calls.some(([line]) => String(line).includes("research_competencia_enrich_order_violation"));
+    spy.mockRestore();
+    expect(logged).toBe(true);
+  });
+
+  it("no loguea nada si los posts vienen en el orden correcto (más reciente primero)", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const posts = [
+      post({ url: "https://instagram.com/p/1", fecha: "2026-08-05" }),
+      post({ url: "https://instagram.com/p/2", fecha: "2026-08-01" }),
+    ];
+    await enrichPosts(posts, deps);
+    const logged = spy.mock.calls.some(([line]) => String(line).includes("order_violation"));
+    spy.mockRestore();
+    expect(logged).toBe(false);
   });
 });
