@@ -54,6 +54,13 @@ describe("buildEntityPrompt", () => {
     expect(prompt).toContain("redes sociales");
     expect(prompt).toContain("URL del post");
   });
+
+  it("la REGLA DURA de fuentes incluye la URL de un post de RRSS como procedencia válida", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null }, 7);
+    const reglaDura = prompt.split("REGLA DURA sobre fuentes")[1];
+    expect(reglaDura).toContain("post de RRSS");
+  });
 });
 
 describe("parseAgentJson", () => {
