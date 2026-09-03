@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Research de competencia de Yape Bolivia — cron semanal standalone.
+
+    Corre `daemon-v2/scripts/research-competencia-now.ts` FUERA del daemon de Jano (ya no hay
+    cron interno ni tool de Telegram para esto — ver docs/superpowers/specs/2026-09-02-research-
+    competencia-fase2-design.md). Scrapea Instagram/TikTok/Facebook/X de 6 competidores, analiza
+    imágenes y videos, escribe hallazgos y battlecards en Notion, y notifica el resumen por
+    @ClaudeCalbot (NOTIF_BOT_TOKEN, no el bot de Jano).
+
+    Precedente del patrón (FDA + node-fda, sin `npm run`/`bash -lc` en el medio):
+    ~/Library/LaunchAgents/com.cal.cookie-jar-sync.plist.
+
+    ⚠️ Requiere Full Disk Access — el research lee la sesión de Safari (Cookies.binarycookies)
+    DIRECTO para inyectar cookies logueadas en el scraping social (research-competencia-cookies.ts,
+    lista de dominios propia y congelada — NO pasa por el Cookie Broker ni su whitelist global, ver
+    el spec). El permiso está atado al binario `~/.claude/bin/node-fda`, NO a "node" en general:
+    `npm run research:now` perdería el permiso en silencio (arranca el `node` del PATH). Por eso
+    ProgramArguments invoca `node-fda` directo con `--import tsx/esm`, un solo proceso, sin `tsx`
+    (el CLI) ni `bash -lc` de por medio — cualquiera de esos podría re-exec en un subproceso que no
+    conserve la identidad de node-fda. Mismo razonamiento documentado en el header de
+    research-competencia-now.ts.
+
+    Horario — lunes 06:00 hora La Paz (America/La_Paz, UTC-4, sin DST):
+    - Fase 1 corría lunes 07:00, pero ese horario hoy choca con com.claude.heartbeat (arranca
+      07:00, cada 30 min hasta 22:30) — el research puede tardar entre 10 y 45 minutos
+      (comentario del propio script) y es pesado (scraping + visión + transcripción), así que no
+      conviene que se pise con crons livianos corriendo en paralelo.
+    - 05:00 (com.claude.daily-briefings) y 05:40 (com.cal.cookie-jar-sync + com.cal.digest-social,
+      ya los dos en ese mismo minuto) están ocupados.
+    - 06:00 deja un colchón de ~20-60 min después de esos tres antes de que arranquen, y termina
+      (peor caso 45 min → ~06:45) ANTES de que arranque heartbeat a las 07:00 — sin superponerse
+      con ningún otro cron pesado.
+
+    Logs: sigue la convención de los procesos standalone adyacentes a Jano (no el daemon en sí,
+    que loguea a ~/Library/Logs/cos-agent-v2.*.log) — mismo patrón que
+    ~/Library/Logs/cine-mcp-jano.{out,err}.log.
+
+    Sin secretos acá: el script resuelve sus propias credenciales (OPENROUTER_API_KEY,
+    ELEVENLABS_API_KEY, NOTIF_BOT_TOKEN) vía dotenv desde ~/.cos-agent/.env,
+    ~/.claude/notifications/.env y ~/.claude/secrets/apps.env — ver research-competencia-now.ts.
+
+    INSTALAR (Cal decide cuándo — NO se instala solo):
+      cp com.cal.jano-research-competencia.plist ~/Library/LaunchAgents/
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cal.jano-research-competencia.plist
+
+    VERIFICAR que quedó cargado:
+      launchctl print gui/$(id -u)/com.cal.jano-research-competencia | grep -E "state|path"
+      # o disparar un run manual ahora mismo, sin esperar al lunes:
+      launchctl kickstart -k gui/$(id -u)/com.cal.jano-research-competencia
+      tail -f ~/Library/Logs/jano-research-competencia.{out,err}.log
+
+    DESACTIVAR:
+      launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cal.jano-research-competencia.plist
+      rm ~/Library/LaunchAgents/com.cal.jano-research-competencia.plist
+  -->
+
+  <key>Label</key>
+  <string>com.cal.jano-research-competencia</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/calepes/.claude/bin/node-fda</string>
+    <string>--import</string>
+    <string>tsx/esm</string>
+    <string>scripts/research-competencia-now.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/calepes/Claude Projects/Personal/Agents/Jano/daemon-v2</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/calepes/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/calepes/Library/Logs/jano-research-competencia.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/calepes/Library/Logs/jano-research-competencia.err.log</string>
+</dict>
+</plist>

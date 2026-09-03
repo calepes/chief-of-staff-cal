@@ -10,7 +10,50 @@
 
 ---
 
+## ⚠️ Estado real vs. plan original (actualizado 2026-09-03)
+
+Este plan se escribió asumiendo que el research seguía cableado DENTRO del daemon de Jano (cron
+interno `node-cron`, tool de Telegram `investigarCompetencia`, cookies vía el Cookie Broker
+compartido). **A mitad de la implementación Cal decidió sacarlo del daemon** — ver
+`docs/superpowers/specs/2026-09-02-research-competencia-fase2-design.md` para el detalle completo
+y el motivo. Las Tasks 1-11 (módulos de media, scrapers de las 4 plataformas, tipos, entidades,
+dispatcher, cableado al orquestador, prompt) se implementaron tal cual están escritas abajo — esa
+parte del plan es fiel al código real. **Las Tasks 12-14 y la tabla "Estructura de archivos" de
+abajo NO** — quedan tal cual como registro histórico de lo que se planeó, pero lo que se construyó
+de verdad fue distinto, resumido acá:
+
+| Plan original (Tasks 12-14) | Lo que se construyó |
+|---|---|
+| Cron interno del daemon (`scheduleResearchCompetenciaWeekly`, `proactive/research-competencia-weekly.ts`) + tool de Telegram `investigarCompetencia` | **Ninguno de los dos existe.** El único disparador automático es un cron **externo de launchd** sobre `daemon-v2/scripts/research-competencia-now.ts` — ver `launchd/com.cal.jano-research-competencia.plist` (creado, sin instalar) — más el comando `/research-competencia` para correrlo a demanda desde una sesión de Claude Code (`~/.claude/commands/research-competencia.md`, fuera del repo). |
+| Cookies vía el Cookie Broker (`getStructuredCookies` sobre el KV compartido `cookie-jar`) | **`research-competencia-cookies.ts`** (nuevo) lee la sesión de Safari **directo** (`Cookies.binarycookies`, requiere Full Disk Access) con una lista de dominios **propia y congelada** (`SOCIAL_DOMAINS`) — el Cookie Broker y su whitelist global NO se tocan para esto. Motivo: esa whitelist también la consume `fetchAsUser`, invocable por el LLM de Jano con URL arbitraria — sumarle facebook.com/tiktok.com ahí le habría dado acceso autenticado a Messenger/DMs. Ver el spec, sección "Cookies". |
+| `~/.claude/config/cookie-jar-domains.json` gana los 4 dominios sociales | **No se tocó.** Instagram y X ya estaban whitelisteados desde 2026-07-31 (por otro flujo, Referencias de Diseño); Facebook y TikTok nunca entraron a esa whitelist. |
+| `package.json` → `research:now` corre bajo `op run --env-file=...` | El script no necesita `op run`: sin el Cookie Broker de por medio, las únicas credenciales que usa (`OPENROUTER_API_KEY`, `ELEVENLABS_API_KEY`, `NOTIF_BOT_TOKEN`) llegan en texto plano por `dotenv` (`~/.cos-agent/.env`, `~/.claude/notifications/.env`, `~/.claude/secrets/apps.env`), validadas al arranque. El comando real es `"$HOME/.claude/bin/node-fda" --import tsx/esm scripts/research-competencia-now.ts` — corre bajo `node-fda` para Full Disk Access (lee cookies de Safari), no bajo `op run`. |
+| Reiniciar `com.cal.cos-agent-v2` y probar "pidiéndole a Jano" por Telegram | No aplica — no hay nada que reiniciar en el daemon (no se tocó `index.ts`/`agent-tools.ts`/`system-prompt.ts` para esto). La verificación es correr el script standalone y revisar Notion + la notificación de @ClaudeCalbot. |
+
+**Efecto colateral de sacarlo del daemon, no planeado originalmente:** con el LLM ya no en el
+camino (nada de esto pasa por `runAgent()`/el agente SDK de Jano), la superficie de riesgo de
+"un LLM con `fetchAsUser` y una whitelist más ancha" dejó de aplicarle a este research — pero
+`fetchAsUser` en sí SÍ se endureció durante esta fase (bloqueo de rutas de mensajería privada,
+ver el spec) porque la revisión adversarial que motivó ese hardening encontró que el agujero ya
+existía desde julio (X e Instagram llevaban whitelisteados con cookies reales desde el 2026-07-31),
+independientemente de este research.
+
+**No probado contra las páginas reales — ninguna de las 4 plataformas.** Los 4 scrapers
+(`research-competencia-social.ts`) están escritos con criterio y testeados contra fixtures (Task
+13 del plan original quedó sin ejecutar: whitelist ya cubierta, pero la verificación en vivo de
+selectores/JSON contra Instagram/TikTok/Facebook/X reales — Step 3 y 4 de esa task — no se corrió).
+Los selectores de Facebook y X en particular (`parseDomPosts`/`scrapeDom`, basados en
+`article`/`[role="article"]`) son los más frágiles: ambos sitios cambian markup seguido y nunca se
+confirmó contra el DOM real. Primera corrida real (cuando Cal active el cron o corra
+`/research-competencia`) es también la primera prueba de humo end-to-end de los 4 scrapers.
+
+---
+
 ## Estructura de archivos
+
+> Tabla del plan ORIGINAL — ver la tabla de arriba para lo que cambió. Dejada intacta como
+> registro de lo planeado; los dos últimos renglones (`op run`, whitelist del Cookie Broker) no
+> reflejan el código final.
 
 | Archivo | Responsabilidad |
 |---|---|
@@ -22,7 +65,23 @@
 | `daemon-v2/scripts/research-competencia-now.ts` + `package.json` (modificar) | El script corre bajo `op run` para tener las credenciales de CF/OpenRouter/ElevenLabs. |
 | `~/.claude/config/cookie-jar-domains.json` (fuera del repo) | Whitelist de los 4 dominios sociales. |
 
-**Topes (del spec):** 8 posts por cuenta, 4 videos por cuenta, 6 frames por video, se saltean videos de más de 5 min.
+**Archivos reales que reemplazan al plan original (no listados arriba):**
+
+| Archivo | Responsabilidad |
+|---|---|
+| `daemon-v2/src/tools/research-competencia-cookies.ts` (nuevo, no planeado) | Lee cookies de Safari directo (`SAFARI_COOKIES_PATH`), lista de dominios propia congelada (`SOCIAL_DOMAINS`), fail-closed en dos niveles (hostname fuera de la lista / fallo de lectura sin FDA). |
+| `daemon-v2/src/tools/fetch-as-user.ts` (endurecido, no planeado originalmente en este plan) | `isPrivateMessagingUrl()` — bloqueo fail-closed de rutas de mensajería privada (Messenger/DMs de Facebook/X/Twitter/Instagram/TikTok), resistente a percent-encoding, hostname con punto final y redirects. Ver el spec, sección "Endurecimiento de `fetchAsUser`". |
+| `daemon-v2/scripts/research-competencia-env.ts` (nuevo, no planeado) | Valida env vars requeridas al arranque del script standalone, falla explícito antes de correr. |
+| `daemon-v2/scripts/research-competencia-notify.ts` (nuevo, no planeado) | Envío del resumen por @ClaudeCalbot (`NOTIF_BOT_TOKEN`), separado del script para poder testearse sin los side effects de `loadEnv`. |
+| `launchd/com.cal.jano-research-competencia.plist` (nuevo, no planeado) | Cron semanal externo — reemplaza al cron interno `scheduleResearchCompetenciaWeekly` que este plan diseñaba. |
+
+**Topes (del spec, SÍ vigentes tal cual se implementaron):** 8 posts por cuenta
+(`MAX_POSTS_PER_ACCOUNT`), 4 videos por cuenta (`MAX_VIDEOS_PER_ACCOUNT`), hasta 6 frames por video
+(`MAX_FRAMES_PER_VIDEO`), se saltean videos de más de 5 min. Además, un **deadline de 8 minutos por
+entidad** para el scraping social completo (`research-competencia.ts`) — no estaba en el plan
+original, se agregó durante la implementación porque una entidad con varios handles y videos puede
+tardar legítimamente más que eso, y sin techo una sola entidad lenta podía comerse buena parte del
+presupuesto de 20-40 min estimado para la corrida entera.
 
 ---
 
@@ -1434,6 +1493,12 @@ git commit -m "feat(research-competencia): el prompt reconoce RRSS como fuente c
 
 ### Task 12: Cookies en los 3 puntos de entrada
 
+> ⚠️ **NO se implementó así — ver "Estado real vs. plan original" al inicio del documento.** Esta
+> task asumía cron interno + tool de Telegram + Cookie Broker. Lo real: `research-competencia-cookies.ts`
+> (lista propia, cookies de Safari directo) inyectado en el único punto de entrada real que quedó
+> (`research-competencia-now.ts`, vía `makeResearchCompetenciaCookiesProvider()`). Queda abajo tal
+> cual se escribió, como registro de lo planeado — no como instrucción vigente.
+
 **Files:**
 - Modify: `daemon-v2/src/index.ts` (cron y tool ya existentes)
 - Modify: `daemon-v2/src/proactive/research-competencia-weekly.ts`
@@ -1520,9 +1585,17 @@ git commit -m "feat(research-competencia): cookies del broker en los 3 puntos de
 
 ### Task 13: Whitelist de dominios y verificación en vivo de los scrapers
 
+> ⚠️ **Step 1 (whitelist del Cookie Broker) NO aplica — ver "Estado real vs. plan original" al
+> inicio del documento.** Este research no toca `~/.claude/config/cookie-jar-domains.json` — usa
+> su propia lista en `research-competencia-cookies.ts`, sin whitelist que editar. **Steps 2-5
+> (sincronizar cookies de Safari, probar cada scraper contra una cuenta real, verificar el
+> pipeline punta a punta, ajustar selectores) siguen siendo el trabajo pendiente real** — no se
+> ejecutaron en esta fase. Ninguna de las 4 plataformas se probó contra las páginas reales
+> todavía; la primera corrida real (cron o `/research-competencia`) es la primera prueba de humo.
+
 **Files:**
-- Modify: `~/.claude/config/cookie-jar-domains.json` (fuera del repo)
-- Modify: `daemon-v2/src/tools/research-competencia-social.ts` (ajuste de selectores según lo que se vea en vivo)
+- ~~Modify: `~/.claude/config/cookie-jar-domains.json` (fuera del repo)~~ — no aplica, ver arriba.
+- Modify: `daemon-v2/src/tools/research-competencia-social.ts` (ajuste de selectores según lo que se vea en vivo) — **pendiente, sin hacer.**
 
 **Contexto:** Los 4 parsers están testeados contra fixtures, pero los selectores y rutas de JSON reales solo se pueden validar contra las páginas en vivo. Esta task es de verificación y ajuste, no de diseño nuevo.
 
@@ -1595,6 +1668,13 @@ git commit -m "fix(research-competencia): ajustar selectores de scraping según 
 
 ### Task 14: Despliegue
 
+> ⚠️ **Step 2 (reiniciar el daemon) y Step 3 (pedirle a Jano por Telegram) NO aplican — ver
+> "Estado real vs. plan original" al inicio del documento.** No hay nada del daemon que reiniciar
+> (esta fase no tocó `index.ts`/`agent-tools.ts`/`system-prompt.ts`). El despliegue real es:
+> instalar `launchd/com.cal.jano-research-competencia.plist` cuando Cal decida activarlo (el
+> archivo se creó pero **no se instaló** — instrucciones de instalación/verificación/desactivación
+> dentro del propio plist), y correr `/research-competencia` o el cron para la primera prueba real.
+
 **Files:** ninguno — es despliegue y verificación.
 
 - [ ] **Step 1: Build final y suite completa**
@@ -1605,7 +1685,7 @@ cd daemon-v2 && npx vitest run && npx tsc --noEmit && npm run build
 
 Expected: todos los tests en verde, sin errores de tipos, build limpio.
 
-- [ ] **Step 2: Reiniciar el daemon — REQUIERE CONFIRMACIÓN EXPLÍCITA DE CAL ANTES DE EJECUTAR**
+- [ ] ~~**Step 2: Reiniciar el daemon**~~ — no aplica, ver arriba.
 
 ```bash
 launchctl bootout gui/501/com.cal.cos-agent-v2
@@ -1615,11 +1695,9 @@ sleep 3
 launchctl list | grep cos-agent
 ```
 
-Expected: PID nuevo con exit status 0, estable tras unos segundos.
-
-- [ ] **Step 3: Prueba real por Telegram — requiere que Cal la haga**
-
-Pedirle a Jano: "corre el research de competencia de los últimos 7 días". Verificar que llega el resumen, que el link del informe abre, y que aparecen hallazgos con fuente de RRSS.
+- [ ] ~~**Step 3: Prueba real por Telegram**~~ — no aplica, ver arriba. La prueba real es correr
+  `npm run research:now` (o `/research-competencia`) a mano y revisar Notion + la notificación de
+  @ClaudeCalbot — **pendiente, sin hacer todavía contra las 4 plataformas reales.**
 
 ---
 
@@ -1627,5 +1705,16 @@ Pedirle a Jano: "corre el research de competencia de los últimos 7 días". Veri
 
 - **No inventar handles.** Si un handle de la tabla resulta no existir en vivo, quitarlo de la config y dejar constancia — no sustituirlo por uno parecido.
 - **Los 3 niveles de aislamiento de fallas son el corazón del diseño** (post → cuenta → entidad). Cualquier `try/catch` que se saque puede hacer que una plataforma bloqueada tumbe la corrida entera.
-- **El daemon no tiene control genérico de browser a propósito** (ver `DISALLOWED_BUILTINS` en `agent-options.ts`). Playwright se usa SOLO dentro de estos módulos, nunca expuesto como tool al LLM — mismo principio que `design-capture.ts`, `boa-checkin` y `cine`.
-- **Costo real por corrida:** con los topes del spec, una corrida semanal completa procesa hasta ~24 cuentas × 8 posts, con hasta 4 videos por cuenta a 6 frames cada uno. Estimado 20-40 min. Si en la práctica se dispara, los topes viven como constantes en `research-competencia-social.ts` y `research-competencia-media.ts`.
+- **El daemon no tiene control genérico de browser a propósito** (ver `DISALLOWED_BUILTINS` en `agent-options.ts`). Playwright se usa SOLO dentro de estos módulos, nunca expuesto como tool al LLM — mismo principio que `design-capture.ts`, `boa-checkin` y `cine`. (Con el cambio de arquitectura de abajo, esto ya ni siquiera es una restricción prestada del daemon — el script standalone tampoco expone Playwright a ningún LLM.)
+- **Costo real por corrida:** con los topes del spec, una corrida semanal completa procesa hasta ~24 cuentas × 8 posts, con hasta 4 videos por cuenta a 6 frames cada uno. Estimado 20-40 min. Si en la práctica se dispara, los topes viven como constantes en `research-competencia-social.ts` y `research-competencia-media.ts`. Además hay un **deadline de 8 minutos por entidad** (`research-competencia.ts`) — no estaba en este plan, agregado durante la implementación como techo del peor caso.
+
+## Qué falta de verdad (2026-09-03)
+
+Ver la sección "⚠️ Estado real vs. plan original" al inicio del documento para el detalle completo
+del cambio de arquitectura. Resumen de lo pendiente:
+
+1. **Ninguna de las 4 plataformas se probó contra las páginas reales.** Task 13 (Steps 2-5) nunca
+   se ejecutó. Los selectores de Facebook y X en particular son los más frágiles — nunca vieron un
+   DOM real.
+2. **El plist del cron semanal existe pero no está instalado** — `launchd/com.cal.jano-research-competencia.plist`, Cal decide cuándo activarlo (instrucciones dentro del archivo).
+3. **`/research-competencia` (comando de sesión interactiva) sí es la vía on-demand real** — reemplaza a la tool de Telegram `investigarCompetencia` que este plan diseñaba y que nunca se construyó.
