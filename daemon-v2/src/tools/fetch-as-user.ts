@@ -64,6 +64,19 @@ function stripHtml(html: string): string {
 // 3) "%2Fmessages"/barra encodeada — mismo fix que (1), decodeURIComponent la resuelve.
 // 4) el chequeo de entrada no sobrevive a un redirect (fetch conserva Cookie en redirects del mismo
 //    origen) — ver el chequeo post-fetch sobre res.url en fetchAsUser más abajo.
+//
+// Regresión encontrada por una SEGUNDA pasada adversarial el mismo día (2026-09-03): el fail-closed
+// del punto 1 corría ANTES del loop de reglas, así que CUALQUIER dominio (no solo mensajería) con un
+// "%" mal formado en el path quedaba bloqueado — un artículo de El País con un "%" suelto en la URL
+// nunca llegaba a fetchear, con el mensaje engañoso de "mensajería privada". Fix: el chequeo de
+// percent-encoding malformado ahora vive DENTRO del loop, solo quando el hostname YA matcheó una
+// regla de mensajería — un path no decodificable en un dominio sin DMs no es un riesgo de
+// exfiltración, así que no hay motivo para bloquearlo.
+//
+// Limitación conocida, evaluada y NO cerrada (misma revisión, 2026-09-03): double-encoding
+// ("dire%2563t") y homoglifos Unicode/fullwidth no se defienden acá — el servidor real de
+// Instagram/Facebook decodifica una sola vez (recibiría el path literal, 404) y los homoglifos no
+// rutean a contenido real. El control asume decodificación simple del lado del servidor.
 interface MessagingRule {
   domain: string;
   // Segmento exacto de path que bloquea (ej. "messages"). null = dominio entero es mensajería.
@@ -107,13 +120,17 @@ export function isPrivateMessagingUrl(url: string): boolean {
   }
 
   const hostname = normalizeHostname(parsed.hostname);
-  const segment = firstPathSegment(parsed.pathname);
-  if (segment === null) return true; // fail-closed: percent-encoding malformado en el path
 
   for (const rule of MESSAGING_RULES) {
     const matchesDomain = hostname === rule.domain || hostname.endsWith(`.${rule.domain}`);
     if (!matchesDomain) continue;
-    if (rule.segment === null) return true;
+    if (rule.segment === null) return true; // dominio entero es mensajería, no importa el path
+    // Fail-closed SOLO acá adentro: el hostname YA matcheó una plataforma de mensajería, así que
+    // un path no decodificable en ESE dominio es sospechoso — no lo dejamos pasar. Un dominio
+    // cualquiera con el mismo "%" mal formado nunca llega a este punto (matchesDomain ya cortó
+    // arriba), así que no se bloquea de más.
+    const segment = firstPathSegment(parsed.pathname);
+    if (segment === null) return true;
     if (segment === rule.segment) return true;
   }
   return false;

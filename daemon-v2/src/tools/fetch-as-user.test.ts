@@ -77,9 +77,22 @@ describe("isPrivateMessagingUrl", () => {
     expect(isPrivateMessagingUrl("https://facebook.com/messages%2Ft%2F123")).toBe(true);
   });
 
-  it("percent-encoding malformado en el path falla cerrado (bloquea, sin tirar excepción)", () => {
-    expect(isPrivateMessagingUrl("https://elpais.com/articulo%")).toBe(true);
-    expect(isPrivateMessagingUrl("https://elpais.com/%zz")).toBe(true);
+  // Regresión encontrada por una segunda revisión adversarial el mismo día: el fail-closed de
+  // percent-encoding malformado corría ANTES de mirar el hostname, así que bloqueaba CUALQUIER
+  // dominio con un "%" suelto en el path — un artículo real de El País nunca llegaba a fetchear,
+  // con el mensaje engañoso de "mensajería privada". El fail-closed debe aplicar SOLO cuando el
+  // hostname ya es de una plataforma de mensajería (no hay riesgo de exfiltración de DMs en un
+  // sitio que no tiene DMs).
+  it("percent-encoding malformado en un dominio SIN mensajería no bloquea (sin tirar excepción)", () => {
+    expect(isPrivateMessagingUrl("https://elpais.com/articulo%")).toBe(false);
+    expect(isPrivateMessagingUrl("https://elpais.com/economia/oferta-50%-descuento")).toBe(false);
+    expect(isPrivateMessagingUrl("https://elpais.com/%zz")).toBe(false);
+  });
+
+  it("percent-encoding malformado en un dominio de mensajería SÍ bloquea (fail-closed conservado)", () => {
+    expect(isPrivateMessagingUrl("https://facebook.com/articulo%")).toBe(true);
+    expect(isPrivateMessagingUrl("https://x.com/%zz")).toBe(true);
+    expect(isPrivateMessagingUrl("https://instagram.com/%")).toBe(true);
   });
 });
 
