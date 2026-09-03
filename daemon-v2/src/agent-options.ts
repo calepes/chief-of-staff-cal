@@ -247,7 +247,11 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__achoradazos__getActiveEvento",
   "mcp__achoradazos__getActiveConcepto",
   "mcp__achoradazos__getPendingPaymentMessage",
-  // inversiones-query — portfolio de inversiones de Cal (Kubera + Yahoo Finance + Airtable)
+  // inversiones-query — portfolio de inversiones de Cal (Kubera + Yahoo Finance + Airtable).
+  // Solo lectura A PROPÓSITO (decisión de Cal 2026-09-03): registrar operaciones, ajustar
+  // posiciones en Kubera, refrescar precios y el snapshot de Tracking Portfolio quedan
+  // exclusivos de la sesión interactiva de Claude Code — recordTransaction/kuberaCashFlow/
+  // kuberaUpdateShares/kuberaFindCustodian NO se wirean acá a propósito, no por olvido.
   "mcp__inversiones-query__getPortfolioSummary",
   "mcp__inversiones-query__getDailyMovers",
   "mcp__inversiones-query__getTickerNews",
@@ -258,10 +262,6 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   "mcp__inversiones-query__getTransactionHistory",
   "mcp__inversiones-query__getPortfolioConcentration",
   "mcp__inversiones-query__searchPosition",
-  "mcp__inversiones-query__recordTransaction",
-  "mcp__inversiones-query__kuberaCashFlow",
-  "mcp__inversiones-query__kuberaUpdateShares",
-  "mcp__inversiones-query__kuberaFindCustodian",
   // Libros (Notion BD) — gestión de la biblioteca personal de Cal
   "mcp__cos-tools__searchBooks",
   "mcp__cos-tools__addBook",
