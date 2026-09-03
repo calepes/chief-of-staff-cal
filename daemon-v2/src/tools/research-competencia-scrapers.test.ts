@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { parseInstagramPosts, extractInstagramNodes } from "./research-competencia-scrapers.js";
+import {
+  parseInstagramPosts,
+  extractInstagramNodes,
+  parseTikTokPosts,
+  extractTikTokNodes,
+} from "./research-competencia-scrapers.js";
 
 /** Nodo de post válido tal como aparece embebido en el JSON del timeline de Instagram. */
 const NODO_VALIDO = {
@@ -107,6 +112,92 @@ describe("extractInstagramNodes", () => {
     const scriptTexts = ["window.foo = {not valid json here shortcode"];
 
     const { nodos, diagnostics } = extractInstagramNodes(scriptTexts);
+
+    expect(nodos).toEqual([]);
+    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 0 });
+  });
+});
+
+describe("parseTikTokPosts", () => {
+  it("extrae descripción, url, fecha y video", () => {
+    const items = [
+      {
+        id: "7500000000000000000",
+        desc: "Así funciona el QR delegado",
+        createTime: 1788307200,
+        video: { playAddr: "https://cdn.tiktok.com/v.mp4" },
+      },
+    ];
+
+    const posts = parseTikTokPosts(items, "altoke.bo");
+
+    expect(posts[0]).toMatchObject({
+      platform: "tiktok",
+      handle: "altoke.bo",
+      url: "https://www.tiktok.com/@altoke.bo/video/7500000000000000000",
+      caption: "Así funciona el QR delegado",
+      esVideo: true,
+      mediaUrls: ["https://cdn.tiktok.com/v.mp4"],
+    });
+    expect(posts[0].fecha).toBe("2026-09-01");
+  });
+
+  it("ignora items sin id", () => {
+    expect(parseTikTokPosts([{ desc: "x" }], "altoke.bo")).toEqual([]);
+  });
+
+  it("usa string vacío de caption si falta desc, y mediaUrls vacío si falta el video", () => {
+    const posts = parseTikTokPosts([{ id: "1" }], "altoke.bo");
+    expect(posts[0]).toMatchObject({ caption: "", mediaUrls: [], esVideo: true });
+  });
+});
+
+/** Item de video válido tal como aparece embebido en el JSON de rehidratación de TikTok. */
+const ITEM_VALIDO = {
+  id: "7500000000000000001",
+  desc: "Otro video",
+  createTime: 1700000000,
+  video: { playAddr: "https://cdn.tiktok.com/otro.mp4" },
+};
+
+/** Mismo propósito que `scriptTextFor` de arriba, adaptado al script de rehidratación de TikTok
+ * (`__UNIVERSAL_DATA_FOR_REHYDRATION__` es JSON puro sin prefijo `window.x =`, pero igual se
+ * respeta el patrón de `indexOf("{")` + sin sufijo colgante tras el JSON). */
+function tiktokScriptTextFor(obj: unknown): string {
+  return JSON.stringify(obj);
+}
+
+describe("extractTikTokNodes", () => {
+  it("encuentra un item anidado dentro del tope de profundidad", () => {
+    const scriptTexts = [tiktokScriptTextFor(wrapDeep(ITEM_VALIDO, 3))];
+
+    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts);
+
+    expect(nodos).toEqual([ITEM_VALIDO]);
+    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 1 });
+  });
+
+  it("NO encuentra un item a más de 8 niveles de profundidad — mismo tope que Instagram", () => {
+    const scriptTexts = [tiktokScriptTextFor(wrapDeep(ITEM_VALIDO, 9))];
+
+    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts);
+
+    expect(nodos).toEqual([]);
+    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 0 });
+  });
+
+  it("encuentra el item justo en el límite (8 niveles de profundidad)", () => {
+    const scriptTexts = [tiktokScriptTextFor(wrapDeep(ITEM_VALIDO, 8))];
+
+    const { nodos } = extractTikTokNodes(scriptTexts);
+
+    expect(nodos).toEqual([ITEM_VALIDO]);
+  });
+
+  it("ignora un script sin JSON válido en vez de romper, y no lo cuenta como productivo", () => {
+    const scriptTexts = ["{not valid json here desc video"];
+
+    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts);
 
     expect(nodos).toEqual([]);
     expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 0 });

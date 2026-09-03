@@ -1,8 +1,8 @@
 // tools/research-competencia-scrapers.ts — scrapers headless por plataforma para el research de
 // competencia (fase 2, redes sociales). Separado de research-competencia-social.ts a propósito:
 // ese archivo se queda con tipos/filtro/formateo/orquestación; acá vive el detalle de Playwright
-// por red social (Instagram en esta tarea; TikTok/Facebook se suman en tareas posteriores, ambos
-// vía `withBrowserContext`).
+// por red social (Instagram y TikTok en esta tarea; Facebook se suma en una tarea posterior, vía
+// `withBrowserContext`).
 //
 // Mismo patrón que design-capture.ts: chromium.launch({headless:true}), cookies inyectadas al
 // contexto, try/finally con browser.close(). El LLM no tiene tool de navegación genérica — esto
@@ -194,5 +194,103 @@ export async function scrapeInstagram(handle: string, cookies: StructuredCookie[
     const scriptTexts = await collectCandidateScripts(page);
     const { nodos, diagnostics } = extractInstagramNodes(scriptTexts);
     return { items: parseInstagramPosts(nodos, handle), diagnostics };
+  });
+}
+
+/**
+ * Parsea los items crudos del feed de TikTok (extraídos del JSON embebido en el script de
+ * rehidratación `#__UNIVERSAL_DATA_FOR_REHYDRATION__` de la página de perfil) a `SocialPost`.
+ * Función pura — sin red — mismo criterio que `parseInstagramPosts`. Todo post de TikTok es
+ * video, así que `esVideo` es siempre `true` (no hay campo equivalente a `is_video` que leer).
+ */
+export function parseTikTokPosts(items: unknown[], handle: string): SocialPost[] {
+  const posts: SocialPost[] = [];
+  for (const raw of items) {
+    const n = raw as { id?: string; desc?: string; createTime?: number; video?: { playAddr?: string } };
+    if (!n.id) continue;
+    posts.push({
+      platform: "tiktok",
+      handle,
+      url: `https://www.tiktok.com/@${handle}/video/${n.id}`,
+      fecha: isoDateFromUnix(n.createTime),
+      caption: n.desc ?? "",
+      mediaUrls: n.video?.playAddr ? [n.video.playAddr] : [],
+      esVideo: true,
+    });
+  }
+  return posts;
+}
+
+function walkForTikTokNodes(valor: unknown, profundidad: number, out: unknown[]): void {
+  if (profundidad > MAX_WALK_DEPTH || !valor || typeof valor !== "object") return;
+  const obj = valor as Record<string, unknown>;
+  if (typeof obj.id === "string" && "desc" in obj && "video" in obj) {
+    out.push(obj);
+    return;
+  }
+  for (const v of Object.values(obj)) walkForTikTokNodes(v, profundidad + 1, out);
+}
+
+export interface TikTokExtraction {
+  nodos: unknown[];
+  /** Señal diagnóstica, mismo criterio que `InstagramExtraction` — ver withBrowserContext. */
+  diagnostics: { scriptsConPatron: number; scriptsConNodosValidos: number };
+}
+
+/**
+ * Recorre los `<script>` candidatos (ya filtrados por contener el literal "desc") buscando los
+ * items de video embebidos en el JSON de rehidratación de TikTok. Misma forma que
+ * `extractInstagramNodes` — recorrido recursivo con el mismo tope `MAX_WALK_DEPTH`, testeable con
+ * fixtures sin levantar un browser.
+ */
+export function extractTikTokNodes(scriptTexts: string[]): TikTokExtraction {
+  const nodos: unknown[] = [];
+  let scriptsConNodosValidos = 0;
+  for (const txt of scriptTexts) {
+    const inicio = txt.indexOf("{");
+    if (inicio < 0) continue;
+    try {
+      const antes = nodos.length;
+      walkForTikTokNodes(JSON.parse(txt.slice(inicio)), 0, nodos);
+      if (nodos.length > antes) scriptsConNodosValidos++;
+    } catch {
+      // Igual que en Instagram: un script que menciona "desc" pero no es JSON puro se ignora.
+    }
+  }
+  return { nodos, diagnostics: { scriptsConPatron: scriptTexts.length, scriptsConNodosValidos } };
+}
+
+/**
+ * Extrae del DOM los `textContent` crudos del script de rehidratación de TikTok
+ * (`#__UNIVERSAL_DATA_FOR_REHYDRATION__`) — equivalente TikTok de `collectCandidateScripts`.
+ * Filtra por el literal "desc" para descartar el resto de los `<script>` de la página, mismo
+ * criterio que el filtro "shortcode" de Instagram.
+ */
+function collectTikTokScripts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const textos: string[] = [];
+    for (const script of Array.from(document.querySelectorAll("script"))) {
+      const txt = script.textContent ?? "";
+      if (txt.includes("desc")) textos.push(txt);
+    }
+    return textos;
+  });
+}
+
+/**
+ * Scrapea el perfil público de TikTok de `handle` y devuelve sus videos recientes.
+ *
+ * TikTok detecta automatización de forma más agresiva que Instagram (fingerprinting de browser,
+ * challenges anti-bot) — si esto devuelve sistemáticamente `[]` (ver `diagnostics` en el log
+ * `research_competencia_scrape_empty`), es señal de bloqueo de plataforma, no un bug del parser.
+ * Este comportamiento está anticipado en el diseño: `withBrowserContext` degrada a `[]` sin
+ * romper el research completo de las demás cuentas/plataformas.
+ */
+export async function scrapeTikTok(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
+  return withBrowserContext("tiktok", handle, cookies, async (page) => {
+    await page.goto(`https://www.tiktok.com/@${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
+    const scriptTexts = await collectTikTokScripts(page);
+    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts);
+    return { items: parseTikTokPosts(nodos, handle), diagnostics };
   });
 }
