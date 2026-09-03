@@ -4,6 +4,7 @@ import {
   formatSocialText,
   enrichPosts,
   fetchSocialText,
+  interleaveByPlatform,
   MAX_POSTS_PER_ACCOUNT,
   MAX_VIDEOS_PER_ACCOUNT,
   MAX_IMAGES_PER_POST,
@@ -264,10 +265,95 @@ describe("fetchSocialText", () => {
     await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, scrapers });
     const logged = spy.mock.calls.some(([line]) => {
       const s = String(line);
-      return s.includes("research_competencia_social_fetch_error") && s.includes("tiktok") && s.includes("altoke.bo");
+      return s.includes("research_competencia_social_scrape_error") && s.includes("tiktok") && s.includes("altoke.bo");
     });
     spy.mockRestore();
     expect(logged).toBe(true);
+  });
+
+  it("si enrichFn tira para un handle, no corta a los demás y loguea la etapa de ENRIQUECIMIENTO (distinta del scraper)", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    let calls = 0;
+    const enrichFn = async (posts: SocialPost[]) => {
+      calls++;
+      // el primer handle en orden de iteración es instagram/altoke.bo — falla ahí, el resto sigue
+      if (calls === 1) throw new Error("OpenRouter caído");
+      return posts.map((p) => ({ ...p, imagenes: [] }));
+    };
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, enrichFn });
+    expect(text).not.toContain("IG de altoke.bo");
+    expect(text).toContain("IG de bancosol_bolivia");
+    const logged = spy.mock.calls.some(([line]) => {
+      const s = String(line);
+      return s.includes("research_competencia_social_enrich_error") && s.includes("instagram") && s.includes("altoke.bo");
+    });
+    spy.mockRestore();
+    expect(logged).toBe(true);
+  });
+
+  it("loguea explícito cuando una plataforma corre con 0 cookies — distinguible de 'corrió y no encontró posts'", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await fetchSocialText(getEntity("bancosol-altoke"), 7, deps); // deps.getCookies = async () => []
+    const logged = spy.mock.calls.some(([line]) => {
+      const s = String(line);
+      return s.includes("research_competencia_social_no_cookies") && s.includes("instagram");
+    });
+    spy.mockRestore();
+    expect(logged).toBe(true);
+  });
+
+  it("si getCookies tira, la plataforma sigue con cookies=[] en vez de abortar la corrida entera", async () => {
+    const getCookies = async () => { throw new Error("KV caído"); };
+    let cookiesRecibidas: unknown = "no-llamado";
+    const scrapers = {
+      ...scrapersOk,
+      instagram: async (h: string, cookies: unknown) => {
+        cookiesRecibidas = cookies;
+        return [post({ platform: "instagram" as const, handle: h, caption: `IG de ${h}` })];
+      },
+    };
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, getCookies, scrapers });
+    expect(cookiesRecibidas).toEqual([]);
+    expect(text).toContain("IG de altoke.bo");
+  });
+
+  it("un handle de Instagram que falla no corta a su HERMANO de la misma plataforma (2 cuentas reales de bancosol-altoke)", async () => {
+    const scrapers = {
+      ...scrapersOk,
+      instagram: async (h: string) => {
+        if (h === "altoke.bo") throw new Error("bloqueado");
+        return [post({ platform: "instagram" as const, handle: h, caption: `IG de ${h}` })];
+      },
+    };
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, scrapers });
+    expect(text).not.toContain("IG de altoke.bo");
+    expect(text).toContain("IG de bancosol_bolivia");
+  });
+
+  it("corta al exceder el presupuesto de tiempo por entidad y devuelve lo ya juntado, con log", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    // Reloj manual: primer llamado (startedAt) = 0; segundo (chequeo antes del 1er handle) = 0
+    // (no excede, presupuesto=1); tercer llamado (chequeo antes del 2do handle, mismo instagram)
+    // ya excede (100000 > 1) y corta ANTES de llegar a tiktok/facebook/x.
+    const tiempos = [0, 0, 100_000];
+    let i = 0;
+    const nowMs = () => tiempos[Math.min(i++, tiempos.length - 1)];
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, nowMs, presupuestoMs: 1 });
+    expect(text).toContain("IG de altoke.bo");
+    expect(text).not.toContain("IG de bancosol_bolivia");
+    expect(text).not.toContain("TikTok");
+    expect(text).not.toContain("X de bancosol");
+    const logged = spy.mock.calls.some(([line]) => String(line).includes("research_competencia_social_budget_exceeded"));
+    spy.mockRestore();
+    expect(logged).toBe(true);
+  });
+
+  it("intercala plataformas antes de formatear — X ya no queda siempre en el último bloque", async () => {
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, deps);
+    const bloques = text!.split("\n\n");
+    const xIndex = bloques.findIndex((b) => b.includes("X de bancosol"));
+    expect(xIndex).toBeGreaterThanOrEqual(0);
+    expect(xIndex).toBeLessThan(bloques.length - 1);
   });
 
   it("devuelve null si la entidad no declara ninguna cuenta", async () => {
@@ -287,5 +373,36 @@ describe("fetchSocialText", () => {
     // bancosol-altoke: instagram×2, tiktok×1, facebook×2, x×1 = 6 handles, 4 plataformas con
     // handles. Sin cachear por plataforma esto daría 6 llamadas (una por handle).
     expect(calls).toBe(4);
+  });
+});
+
+describe("interleaveByPlatform", () => {
+  it("reparte round-robin por plataforma preservando el orden relativo dentro de cada una", () => {
+    const items = [
+      { platform: "instagram" as const, id: "ig1" },
+      { platform: "instagram" as const, id: "ig2" },
+      { platform: "instagram" as const, id: "ig3" },
+      { platform: "tiktok" as const, id: "tt1" },
+      { platform: "facebook" as const, id: "fb1" },
+      { platform: "x" as const, id: "x1" },
+      { platform: "x" as const, id: "x2" },
+      { platform: "x" as const, id: "x3" },
+    ];
+    const resultado = interleaveByPlatform(items).map((i) => i.id);
+    // Ronda 1: ig1,tt1,fb1,x1 — ronda 2: ig2,(tiktok/facebook agotados),x2 — ronda 3: ig3,x3.
+    expect(resultado).toEqual(["ig1", "tt1", "fb1", "x1", "ig2", "x2", "ig3", "x3"]);
+  });
+
+  it("no pierde ni duplica posts", () => {
+    const items = [
+      { platform: "instagram" as const, id: "a" },
+      { platform: "x" as const, id: "b" },
+      { platform: "facebook" as const, id: "c" },
+    ];
+    expect(interleaveByPlatform(items)).toHaveLength(3);
+  });
+
+  it("con lista vacía devuelve lista vacía", () => {
+    expect(interleaveByPlatform([])).toEqual([]);
   });
 });

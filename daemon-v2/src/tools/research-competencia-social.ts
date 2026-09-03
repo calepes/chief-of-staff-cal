@@ -232,6 +232,11 @@ export interface FetchSocialDeps {
   getCookies?: (hostname: string) => Promise<StructuredCookie[]>;
   enrichFn?: (posts: SocialPost[]) => Promise<EnrichedPost[]>;
   ahora?: Date;
+  /** Reloj inyectable para el presupuesto de tiempo por entidad — permite tests deterministas
+   * (contador manual) sin depender de fake timers ni de esperas reales. Default `Date.now`. */
+  nowMs?: () => number;
+  /** Override del presupuesto de tiempo por entidad, en ms. Default `PER_ENTITY_BUDGET_MS`. */
+  presupuestoMs?: number;
 }
 
 const DEFAULT_SCRAPERS: Record<SocialPlatform, ScraperFn> = {
@@ -248,15 +253,67 @@ const HOSTNAMES: Record<SocialPlatform, string> = {
   x: "x.com",
 };
 
+// Presupuesto de tiempo por ENTIDAD (no por handle) — sin esto, la multiplicación ya documentada
+// abajo (topes por cuenta × N handles) puede correr sin techo si varias cuentas seguidas encadenan
+// llamadas legítimas pero lentas (ej. varios videos pesados de fila). 10 minutos es generoso a
+// propósito: enrichPosts ya documenta que UN SOLO handle con videos puede tardar "decenas de
+// minutos" en el peor caso, y cortar antes de eso perdería trabajo real sin necesidad — el research
+// corre fire-and-forget (confirmado: `investigarCompetencia` en agent-tools.ts hace
+// `void runResearchCompetencia(...)`, nunca lo awaitea desde el loop de mensajes de Jano), así que
+// nadie queda bloqueado esperando este tiempo. Es un corte ENTRE handles, no una cancelación real
+// de un await ya en curso (eso exigiría enhebrar AbortController hasta los scrapers de Playwright y
+// hasta research-competencia-media.ts — fuera de alcance acá): si UNA sola llamada se cuelga sin
+// tirar nunca, este chequeo no la interrumpe; sí evita arrancar handles NUEVOS una vez pasado el
+// presupuesto, acotando el peor caso de una entidad con muchos handles a un techo conocido.
+const PER_ENTITY_BUDGET_MS = 10 * 60 * 1000;
+
+/**
+ * Reparte los posts recolectados en round-robin por plataforma (instagram/tiktok/facebook/x),
+ * preservando el orden relativo dentro de cada plataforma. `formatSocialText` trunca por el FINAL
+ * del texto (`MAX_TOTAL_CHARS`) — sin intercalar, el orden fijo de iteración de `fetchSocialText`
+ * hace que la ÚLTIMA plataforma recorrida (x) sea siempre la primera en perderse con volumen real
+ * (varios handles de Instagram con carruseles/videos), sin que eso refleje relevancia ni recencia:
+ * es puro artefacto del orden del loop. Repartir en round-robin distribuye el riesgo de corte entre
+ * las 4 en vez de castigar siempre a la misma.
+ */
+export function interleaveByPlatform<T extends { platform: SocialPlatform }>(posts: T[]): T[] {
+  const grupos = new Map<SocialPlatform, T[]>();
+  for (const p of posts) {
+    const arr = grupos.get(p.platform);
+    if (arr) arr.push(p);
+    else grupos.set(p.platform, [p]);
+  }
+  const colas = [...grupos.values()];
+  const resultado: T[] = [];
+  let i = 0;
+  while (resultado.length < posts.length) {
+    const cola = colas[i % colas.length];
+    if (cola.length > 0) resultado.push(cola.shift() as T);
+    i++;
+  }
+  return resultado;
+}
+
 /**
  * Recorre todas las plataformas y handles declarados de una entidad, aplica el filtro de
  * timeframe, enriquece la media y devuelve un bloque de texto listo para el prompt. Devuelve null
  * si la entidad no declara cuentas o si nada trajo contenido.
  *
- * Aislamiento por cuenta: try/catch POR HANDLE — una plataforma bloqueada (ej. TikTok con captcha)
- * o un handle caído no cortan a los demás. El catch loguea plataforma+handle: sin eso, un fallo acá
- * (cron desatendido, sin nadie mirando la consola) es indistinguible de "esa cuenta no publicó
- * nada esta semana" — mismo criterio del resto del módulo (ver enrichPosts).
+ * Aislamiento por cuenta: try/catch SEPARADO por ETAPA (scraper, filtro de ventana, enriquecimiento)
+ * y por handle — una plataforma bloqueada (ej. TikTok con captcha) o un handle caído no cortan a los
+ * demás. Las 3 etapas tienen mensajes de log distintos (`_scrape_error`/`_filter_error`/
+ * `_enrich_error`) a propósito: si el scraper anda pero falla el enriquecimiento (visión/
+ * transcripción vía OpenRouter/ElevenLabs, ver research-competencia-media.ts), un log genérico
+ * sería indistinguible de una cuenta bloqueada — en un cron desatendido eso obliga a leer código
+ * para diagnosticar. Todos identifican plataforma+handle.
+ *
+ * Log adicional cuando una plataforma corre con 0 cookies (`_no_cookies`) — distinto de "corrió y
+ * no encontró posts". Sin esa señal, un Cookie Broker desincronizado (Safari deslogueada, sync
+ * rota) produce el MISMO resultado que una cuenta tranquila esta semana, y el reporte a Cal diría
+ * "sin novedades" en los dos casos cuando solo el primero merece revisar el Cookie Broker.
+ *
+ * Presupuesto de tiempo por entidad (`PER_ENTITY_BUDGET_MS`, ver comentario ahí) — al excederse,
+ * corta y devuelve lo ya juntado en vez de seguir indefinidamente.
  *
  * Los topes de enrichPosts (MAX_POSTS_PER_ACCOUNT/MAX_VIDEOS_PER_ACCOUNT) son POR CUENTA, y acá
  * enrichFn se llama una vez por HANDLE (no una vez por entidad con todos los posts juntos) — es la
@@ -277,9 +334,12 @@ export async function fetchSocialText(
   const scrapers = deps.scrapers ?? DEFAULT_SCRAPERS;
   const getCookies = deps.getCookies ?? (async () => []);
   const enrichFn = deps.enrichFn ?? ((posts: SocialPost[]) => enrichPosts(posts));
+  const nowFn = deps.nowMs ?? Date.now;
+  const presupuestoMs = deps.presupuestoMs ?? PER_ENTITY_BUDGET_MS;
+  const startedAt = nowFn();
 
   const todos: EnrichedPost[] = [];
-  for (const platform of Object.keys(HOSTNAMES) as SocialPlatform[]) {
+  platformLoop: for (const platform of Object.keys(HOSTNAMES) as SocialPlatform[]) {
     const handles = social[platform];
     if (handles.length === 0) continue;
 
@@ -293,21 +353,46 @@ export async function fetchSocialText(
     try {
       cookies = await getCookies(HOSTNAMES[platform]);
     } catch (err) {
-      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_cookies_error", platform, err: String(err) }));
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_cookies_error", entityId: entity.id, platform, err: String(err) }));
       cookies = [];
+    }
+    if (cookies.length === 0) {
+      // Se loguea siempre que quede vacío, sin importar la causa (sin getCookies real, KV vacío,
+      // o el catch de arriba) — las tres comparten el mismo síntoma: si la cuenta requiere sesión,
+      // el scraping de esta plataforma va a chocar contra el muro de login.
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_no_cookies", entityId: entity.id, platform }));
     }
 
     for (const handle of handles) {
+      if (nowFn() - startedAt > presupuestoMs) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_budget_exceeded", entityId: entity.id, platform, handle, elapsedMs: nowFn() - startedAt }));
+        break platformLoop;
+      }
+
+      let posts: SocialPost[];
       try {
-        const posts = await scrapers[platform](handle, cookies);
-        const enVentana = filterPostsByTimeframe(posts, timeframeDias, deps.ahora);
+        posts = await scrapers[platform](handle, cookies);
+      } catch (err) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_scrape_error", platform, handle, err: String(err) }));
+        continue;
+      }
+
+      let enVentana: SocialPost[];
+      try {
+        enVentana = filterPostsByTimeframe(posts, timeframeDias, deps.ahora);
+      } catch (err) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_filter_error", platform, handle, err: String(err) }));
+        continue;
+      }
+
+      try {
         todos.push(...(await enrichFn(enVentana)));
       } catch (err) {
-        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_fetch_error", platform, handle, err: String(err) }));
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_enrich_error", platform, handle, err: String(err) }));
       }
     }
   }
 
-  const texto = formatSocialText(todos);
+  const texto = formatSocialText(interleaveByPlatform(todos));
   return texto || null;
 }
