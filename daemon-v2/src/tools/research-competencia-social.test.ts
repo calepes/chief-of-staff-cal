@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { filterPostsByTimeframe, formatSocialText, type SocialPost, type EnrichedPost } from "./research-competencia-social.js";
+import {
+  filterPostsByTimeframe,
+  formatSocialText,
+  enrichPosts,
+  MAX_POSTS_PER_ACCOUNT,
+  MAX_VIDEOS_PER_ACCOUNT,
+  type SocialPost,
+  type EnrichedPost,
+} from "./research-competencia-social.js";
 
 function post(overrides: Partial<SocialPost> = {}): SocialPost {
   return {
@@ -113,5 +121,46 @@ describe("formatSocialText", () => {
     expect(text.split("\n\n")).toHaveLength(1);
     expect(text).not.toMatch(/^\[tiktok @competidor\]/m);
     expect(text).not.toContain("\n\n[tiktok");
+  });
+});
+
+describe("enrichPosts", () => {
+  const deps = {
+    describeImageFn: async () => "Descripción de imagen",
+    analyzeVideoFn: async () => ({ transcripcion: "Audio del video", frames: ["Frame 1"] }),
+  };
+
+  it("aplica el tope de posts por cuenta", async () => {
+    const posts = Array.from({ length: MAX_POSTS_PER_ACCOUNT + 5 }, (_, i) =>
+      post({ url: `https://instagram.com/p/${i}`, mediaUrls: ["https://cdn/x.jpg"] }));
+    const enriched = await enrichPosts(posts, deps);
+    expect(enriched).toHaveLength(MAX_POSTS_PER_ACCOUNT);
+  });
+
+  it("aplica el tope de videos por cuenta — los que sobran quedan sin análisis de video", async () => {
+    const posts = Array.from({ length: MAX_POSTS_PER_ACCOUNT }, (_, i) =>
+      post({ url: `https://instagram.com/p/${i}`, esVideo: true, mediaUrls: ["https://cdn/v.mp4"] }));
+    const enriched = await enrichPosts(posts, deps);
+    expect(enriched.filter((p) => p.video).length).toBe(MAX_VIDEOS_PER_ACCOUNT);
+  });
+
+  it("enriquece imágenes con visión", async () => {
+    const enriched = await enrichPosts([post({ mediaUrls: ["https://cdn/x.jpg"] })], deps);
+    expect(enriched[0].imagenes).toEqual(["Descripción de imagen"]);
+  });
+
+  it("un post cuyo análisis tira no corta los demás", async () => {
+    const posts = [
+      post({ url: "https://instagram.com/p/1", mediaUrls: ["https://cdn/roto.jpg"] }),
+      post({ url: "https://instagram.com/p/2", mediaUrls: ["https://cdn/ok.jpg"] }),
+    ];
+    const describeImageFn = async (url: string) => {
+      if (url.includes("roto")) throw new Error("boom");
+      return "Descripción de imagen";
+    };
+    const enriched = await enrichPosts(posts, { ...deps, describeImageFn });
+    expect(enriched).toHaveLength(2);
+    expect(enriched[0].imagenes).toEqual([]);
+    expect(enriched[1].imagenes).toEqual(["Descripción de imagen"]);
   });
 });

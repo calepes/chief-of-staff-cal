@@ -1,4 +1,4 @@
-import type { VideoAnalysis } from "./research-competencia-media.js";
+import { describeImage, analyzeVideo, type VideoAnalysis } from "./research-competencia-media.js";
 
 export type SocialPlatform = "instagram" | "tiktok" | "facebook" | "x";
 
@@ -75,6 +75,60 @@ const MAX_TOTAL_CHARS = 20_000;
 function sanitizeField(s: string, max: number): string {
   const oneLine = s.replace(/\s*[\r\n]+\s*/g, " ").trim();
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
+export const MAX_POSTS_PER_ACCOUNT = 8;
+export const MAX_VIDEOS_PER_ACCOUNT = 4;
+
+export interface EnrichDeps {
+  describeImageFn?: (url: string) => Promise<string | null>;
+  analyzeVideoFn?: (url: string) => Promise<VideoAnalysis | null>;
+}
+
+/**
+ * Descarga y analiza la media de los posts, respetando los topes por cuenta del spec.
+ * Los videos que exceden MAX_VIDEOS_PER_ACCOUNT se conservan como post (caption incluido)
+ * pero sin análisis de video — el caption sigue teniendo valor.
+ *
+ * El tope de posts (`slice`) NO reordena — toma los primeros N tal cual llegan. El spec pide
+ * quedarse con "los más recientes de la ventana", pero acá no hay forma confiable de ordenar:
+ * `filterPostsByTimeframe` conserva a propósito los posts sin fecha parseable (ver ese comentario),
+ * así que un sort por `fecha` dejaría indeterminado dónde caen esos posts sin castigar el caso común.
+ * Responsabilidad del caller (el scraper, `research-competencia-scrapers.ts`): entregar los posts
+ * ya en orden más-reciente-primero, que es el orden natural en que las 4 plataformas listan un feed.
+ */
+export async function enrichPosts(posts: SocialPost[], deps: EnrichDeps = {}): Promise<EnrichedPost[]> {
+  const describeImageFn = deps.describeImageFn ?? describeImage;
+  const analyzeVideoFn = deps.analyzeVideoFn ?? analyzeVideo;
+
+  const acotados = posts.slice(0, MAX_POSTS_PER_ACCOUNT);
+  const enriched: EnrichedPost[] = [];
+  let videosAnalizados = 0;
+
+  for (const p of acotados) {
+    const item: EnrichedPost = { ...p, imagenes: [] };
+    try {
+      if (p.esVideo) {
+        if (videosAnalizados < MAX_VIDEOS_PER_ACCOUNT && p.mediaUrls[0]) {
+          const analisis = await analyzeVideoFn(p.mediaUrls[0]);
+          if (analisis) item.video = analisis;
+          videosAnalizados++;
+        }
+      } else {
+        for (const url of p.mediaUrls) {
+          const desc = await describeImageFn(url);
+          if (desc) item.imagenes.push(desc);
+        }
+      }
+    } catch (err) {
+      // Un post cuyo análisis falla se conserva igual (caption + URL siguen sirviendo) — pero
+      // esto corre en un cron desatendido, así que la falla queda logueada (mismo criterio que
+      // describeImage/analyzeVideo en research-competencia-media.ts).
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_enrich_post_error", url: p.url, err: String(err) }));
+    }
+    enriched.push(item);
+  }
+  return enriched;
 }
 
 /** Consolida los posts enriquecidos a un bloque de texto para el prompt del agente. */
