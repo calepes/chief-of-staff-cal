@@ -195,10 +195,21 @@ interface DomElement {
   href?: string;
   src?: string;
   dateTime?: string;
+  /** Solo lo llenan los `<img>` — dimensión REAL renderizada, no el tamaño del atributo `width/height`. */
+  naturalWidth?: number;
+  naturalHeight?: number;
 }
 declare const document: {
   querySelectorAll(selector: string): ArrayLike<DomElement>;
 };
+
+// px — mismo criterio y mismo valor que `MIN_IMAGE_DIMENSION` de design-capture.ts: filtra
+// avatares/íconos (rondan 24-88px), un post real siempre supera esto. Encontrado en review de
+// calidad: sin este piso, `querySelectorAll("img")` devuelve en orden de documento, y en X/
+// Facebook el avatar del header renderiza ANTES del contenido dentro del mismo `<article>` —
+// `mediaUrls[0]` se llevaba el avatar en vez de la foto del post. Umbral sujeto a ajuste en la
+// verificación en vivo (tarea 13) — acá no hay forma de confirmar contra el DOM real.
+const MIN_DOM_IMAGE_DIMENSION = 200;
 
 /**
  * Extrae del DOM los `textContent` crudos de los `<script>` que contienen `literal` — es lo
@@ -367,10 +378,57 @@ export interface RawDomPost {
   autor: string | null;
 }
 
-/** `fechaIso` → `YYYY-MM-DD` (los primeros 10 chars) si parsea como fecha válida; `null` si no. */
+/**
+ * `fechaIso` (el `dateTime` de `<time>`, en UTC en X y Facebook) → fecha calendario `YYYY-MM-DD`
+ * en La Paz — NUNCA los primeros 10 chars del ISO crudo. Reusa `isoDateFromUnix` (mismo offset fijo
+ * -4h que ya aplica Instagram/TikTok) en vez de reimplementar el ajuste: BLOQUEANTE de la revisión
+ * de calidad, encontrado porque un post publicado a las 21:00 La Paz llega como
+ * `01:00Z` del día siguiente — `.slice(0,10)` sobre eso lo fechaba un día después del real, y esa
+ * fecha se propaga al filtro de ventana, al chequeo de orden, y al battlecard. Devuelve `null` si
+ * `fechaIso` es `null` o no parsea.
+ */
 function parseDomDate(fechaIso: string | null): string | null {
   if (!fechaIso) return null;
-  return Number.isNaN(new Date(fechaIso).getTime()) ? null : fechaIso.slice(0, 10);
+  const ms = new Date(fechaIso).getTime();
+  if (Number.isNaN(ms)) return null;
+  return isoDateFromUnix(ms / 1000);
+}
+
+/**
+ * Deriva el autor de un post de Facebook/X a partir de su URL de permalink — extraída a función
+ * pura de Node (importante en la revisión de calidad: antes vivía inline dentro de
+ * `page.evaluate`, sin un solo test, pese a ser la lógica que decide si un retweet o un post
+ * compartido se descarta — el riesgo central que motivó esta tarea; mismo criterio que llevó a
+ * mover `extractNodes`/`walkForNodes` fuera del closure del browser para Instagram/TikTok).
+ *
+ * Toma el PRIMER segmento de path (`/{autor}/status/{id}` en X, `/{autor}/posts|videos/{id}` en
+ * Facebook) — en X esto es estructuralmente robusto ante retweets: el permalink de un retweet en
+ * el timeline de `handle` sigue apuntando a `x.com/{autorOriginal}/status/{id}`, no a `handle`,
+ * así que `parseDomPosts` ya lo descarta solo con esto. En Facebook es más débil (un post
+ * COMPARTIDO por la página puede seguir teniendo permalink bajo la propia página) — si la tarea 13
+ * confirma que no alcanza, hay que sumar un selector más específico del nombre visible en el
+ * header del post.
+ *
+ * Casos de borde verificados por test, no supuestos: `/i/web/status/{id}` de X devuelve `"i"` —
+ * hoy eso se descarta bien porque ninguna cuenta real se llama "i", pero es un acierto casual del
+ * primer-segmento, no una regla de diseño verificada (dejado así, documentado). `permalink.php` de
+ * Facebook (`?story_fbid=...&id=...`) NO lleva el autor en el path — el `id` de query es un ID
+ * numérico interno, no comparable contra el handle vanity que usa Cal — así que se devuelve `null`
+ * explícito en vez de comparar por casualidad contra el literal `"permalink.php"`.
+ */
+export function deriveAuthorFromPermalink(url: string): string | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    // Segundo argumento como base: soporta también URLs relativas (`/handle/status/123`), que es
+    // lo que devuelve un `href` de anchor relativo si algún día `collectDomPosts` lo captura crudo.
+    parsed = new URL(url, "https://dominio-base.invalid");
+  } catch {
+    return null;
+  }
+  const primerSegmento = parsed.pathname.split("/").filter(Boolean)[0];
+  if (!primerSegmento || primerSegmento === "permalink.php") return null;
+  return primerSegmento;
 }
 
 /**
@@ -401,9 +459,21 @@ export function parseDomPosts(crudos: RawDomPost[], platform: SocialPlatform, ha
   return posts;
 }
 
+/** Forma cruda que devuelve `collectDomPosts` — sin `autor`, a diferencia de `RawDomPost`: acá
+ * el autor se deriva DESPUÉS, en Node, vía `deriveAuthorFromPermalink` (ver comentario ahí sobre
+ * por qué se movió fuera del closure del browser). */
+interface DomPostExtraction {
+  url: string;
+  texto: string;
+  fechaIso: string | null;
+  imagenes: string[];
+  videos: string[];
+}
+
 /**
  * Extrae posts crudos del DOM ya renderizado — compartida por Facebook y X, corre dentro de
- * `page.evaluate` (contexto del browser, no de Node).
+ * `page.evaluate` (contexto del browser, no de Node). Deliberadamente NO deriva el autor acá (ver
+ * `deriveAuthorFromPermalink`) — solo hace la extracción de DOM en sí.
  *
  * ⚠️ SELECTORES PENDIENTES DE VERIFICACIÓN EN VIVO. Esta tarea no navega a las páginas reales (eso
  * es la tarea 13, con cookies reales) — lo de abajo es el mejor criterio disponible sin poder
@@ -412,45 +482,42 @@ export function parseDomPosts(crudos: RawDomPost[], platform: SocialPlatform, ha
  *   Facebook usa `role="article"`.
  * - El permalink sale de `a[href*="/status/"]` (X) / `a[href*="/posts/"]`/`a[href*="/videos/"]`
  *   (Facebook).
- * - El autor se deriva del PRIMER segmento de path de ESE permalink (`/{autor}/status/{id}` en X,
- *   `/{autor}/posts|videos/{id}` en Facebook) — en X esto es estructuralmente robusto ante
- *   retweets: el permalink de un retweet en el timeline de `handle` sigue apuntando a
- *   `x.com/{autorOriginal}/status/{id}`, no a `handle`, así que `parseDomPosts` ya lo descarta
- *   solo con esto. En Facebook es más débil (un post COMPARTIDO por la página puede seguir
- *   teniendo permalink bajo la propia página) — si la tarea 13 confirma que no alcanza, hay que
- *   sumar un selector más específico del nombre visible en el header del post.
+ * - El texto intenta primero `[data-testid="tweetText"]` (contenedor documentado de X para el
+ *   cuerpo del tweet) y solo cae al `textContent` del `<article>` completo si no lo encuentra —
+ *   sin esto, el `<article>` entero mezcla nombre de cuenta, handle, timestamp, contadores y
+ *   botones ("Me gusta", "Compartir") ANTES del texto real, y como aguas abajo hay un tope de
+ *   caracteres por caption, esa basura puede desplazar el contenido real antes del corte.
+ *   Facebook no tiene un selector de texto tan documentado — queda en el fallback, pendiente de
+ *   afinar en la tarea 13.
+ * - Las imágenes filtran por `naturalWidth/naturalHeight >= 200px` (`MIN_DOM_IMAGE_DIMENSION`,
+ *   mismo criterio que `design-capture.ts`) — sin esto, el avatar del header (que renderiza ANTES
+ *   que el contenido dentro del mismo `<article>` en X/Facebook) se lleva `mediaUrls[0]` en vez de
+ *   la foto real del post.
  */
-function collectDomPosts(page: Page): Promise<RawDomPost[]> {
-  return page.evaluate(() => {
-    const crudos: RawDomPost[] = [];
+function collectDomPosts(page: Page): Promise<DomPostExtraction[]> {
+  return page.evaluate((minDim) => {
+    const crudos: DomPostExtraction[] = [];
     for (const art of Array.from(document.querySelectorAll('article, [role="article"]'))) {
       const link = art.querySelector('a[href*="/status/"], a[href*="/posts/"], a[href*="/videos/"]');
       const url = link?.href ?? "";
-      let autor: string | null = null;
-      if (url) {
-        try {
-          autor = new URL(url).pathname.split("/").filter(Boolean)[0] ?? null;
-        } catch {
-          autor = null;
-        }
-      }
+      const textoEl = art.querySelector('[data-testid="tweetText"]');
+      const texto = (textoEl?.textContent ?? art.textContent ?? "").trim();
       const imagenes = Array.from(art.querySelectorAll("img"))
-        .map((img) => img.src ?? "")
-        .filter((src) => src.startsWith("http"));
+        .filter((img) => (img.src ?? "").startsWith("http") && (img.naturalWidth ?? 0) >= minDim && (img.naturalHeight ?? 0) >= minDim)
+        .map((img) => img.src ?? "");
       const videos = Array.from(art.querySelectorAll("video"))
         .map((v) => v.src ?? "")
         .filter((src) => src.startsWith("http"));
       crudos.push({
         url,
-        texto: art.textContent?.trim() ?? "",
+        texto,
         fechaIso: art.querySelector("time")?.dateTime ?? null,
         imagenes,
         videos,
-        autor,
       });
     }
     return crudos;
-  });
+  }, MIN_DOM_IMAGE_DIMENSION);
 }
 
 /**
@@ -467,7 +534,8 @@ export async function scrapeFacebook(handle: string, cookies: StructuredCookie[]
   return withBrowserContext("facebook", handle, cookies, async (page) => {
     await page.goto(`https://www.facebook.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
     const crudos = await collectDomPosts(page);
-    return { items: parseDomPosts(crudos, "facebook", handle), diagnostics: { articulosEncontrados: crudos.length } };
+    const conAutor: RawDomPost[] = crudos.map((c) => ({ ...c, autor: deriveAuthorFromPermalink(c.url) }));
+    return { items: parseDomPosts(conAutor, "facebook", handle), diagnostics: { articulosEncontrados: crudos.length } };
   });
 }
 
@@ -483,6 +551,7 @@ export async function scrapeX(handle: string, cookies: StructuredCookie[]): Prom
   return withBrowserContext("x", handle, cookies, async (page) => {
     await page.goto(`https://x.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
     const crudos = await collectDomPosts(page);
-    return { items: parseDomPosts(crudos, "x", handle), diagnostics: { articulosEncontrados: crudos.length } };
+    const conAutor: RawDomPost[] = crudos.map((c) => ({ ...c, autor: deriveAuthorFromPermalink(c.url) }));
+    return { items: parseDomPosts(conAutor, "x", handle), diagnostics: { articulosEncontrados: crudos.length } };
   });
 }

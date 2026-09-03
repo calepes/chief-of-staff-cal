@@ -5,6 +5,7 @@ import {
   parseTikTokPosts,
   extractTikTokNodes,
   parseDomPosts,
+  deriveAuthorFromPermalink,
   type RawDomPost,
 } from "./research-competencia-scrapers.js";
 
@@ -404,5 +405,56 @@ describe("parseDomPosts", () => {
       { url: "https://x.com/bancosol/status/1", texto: "solo texto", fechaIso: null, imagenes: [], videos: [], autor: "bancosol" },
     ];
     expect(parseDomPosts(crudos, "x", "bancosol")[0].mediaUrls).toEqual([]);
+  });
+
+  it("BLOQUEANTE (revisión de calidad): convierte la fecha a calendario La Paz, no UTC — un post nocturno no salta al día siguiente", () => {
+    // 2026-09-02T02:00:00.000Z son las 22:00 del 1/sep en La Paz (UTC-4). `.slice(0,10)` sobre el
+    // ISO crudo daría "2026-09-02" (un día después del real) — el bug bloqueante reportado.
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/bancosol/status/1", texto: "post nocturno", fechaIso: "2026-09-02T02:00:00.000Z", imagenes: [], videos: [], autor: "bancosol" },
+    ];
+    expect(parseDomPosts(crudos, "x", "bancosol")[0].fecha).toBe("2026-09-01");
+  });
+});
+
+describe("deriveAuthorFromPermalink", () => {
+  it("caso normal de X: primer segmento de path es el autor", () => {
+    expect(deriveAuthorFromPermalink("https://x.com/bancosol/status/123")).toBe("bancosol");
+  });
+
+  it("caso normal de Facebook: primer segmento de path es el autor", () => {
+    expect(deriveAuthorFromPermalink("https://www.facebook.com/altoke.bo/posts/1")).toBe("altoke.bo");
+  });
+
+  it("Facebook /videos/ también matchea por el mismo criterio de primer segmento", () => {
+    expect(deriveAuthorFromPermalink("https://www.facebook.com/bg.com.bo/videos/99")).toBe("bg.com.bo");
+  });
+
+  it("ignora la querystring — no afecta el primer segmento de path", () => {
+    expect(deriveAuthorFromPermalink("https://x.com/bancosol/status/123?s=20&t=abc")).toBe("bancosol");
+  });
+
+  it("acepta una URL relativa (sin protocolo/host)", () => {
+    expect(deriveAuthorFromPermalink("/bancosol/status/123")).toBe("bancosol");
+  });
+
+  it("caso de borde documentado: /i/web/status/{id} de X devuelve 'i' — acierto casual del primer segmento, no diseño verificado", () => {
+    expect(deriveAuthorFromPermalink("https://x.com/i/web/status/123")).toBe("i");
+  });
+
+  it("permalink.php de Facebook no lleva el autor en el path — devuelve null explícito, no 'permalink.php'", () => {
+    expect(deriveAuthorFromPermalink("https://www.facebook.com/permalink.php?story_fbid=123&id=456")).toBeNull();
+  });
+
+  it("descarta string vacío", () => {
+    expect(deriveAuthorFromPermalink("")).toBeNull();
+  });
+
+  it("descarta una URL sin ningún segmento de path", () => {
+    expect(deriveAuthorFromPermalink("https://x.com/")).toBeNull();
+  });
+
+  it("descarta una URL no parseable", () => {
+    expect(deriveAuthorFromPermalink("http://[::1")).toBeNull();
   });
 });
