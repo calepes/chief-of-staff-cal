@@ -13,8 +13,13 @@ const SAFARI_FETCH_SCRIPT = `${HOME}/.claude/scripts/safari-fetch.mjs`;
  * sumarle facebook.com/tiktok.com ahí le daría acceso autenticado a Messenger/DMs. Este research
  * corre standalone (fuera de Jano) y lee la sesión de Safari directo, sin pasar por el broker ni
  * por esa whitelist, así que no hace falta (ni corresponde) tocar ese archivo para nada.
+ *
+ * Congelada (`as const` + `Object.freeze`) a propósito, no por tic de estilo: es la barrera que
+ * mantiene esta lista SEPARADA de la whitelist global — un `SOCIAL_DOMAINS.push(...)` desde otro
+ * módulo la ampliaría en runtime sin pasar por revisión de código, justo lo que este archivo
+ * existe para evitar.
  */
-export const SOCIAL_DOMAINS = ["instagram.com", "tiktok.com", "facebook.com", "x.com", "twitter.com"];
+export const SOCIAL_DOMAINS = Object.freeze(["instagram.com", "tiktok.com", "facebook.com", "x.com", "twitter.com"] as const);
 
 interface RawSafariCookie {
   domain: string;
@@ -72,9 +77,27 @@ export function makeResearchCompetenciaCookiesProvider(
     const domain = SOCIAL_DOMAINS.find((d) => matchesDomain(hostname, d));
     if (!domain) return [];
 
+    // Dos try/catch separados a propósito: cargar el parser (import dinámico de un .mjs externo)
+    // y leer+parsear el archivo de Safari fallan por motivos DISTINTOS, y el hint que sirve para
+    // uno es ruido -- o directo engañoso -- para el otro. Un solo catch mandaría a revisar Full
+    // Disk Access aunque el problema real fuera, por ejemplo, que safari-fetch.mjs se movió o
+    // renombró `parseSafariCookies` -- el `err` original queda de cualquier forma en ambos logs.
+    let parseCookies: SafariCookieParser;
+    try {
+      parseCookies = deps.parseCookies ?? (await loadDefaultParser());
+    } catch (err) {
+      console.log(JSON.stringify({
+        ts: Date.now(),
+        msg: "research_competencia_cookies_parser_load_failed",
+        hostname,
+        hint: `no se pudo cargar parseSafariCookies desde ${SAFARI_FETCH_SCRIPT} -- ¿se renombró o movió el archivo?`,
+        err: String(err),
+      }));
+      return [];
+    }
+
     let raw: RawSafariCookie[];
     try {
-      const parseCookies = deps.parseCookies ?? (await loadDefaultParser());
       raw = parseCookies(readCookiesFile());
     } catch (err) {
       console.log(JSON.stringify({
