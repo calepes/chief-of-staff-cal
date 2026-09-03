@@ -60,23 +60,84 @@ export function parseInstagramPosts(nodos: unknown[], handle: string): SocialPos
   return posts;
 }
 
-// Tope de profundidad del recorrido recursivo de `extractInstagramNodes`. Instagram anida el
-// JSON del timeline dentro de wrappers de webpack/relay que cambian de forma entre despliegues —
-// no hay confirmación de que 8 niveles alcancen siempre para la estructura real de producción.
+// Tope de profundidad del recorrido recursivo de `extractNodes`. Instagram/TikTok anidan el JSON
+// del timeline dentro de wrappers de webpack/relay que cambian de forma entre despliegues — no
+// hay confirmación de que 8 niveles alcancen siempre para la estructura real de producción.
 // Ver el test "no encuentra un nodo a más de 8 niveles de profundidad" en el archivo de test: si
 // el tope no alcanza, el síntoma es `nodos: []` con `scriptsConPatron > 0` y
 // `scriptsConNodosValidos === 0` en el diagnóstico que loguea `withBrowserContext` — esa
 // combinación es la señal de "hay que subir MAX_WALK_DEPTH", no de "cambiaron las cookies".
 const MAX_WALK_DEPTH = 8;
 
-function walkForInstagramNodes(valor: unknown, profundidad: number, out: unknown[]): void {
+type NodePredicate = (obj: Record<string, unknown>) => boolean;
+
+/**
+ * Recorrido recursivo genérico compartido por todos los extractores de este archivo (Instagram,
+ * TikTok, y Facebook/X en tareas posteriores) — antes había una copia por plataforma, idéntica
+ * salvo el predicado de match. `predicado` decide si un nodo matchea; ver los comentarios sobre
+ * `ownerUsernameMatches`/`authorUniqueIdMatches` más abajo sobre por qué el predicado tiene que
+ * validar autoría, no solo forma.
+ */
+function walkForNodes(valor: unknown, predicado: NodePredicate, profundidad: number, out: unknown[]): void {
   if (profundidad > MAX_WALK_DEPTH || !valor || typeof valor !== "object") return;
   const obj = valor as Record<string, unknown>;
-  if (typeof obj.shortcode === "string" && "is_video" in obj) {
+  if (predicado(obj)) {
     out.push(obj);
     return;
   }
-  for (const v of Object.values(obj)) walkForInstagramNodes(v, profundidad + 1, out);
+  for (const v of Object.values(obj)) walkForNodes(v, predicado, profundidad + 1, out);
+}
+
+interface NodeExtraction {
+  nodos: unknown[];
+  /** Señal diagnóstica para distinguir "no hay posts" de "no pudimos leer la página" — ver withBrowserContext. */
+  diagnostics: { scriptsConPatron: number; scriptsConNodosValidos: number };
+}
+
+/**
+ * Recorre los `<script>` candidatos aplicando `predicado` en cada nodo del recorrido recursivo.
+ * Movido a Node (fuera de `page.evaluate`) para ser testeable con fixtures — es la parte más
+ * frágil del scraper (recorrido recursivo + `JSON.parse` por script) y antes vivía intestable
+ * dentro del closure del browser. `extractInstagramNodes`/`extractTikTokNodes` son wrappers de
+ * una línea sobre esto, cada uno con su propio predicado.
+ */
+function extractNodes(scriptTexts: string[], predicado: NodePredicate): NodeExtraction {
+  const nodos: unknown[] = [];
+  let scriptsConNodosValidos = 0;
+  for (const txt of scriptTexts) {
+    const inicio = txt.indexOf("{");
+    if (inicio < 0) continue;
+    try {
+      const antes = nodos.length;
+      walkForNodes(JSON.parse(txt.slice(inicio)), predicado, 0, nodos);
+      if (nodos.length > antes) scriptsConNodosValidos++;
+    } catch {
+      // Script que no es JSON puro (ej. un script de analytics que también menciona el literal
+      // buscado en un comentario) — se ignora, no es un error del scraper.
+    }
+  }
+  return { nodos, diagnostics: { scriptsConPatron: scriptTexts.length, scriptsConNodosValidos } };
+}
+
+// ⚠️ GRAVE, encontrado en review: el payload de rehidratación de un perfil (Instagram o TikTok)
+// no trae SOLO los posts propios de la cuenta — también trae módulos de contenido
+// recomendado/relacionado precargado, con nodos de EXACTAMENTE la misma forma (mismos campos:
+// shortcode+is_video en Instagram, id+desc+video en TikTok). Sin validar de quién es el post, el
+// matcher por forma puede levantar un video/post de OTRA cuenta y `parseInstagramPosts`/
+// `parseTikTokPosts` lo atribuyen igual al `handle` scrapeado (el handle se pasa por afuera, no
+// se lee del nodo) — el resultado es una URL bien formada pero FALSA, citada después como fuente
+// verificable en el battlecard de research de competencia. Por eso el predicado de cada
+// plataforma exige que el nodo declare como autor al `handle` que se está scrapeando, comparando
+// en minúsculas — un nodo sin ese campo, o con un autor distinto, se descarta aunque matchee la
+// forma.
+function ownerUsernameMatches(obj: Record<string, unknown>, handle: string): boolean {
+  const owner = obj.owner as { username?: unknown } | undefined;
+  return typeof owner?.username === "string" && owner.username.toLowerCase() === handle.toLowerCase();
+}
+
+function authorUniqueIdMatches(obj: Record<string, unknown>, handle: string): boolean {
+  const author = obj.author as { uniqueId?: unknown } | undefined;
+  return typeof author?.uniqueId === "string" && author.uniqueId.toLowerCase() === handle.toLowerCase();
 }
 
 export interface InstagramExtraction {
@@ -86,27 +147,16 @@ export interface InstagramExtraction {
 }
 
 /**
- * Recorre los `<script>` candidatos (ya filtrados por contener el literal "shortcode") buscando
- * los nodos de post embebidos. Movido a Node (fuera de `page.evaluate`) para ser testeable con
- * fixtures — es la parte más frágil del scraper (recorrido recursivo + `JSON.parse` por script) y
- * antes vivía intestable dentro del closure del browser.
+ * Extrae los nodos de post de Instagram que pertenecen a `handle` — ver el comentario sobre
+ * `ownerUsernameMatches` arriba sobre por qué la validación de autoría es obligatoria, no un
+ * extra: sin ella, un post recomendado de otra cuenta embebido en el mismo payload matchearía
+ * igual de bien.
  */
-export function extractInstagramNodes(scriptTexts: string[]): InstagramExtraction {
-  const nodos: unknown[] = [];
-  let scriptsConNodosValidos = 0;
-  for (const txt of scriptTexts) {
-    const inicio = txt.indexOf("{");
-    if (inicio < 0) continue;
-    try {
-      const antes = nodos.length;
-      walkForInstagramNodes(JSON.parse(txt.slice(inicio)), 0, nodos);
-      if (nodos.length > antes) scriptsConNodosValidos++;
-    } catch {
-      // Script que no es JSON puro (ej. un script de analytics que también menciona "shortcode"
-      // en un comentario) — se ignora, no es un error del scraper.
-    }
-  }
-  return { nodos, diagnostics: { scriptsConPatron: scriptTexts.length, scriptsConNodosValidos } };
+export function extractInstagramNodes(scriptTexts: string[], handle: string): InstagramExtraction {
+  return extractNodes(
+    scriptTexts,
+    (obj) => typeof obj.shortcode === "string" && "is_video" in obj && ownerUsernameMatches(obj, handle)
+  );
 }
 
 // Ambiente mínimo SOLO para el body de page.evaluate() (corre en el navegador, no en Node) —
@@ -117,19 +167,20 @@ declare const document: {
 };
 
 /**
- * Extrae del DOM los `textContent` crudos de los `<script>` que mencionan "shortcode" — es lo
+ * Extrae del DOM los `textContent` crudos de los `<script>` que contienen `literal` — es lo
  * mínimo que `page.evaluate` necesita tocar. El parseo real (recorrido recursivo, `JSON.parse`)
- * vive del lado de Node en `extractInstagramNodes`, testeable sin browser.
+ * vive del lado de Node en `extractNodes`. Compartido por Instagram ("shortcode") y TikTok
+ * ("desc") — antes eran dos copias idénticas que solo diferían en el literal buscado.
  */
-function collectCandidateScripts(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+function collectScriptsByLiteral(page: Page, literal: string): Promise<string[]> {
+  return page.evaluate((lit) => {
     const textos: string[] = [];
     for (const script of Array.from(document.querySelectorAll("script"))) {
       const txt = script.textContent ?? "";
-      if (txt.includes("shortcode")) textos.push(txt);
+      if (txt.includes(lit)) textos.push(txt);
     }
     return textos;
-  });
+  }, literal);
 }
 
 export interface ScrapeOutcome<T> {
@@ -191,8 +242,8 @@ export async function withBrowserContext<T>(
 export async function scrapeInstagram(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
   return withBrowserContext("instagram", handle, cookies, async (page) => {
     await page.goto(`https://www.instagram.com/${handle}/`, { waitUntil: "networkidle", timeout: 30_000 });
-    const scriptTexts = await collectCandidateScripts(page);
-    const { nodos, diagnostics } = extractInstagramNodes(scriptTexts);
+    const scriptTexts = await collectScriptsByLiteral(page, "shortcode");
+    const { nodos, diagnostics } = extractInstagramNodes(scriptTexts, handle);
     return { items: parseInstagramPosts(nodos, handle), diagnostics };
   });
 }
@@ -221,16 +272,6 @@ export function parseTikTokPosts(items: unknown[], handle: string): SocialPost[]
   return posts;
 }
 
-function walkForTikTokNodes(valor: unknown, profundidad: number, out: unknown[]): void {
-  if (profundidad > MAX_WALK_DEPTH || !valor || typeof valor !== "object") return;
-  const obj = valor as Record<string, unknown>;
-  if (typeof obj.id === "string" && "desc" in obj && "video" in obj) {
-    out.push(obj);
-    return;
-  }
-  for (const v of Object.values(obj)) walkForTikTokNodes(v, profundidad + 1, out);
-}
-
 export interface TikTokExtraction {
   nodos: unknown[];
   /** Señal diagnóstica, mismo criterio que `InstagramExtraction` — ver withBrowserContext. */
@@ -238,43 +279,17 @@ export interface TikTokExtraction {
 }
 
 /**
- * Recorre los `<script>` candidatos (ya filtrados por contener el literal "desc") buscando los
- * items de video embebidos en el JSON de rehidratación de TikTok. Misma forma que
- * `extractInstagramNodes` — recorrido recursivo con el mismo tope `MAX_WALK_DEPTH`, testeable con
- * fixtures sin levantar un browser.
+ * Extrae los items de video de TikTok que pertenecen a `handle` — ver el comentario sobre
+ * `authorUniqueIdMatches` más arriba sobre por qué la validación de autoría es obligatoria: el
+ * payload de rehidratación de un perfil trae también videos recomendados de otras cuentas, con
+ * exactamente la misma forma (`id`+`desc`+`video`).
  */
-export function extractTikTokNodes(scriptTexts: string[]): TikTokExtraction {
-  const nodos: unknown[] = [];
-  let scriptsConNodosValidos = 0;
-  for (const txt of scriptTexts) {
-    const inicio = txt.indexOf("{");
-    if (inicio < 0) continue;
-    try {
-      const antes = nodos.length;
-      walkForTikTokNodes(JSON.parse(txt.slice(inicio)), 0, nodos);
-      if (nodos.length > antes) scriptsConNodosValidos++;
-    } catch {
-      // Igual que en Instagram: un script que menciona "desc" pero no es JSON puro se ignora.
-    }
-  }
-  return { nodos, diagnostics: { scriptsConPatron: scriptTexts.length, scriptsConNodosValidos } };
-}
-
-/**
- * Extrae del DOM los `textContent` crudos del script de rehidratación de TikTok
- * (`#__UNIVERSAL_DATA_FOR_REHYDRATION__`) — equivalente TikTok de `collectCandidateScripts`.
- * Filtra por el literal "desc" para descartar el resto de los `<script>` de la página, mismo
- * criterio que el filtro "shortcode" de Instagram.
- */
-function collectTikTokScripts(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const textos: string[] = [];
-    for (const script of Array.from(document.querySelectorAll("script"))) {
-      const txt = script.textContent ?? "";
-      if (txt.includes("desc")) textos.push(txt);
-    }
-    return textos;
-  });
+export function extractTikTokNodes(scriptTexts: string[], handle: string): TikTokExtraction {
+  return extractNodes(
+    scriptTexts,
+    (obj) =>
+      typeof obj.id === "string" && "desc" in obj && "video" in obj && authorUniqueIdMatches(obj, handle)
+  );
 }
 
 /**
@@ -285,12 +300,19 @@ function collectTikTokScripts(page: Page): Promise<string[]> {
  * `research_competencia_scrape_empty`), es señal de bloqueo de plataforma, no un bug del parser.
  * Este comportamiento está anticipado en el diseño: `withBrowserContext` degrada a `[]` sin
  * romper el research completo de las demás cuentas/plataformas.
+ *
+ * `mediaUrls` (el `playAddr` de TikTok) es una URL FIRMADA y de vida corta, atada a la sesión que
+ * la generó — no es un link permanente como el `display_url`/`video_url` de Instagram. Si quien
+ * cablea la orquestación llega a separar "scrapear todo" de "enriquecer todo" (`enrichPosts`
+ * descarga esta URL más tarde, en `research-competencia-social.ts`), esas URLs pueden estar
+ * muertas para cuando les toque el turno de descargarse — no asumir que sobreviven más allá del
+ * mismo ciclo de research.
  */
 export async function scrapeTikTok(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
   return withBrowserContext("tiktok", handle, cookies, async (page) => {
     await page.goto(`https://www.tiktok.com/@${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
-    const scriptTexts = await collectTikTokScripts(page);
-    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts);
+    const scriptTexts = await collectScriptsByLiteral(page, "desc");
+    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts, handle);
     return { items: parseTikTokPosts(nodos, handle), diagnostics };
   });
 }
