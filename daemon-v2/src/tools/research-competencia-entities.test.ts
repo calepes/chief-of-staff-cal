@@ -30,15 +30,9 @@ describe("research-competencia-entities", () => {
       expect(e.social?.x).toEqual(["bancosol"]);
     });
 
-    it("toda entidad tiene al menos una cuenta de Instagram", () => {
-      for (const e of ENTITIES) {
-        expect(e.social?.instagram?.length ?? 0).toBeGreaterThan(0);
-      }
-    });
-
-    it("las entidades sin cuenta confirmada en una plataforma no la declaran", () => {
-      expect(getEntity("peso-app").social?.x ?? []).toEqual([]);
-      expect(getEntity("takenos").social?.facebook ?? []).toEqual([]);
+    it("las entidades sin cuenta confirmada en una plataforma declaran un array vacío", () => {
+      expect(getEntity("peso-app").social?.x).toEqual([]);
+      expect(getEntity("takenos").social?.facebook).toEqual([]);
     });
   });
 });

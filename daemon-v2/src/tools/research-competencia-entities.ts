@@ -1,8 +1,8 @@
 export interface SocialHandles {
-  instagram?: string[];
-  tiktok?: string[];
-  facebook?: string[];
-  x?: string[];
+  instagram: string[];
+  tiktok: string[];
+  facebook: string[];
+  x: string[];
 }
 
 export interface EntityConfig {
@@ -12,8 +12,11 @@ export interface EntityConfig {
   android?: { packageName: string };
   siteUrl?: string;
   linkedinQuery: string;
-  // Handles verificados por búsqueda web el 2026-09-02 (ver spec de Fase 2). Una plataforma
-  // sin cuenta oficial confirmada simplemente no se declara — no se inventa un handle.
+  // Handles verificados por búsqueda web el 2026-09-02 (ver spec de Fase 2). Los 4 campos son
+  // requeridos: una plataforma sin cuenta oficial confirmada se declara con array vacío en vez
+  // de omitirse, para que el consumidor (dispatcher, tarea 9) acceda directo sin encadenar
+  // `?? []` en cada punto de uso. Un array vacío es una afirmación explícita ("buscamos y no
+  // hay"), distinta de un olvido — nunca se inventa un handle para completar.
   social?: SocialHandles;
 }
 
@@ -56,7 +59,9 @@ export const ENTITIES: EntityConfig[] = [
     linkedinQuery: "Banco Economico ZAS Bolivia",
     social: {
       instagram: ["banco.economico"],
+      tiktok: [],
       facebook: ["banco.economico"],
+      x: [],
     },
   },
   {
@@ -71,6 +76,7 @@ export const ENTITIES: EntityConfig[] = [
     social: {
       instagram: ["takenosapp.bo"],
       tiktok: ["takenos_app_bo"],
+      facebook: [],
       x: ["takenosapp"],
     },
   },
@@ -83,6 +89,7 @@ export const ENTITIES: EntityConfig[] = [
     linkedinQuery: "Meru getmeru fintech Bolivia",
     social: {
       instagram: ["meru.app"],
+      tiktok: [],
       facebook: ["getmeruapp"],
       x: ["getmeru"],
     },
@@ -97,6 +104,8 @@ export const ENTITIES: EntityConfig[] = [
     social: {
       instagram: ["peso.latam"],
       tiktok: ["peso.latam"],
+      facebook: [],
+      x: [],
     },
   },
 ];
