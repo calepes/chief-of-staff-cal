@@ -113,6 +113,43 @@ describe("runResearchCompetencia", () => {
     expect(facts.socialText).toBe("[instagram @altoke.bo] Promo nueva");
   });
 
+  it("sin getCookies en opts, no cuenta intentos de cookies (bloqueante 2)", async () => {
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+    expect(result.socialCookiesIntentos).toBe(0);
+    expect(result.socialCookiesEncontradas).toBe(0);
+  });
+
+  it("cuenta intentos y hallazgos de cookies sociales a través de todos los llamados a getCookies (bloqueante 2)", async () => {
+    const getCookies = vi.fn(async (hostname: string) =>
+      hostname === "instagram.com" ? [{ name: "a", value: "b", domain: ".instagram.com", path: "/" }] : [],
+    );
+    vi.mocked(fetchSocialText).mockImplementationOnce(async (_entity, _timeframeDias, deps) => {
+      await deps?.getCookies?.("instagram.com");
+      await deps?.getCookies?.("tiktok.com");
+      return "texto";
+    });
+
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"], getCookies });
+
+    expect(result.socialCookiesIntentos).toBe(2);
+    expect(result.socialCookiesEncontradas).toBe(1);
+  });
+
+  it("un getCookies que tira sigue contando el intento pero no el hallazgo", async () => {
+    const getCookies = vi.fn(async () => {
+      throw new Error("FDA rota");
+    });
+    vi.mocked(fetchSocialText).mockImplementationOnce(async (_entity, _timeframeDias, deps) => {
+      await deps?.getCookies?.("instagram.com").catch(() => []);
+      return null;
+    });
+
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"], getCookies });
+
+    expect(result.socialCookiesIntentos).toBe(1);
+    expect(result.socialCookiesEncontradas).toBe(0);
+  });
+
   it("una falla del scraping social no corta la corrida de la entidad", async () => {
     vi.mocked(fetchSocialText).mockRejectedValueOnce(new Error("boom"));
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
@@ -147,14 +184,18 @@ describe("runResearchCompetencia", () => {
   });
 });
 
+// Campos de cookies con valores "sanos" por default (hubo intentos, y encontraron cookies) — así
+// cada test de abajo que no le importa el bloqueante 2 no dispara la advertencia sin querer.
+const COOKIES_OK = { socialCookiesIntentos: 4, socialCookiesEncontradas: 4 };
+
 describe("formatSummaryHtml", () => {
   it("dice 'sin novedades' cuando no hay hallazgos", () => {
-    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0 });
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, ...COOKIES_OK });
     expect(html).toContain("Sin novedades relevantes");
   });
 
   it("incluye el link al informe cuando existe", () => {
-    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, informeUrl: "https://notion.so/x" });
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, informeUrl: "https://notion.so/x", ...COOKIES_OK });
     expect(html).toContain("https://notion.so/x");
   });
 
@@ -163,11 +204,43 @@ describe("formatSummaryHtml", () => {
       fecha: "2026-08-31",
       timeframeDias: 7,
       totalHallazgos: 0,
+      ...COOKIES_OK,
       entidades: [
         { entityId: "takenos", entityNombre: "Takenos", primeraCorrida: true, hallazgos: [], snapshot: { entityId: "takenos", updatedAt: "" } },
       ],
     });
     expect(html).toContain("primera corrida");
     expect(html).toContain("Takenos");
+  });
+
+  it("sin advertencia de cookies cuando encontró al menos una", () => {
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialCookiesIntentos: 4, socialCookiesEncontradas: 1 });
+    expect(html).not.toContain("0 cookies de sesión");
+  });
+
+  it("sin advertencia de cookies cuando no hubo ningún intento (caller sin getCookies)", () => {
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialCookiesIntentos: 0, socialCookiesEncontradas: 0 });
+    expect(html).not.toContain("0 cookies de sesión");
+  });
+
+  it("advierte cuando hubo intentos de cookies pero ninguno encontró sesión (bloqueante 2)", () => {
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialCookiesIntentos: 6, socialCookiesEncontradas: 0 });
+    expect(html).toContain("0 cookies de sesión");
+    expect(html).toContain("Full Disk Access");
+  });
+
+  it("la advertencia de cookies aparece aunque también haya hallazgos reales", () => {
+    const html = formatSummaryHtml({
+      fecha: "2026-08-31",
+      timeframeDias: 7,
+      totalHallazgos: 1,
+      socialCookiesIntentos: 6,
+      socialCookiesEncontradas: 0,
+      entidades: [
+        { entityId: "takenos", entityNombre: "Takenos", primeraCorrida: false, hallazgos: [{ dimension: "Producto", descripcion: "x", fuente: "" }], snapshot: { entityId: "takenos", updatedAt: "" } },
+      ],
+    });
+    expect(html).toContain("0 cookies de sesión");
+    expect(html).toContain("1 hallazgo");
   });
 });

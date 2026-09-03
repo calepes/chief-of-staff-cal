@@ -49,4 +49,15 @@ export interface RunResult {
   entidades: EntityRunResult[];
   totalHallazgos: number;
   informeUrl?: string;
+  /**
+   * Cuántas veces se pidieron cookies de redes sociales durante la corrida (una vez por
+   * plataforma con handles configurados, por entidad) y en cuántas de esas se obtuvo al menos
+   * una cookie. Señal para `formatSummaryHtml`: si `socialCookiesIntentos > 0` y
+   * `socialCookiesEncontradas === 0`, TODAS las plataformas corrieron sin sesión — lectura de
+   * cookies rota (falta FDA, sesión de Safari vencida), no "semana tranquila". Ver el comentario
+   * en runResearchCompetencia (research-competencia.ts) para por qué se mide acá y no en
+   * research-competencia-social.ts.
+   */
+  socialCookiesIntentos: number;
+  socialCookiesEncontradas: number;
 }

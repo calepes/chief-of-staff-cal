@@ -33,9 +33,8 @@ const SOCIAL_TIMEOUT_MS = 8 * 60 * 1000;
 // a runResearchCompetencia() en el mismo proceso escribirían sobre las mismas páginas de estado
 // de Notion. Este módulo corre hoy SOLO dentro del script standalone `research:now`
 // (`scripts/research-competencia-now.ts`, invocado por un cron externo de launchd) — ya no vive
-// dentro del daemon de Jano (ver `docs/superpowers/plans/` sobre la salida del research del
-// daemon). El flag no cubre exclusión cross-proceso (dos corridas del script en paralelo); si
-// algún día hace falta eso, upgrade a un lock real (archivo/KV), no este flag.
+// dentro del daemon de Jano. El flag no cubre exclusión cross-proceso (dos corridas del script en
+// paralelo); si algún día hace falta eso, upgrade a un lock real (archivo/KV), no este flag.
 let researchInFlight = false;
 
 // Chequeo SÍNCRONO para que un caller externo pueda mirar el estado ANTES de arrancar, en vez de
@@ -54,6 +53,24 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     const timeframeDias = opts.timeframeDias ?? 7;
     const targetIds = opts.entidadIds?.length ? opts.entidadIds : ENTITIES.map((e) => e.id);
     const fecha = nowInLaPaz().slice(0, 10);
+
+    // Cuenta cookies acá, envolviendo opts.getCookies, en vez de tocar
+    // research-competencia-social.ts — ese módulo ya tiene su propio log por-plataforma
+    // (`research_competencia_social_no_cookies`) diseñado para diagnóstico fino en el log
+    // estructurado; lo que falta acá es una señal AGREGADA de toda la corrida que llegue al
+    // resumen de Telegram (el único canal de un cron desatendido — los logs a stdout no los ve
+    // nadie bajo launchd). Envolver en este nivel, sin tocar fetchSocialText, mantiene ese
+    // módulo (con sus try/catch deliberadamente resilientes por plataforma/handle) intacto.
+    let socialCookiesIntentos = 0;
+    let socialCookiesEncontradas = 0;
+    const trackedGetCookies = opts.getCookies
+      ? async (hostname: string) => {
+          socialCookiesIntentos++;
+          const cookies = await opts.getCookies!(hostname);
+          if (cookies.length > 0) socialCookiesEncontradas++;
+          return cookies;
+        }
+      : undefined;
 
     const resultados: EntityRunResult[] = [];
     // Cada entidad dispara un agente SDK one-off (maxTurns:20, WebSearch) — en una prueba real
@@ -80,7 +97,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
       }
       try {
         const baseline = await readEntityState(entity.id);
-        const socialTextPromise = fetchSocialText(entity, timeframeDias, { getCookies: opts.getCookies }).catch((err) => {
+        const socialTextPromise = fetchSocialText(entity, timeframeDias, { getCookies: trackedGetCookies }).catch((err) => {
           console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_error", entityId: entity.id, err: String(err) }));
           return null;
         });
@@ -155,7 +172,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     }
 
     const totalHallazgos = resultados.reduce((sum, r) => sum + r.hallazgos.length, 0);
-    return { fecha, timeframeDias, entidades: resultados, totalHallazgos, informeUrl };
+    return { fecha, timeframeDias, entidades: resultados, totalHallazgos, informeUrl, socialCookiesIntentos, socialCookiesEncontradas };
   } finally {
     researchInFlight = false;
   }
@@ -163,6 +180,20 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
 
 export function formatSummaryHtml(result: RunResult): string {
   const lines = [`🔎 <b>Research de competencia</b> — ${result.fecha} (últimos ${result.timeframeDias} días)`];
+  // Bloqueante 2 (revisión de salud): con 0 cookies, el research corre igual y emite "sin
+  // novedades" — texto idéntico al de una semana tranquila real. Bajo un cron desatendido, el
+  // resumen de Telegram es el ÚNICO canal (los logs `research_competencia_cookies_read_failed`/
+  // `_social_no_cookies` van a stdout, que nadie mira bajo launchd), así que la advertencia tiene
+  // que vivir acá, no solo en el log estructurado. `socialCookiesIntentos > 0` confirma que hubo
+  // al menos un intento real de leer cookies (evita falsear la advertencia si algún caller no
+  // pasa getCookies, ej. tests) — `=== 0 encontradas` con intentos > 0 significa que TODAS las
+  // plataformas de TODAS las entidades corrieron sin sesión, algo que una semana tranquila normal
+  // no produce (algún handle de las 6 entidades siempre tiene cookie si Safari/FDA están sanos).
+  if (result.socialCookiesIntentos > 0 && result.socialCookiesEncontradas === 0) {
+    lines.push(
+      "⚠️ 0 cookies de sesión para redes sociales en toda la corrida — Instagram/TikTok/Facebook/X probablemente corrieron contra el muro de login. Los hallazgos de esta corrida NO reflejan RRSS. Revisar Full Disk Access (node-fda) o la sesión de Safari.",
+    );
+  }
   if (result.totalHallazgos === 0) {
     lines.push("Sin novedades relevantes esta corrida.");
   } else {
