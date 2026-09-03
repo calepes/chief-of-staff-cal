@@ -250,6 +250,8 @@ export const CLAUDE_AI_COS_TOOLS: string[] = [
   // inversiones-query — portfolio de inversiones de Cal (Kubera + Yahoo Finance + Airtable)
   "mcp__inversiones-query__getPortfolioSummary",
   "mcp__inversiones-query__getDailyMovers",
+  "mcp__inversiones-query__getTickerNews",
+  "mcp__inversiones-query__getPortfolioGoal",
   "mcp__inversiones-query__getPositionDetail",
   "mcp__inversiones-query__getPortfolioPerformance",
   "mcp__inversiones-query__getPriceHistory",
