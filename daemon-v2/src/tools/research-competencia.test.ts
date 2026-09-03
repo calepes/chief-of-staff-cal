@@ -118,6 +118,33 @@ describe("runResearchCompetencia", () => {
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
     expect(result.entidades[0].error).toBeUndefined();
   });
+
+  it("un scraping social colgado no traba la entidad — corta al deadline y sigue con socialText null", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetchSocialText).mockImplementationOnce(() => new Promise(() => {})); // nunca resuelve
+      const resultPromise = runResearchCompetencia({ entidadIds: ["takenos"] });
+      await vi.advanceTimersByTimeAsync(8 * 60 * 1000 + 1);
+      const result = await resultPromise;
+
+      expect(result.entidades[0].error).toBeUndefined();
+      const facts = vi.mocked(buildEntityPrompt).mock.calls[0][2];
+      expect(facts.socialText).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("no arranca una segunda corrida si ya hay una en curso (guard en proceso)", async () => {
+    const first = runResearchCompetencia({ entidadIds: ["takenos"] });
+    await expect(runResearchCompetencia({ entidadIds: ["meru"] })).rejects.toThrow(/en curso/i);
+    await first; // dejar terminar la primera para no colgar el flag entre tests
+  });
+
+  it("libera el guard al terminar, permitiendo una corrida posterior", async () => {
+    await runResearchCompetencia({ entidadIds: ["takenos"] });
+    await expect(runResearchCompetencia({ entidadIds: ["meru"] })).resolves.toBeTruthy();
+  });
 });
 
 describe("formatSummaryHtml", () => {
