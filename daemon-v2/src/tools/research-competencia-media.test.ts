@@ -1,4 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
+import { readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+
+/** Directorios `rc-img-*` que describeImage crea con mkdtemp — deberían desaparecer al terminar. */
+function rcImgDirs(): string[] {
+  return readdirSync(tmpdir()).filter((name) => name.startsWith("rc-img-"));
+}
 
 vi.mock("./vision.js", () => ({
   analyzePhoto: vi.fn(async () => ({ text: "Un flyer con la promo 2x1", rawTokens: { input: 1, output: 1 } })),
@@ -31,5 +38,25 @@ describe("describeImage", () => {
     const fetchFn = vi.fn(async () => new Response("", { status: 500 })) as unknown as typeof fetch;
     expect(await describeImage("https://cdn/x.jpg", fetchFn)).toBeNull();
     expect(analyzePhoto).not.toHaveBeenCalled();
+  });
+
+  it("devuelve null si analyzePhoto tira (ej. falta OPENROUTER_API_KEY), sin propagar el error", async () => {
+    vi.mocked(analyzePhoto).mockRejectedValueOnce(new Error("OPENROUTER_API_KEY no configurada"));
+    const fetchFn = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })) as unknown as typeof fetch;
+    expect(await describeImage("https://cdn/x.jpg", fetchFn)).toBeNull();
+  });
+
+  it("borra el directorio temporal tras terminar, con descarga exitosa", async () => {
+    const before = rcImgDirs();
+    const fetchFn = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })) as unknown as typeof fetch;
+    await describeImage("https://cdn/x.jpg", fetchFn);
+    expect(rcImgDirs().filter((d) => !before.includes(d))).toEqual([]);
+  });
+
+  it("borra el directorio temporal tras terminar, con descarga fallida", async () => {
+    const before = rcImgDirs();
+    const fetchFn = vi.fn(async () => new Response("", { status: 500 })) as unknown as typeof fetch;
+    await describeImage("https://cdn/x.jpg", fetchFn);
+    expect(rcImgDirs().filter((d) => !before.includes(d))).toEqual([]);
   });
 });
