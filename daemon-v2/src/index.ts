@@ -23,7 +23,7 @@ import { stripHtmlTags, editCronMessage } from "./proactive/rich-send.js";
 import { checkKpiCardLending } from "./proactive/kpi-card-lending-daily.js";
 import { scheduleFocoCheckins } from "./proactive/foco-check.js";
 import { checkPlaylistsResumir, checkStarredResumir, cleanStalePlaceholders, guardarResumenReadwise, saltarResumen, detenerResumidor, handleQueuePick, handleCookieJarConfirm } from "./tools/resumir.js";
-import { COOKIE_JAR_NAMESPACE_ID } from "./tools/cookie-jar.js";
+import { COOKIE_JAR_NAMESPACE_ID, makeSocialCookiesProvider } from "./tools/cookie-jar.js";
 import { JournalStore } from "./journal-store.js";
 import { captureThought, nowInLaPaz } from "./journal-capture.js";
 import { applyPendingEdit, handleJournalCallback, isJournalCallback } from "./journal-callbacks.js";
@@ -210,6 +210,9 @@ const cookieJarKv = new CfKv({
   namespaceId: COOKIE_JAR_NAMESPACE_ID,
   apiToken: env.CF_API_TOKEN,
 });
+// Proveedor de cookies del Cookie Broker para el research de competencia (fase 2 — redes
+// sociales) — reusado por el cron semanal y por la tool on-demand `investigarCompetencia`.
+const getSocialCookies = makeSocialCookiesProvider(cookieJarKv);
 const state = new ConversationState(kv, compactHistory);
 const journalStore = new JournalStore(kv);
 const backlogStore = new BacklogStore(kv);
@@ -1897,6 +1900,7 @@ function scheduleResearchCompetenciaWeekly(): void {
     void checkResearchCompetenciaWeekly({
       botToken: env.COS_TELEGRAM_BOT_TOKEN,
       chatId: ALERT_CHAT_ID,
+      getCookies: getSocialCookies,
     }).catch((err) => log({ msg: "research_competencia_weekly_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
   log({ msg: "research_competencia_weekly_scheduled", interval: "monday 07:05" });

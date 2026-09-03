@@ -25,7 +25,7 @@ import {
   type FocoSection,
 } from "./tools/foco-cal.js";
 import { fetchAsUser } from "./tools/fetch-as-user.js";
-import { addDomainAndSync, getStructuredCookies } from "./tools/cookie-jar.js";
+import { addDomainAndSync, getStructuredCookies, makeSocialCookiesProvider } from "./tools/cookie-jar.js";
 import { readPersistedOutput } from "./tools/read-persisted.js";
 import { consultarJson } from "./tools/consultar-json.js";
 import { formatLearning } from "./learning-file.js";
@@ -624,7 +624,7 @@ export function buildSdkTools(deps: ToolDeps) {
         // patrón que resumirContenido en tools/resumir.ts. El resultado (o el error) se manda
         // como mensaje NUEVO al chatId capturado ahora, no dentro del .then() (el chat activo
         // puede cambiar antes de que termine).
-        void runResearchCompetencia({ timeframeDias, entidadIds: entidades })
+        void runResearchCompetencia({ timeframeDias, entidadIds: entidades, getCookies: makeSocialCookiesProvider(deps.cookieJarKv) })
           .then((result) =>
             sendCronMessage(botToken, { chatId, text: formatSummaryHtml(result) }).catch((sendErr) => {
               // El research SÍ funcionó (ya está en Notion) — el error es solo del envío del

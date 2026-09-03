@@ -182,3 +182,23 @@ export async function getStructuredCookies(hostname: string, kv: CfKv): Promise<
   const header = await kv.getText(`cookie:${domain}`);
   return { whitelisted: true, domain, cookies: header ? parseCookieHeaderToStructured(header, domain) : [] };
 }
+
+/**
+ * Envuelve getStructuredCookies como el `getCookies` que espera runResearchCompetencia (research
+ * de competencia, fase 2 — redes sociales). Devuelve solo las cookies, pero antes deja explícito
+ * en el log POR QUÉ vinieron vacías: dominio no whitelisteado (los 4 dominios sociales todavía no
+ * lo están — ver tarea 13) vs. whitelisteado pero sin cookie sincronizada. Sin este log las dos
+ * causas se ven idénticas desde afuera ("el scraping corrió sin sesión"), y el tercer caso (hubo
+ * cookies pero 0 posts) ya queda visible por los logs propios de research-competencia-social.ts.
+ */
+export function makeSocialCookiesProvider(kv: CfKv): (hostname: string) => Promise<StructuredCookie[]> {
+  return async (hostname: string) => {
+    const { whitelisted, domain, cookies } = await getStructuredCookies(hostname, kv);
+    if (!whitelisted) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "cookie_jar_domain_not_whitelisted", hostname }));
+    } else if (cookies.length === 0) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "cookie_jar_no_cookies_synced", hostname, domain }));
+    }
+    return cookies;
+  };
+}

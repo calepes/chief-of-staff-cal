@@ -25,6 +25,12 @@ describe("checkResearchCompetenciaWeekly", () => {
     expect(mockSend).toHaveBeenCalledWith("t", { chatId: 1, text: "resumen" });
   });
 
+  it("le pasa el proveedor de cookies al research", async () => {
+    const getCookies = vi.fn(async () => []);
+    await checkResearchCompetenciaWeekly({ botToken: "t", chatId: 1, getCookies });
+    expect(vi.mocked(runResearchCompetencia).mock.calls[0][0]).toMatchObject({ timeframeDias: 7, getCookies });
+  });
+
   it("no tira si runResearchCompetencia falla — solo loguea run_failed, no manda", async () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockRun.mockRejectedValue(new Error("boom"));
