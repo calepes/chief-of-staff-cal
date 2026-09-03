@@ -17,9 +17,13 @@ vi.mock("./research-competencia-notion.js", () => ({
   appendCambios: vi.fn(async () => {}),
   createInformePage: vi.fn(async () => ({ pageId: "page1", url: "https://notion.so/page1" })),
 }));
+vi.mock("./research-competencia-social.js", () => ({
+  fetchSocialText: vi.fn(async () => "[instagram @altoke.bo] Promo nueva"),
+}));
 
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
-import { runEntityAgent, parseAgentJson } from "./research-competencia-agent.js";
+import { buildEntityPrompt, runEntityAgent, parseAgentJson } from "./research-competencia-agent.js";
+import { fetchSocialText } from "./research-competencia-social.js";
 import { runResearchCompetencia, formatSummaryHtml } from "./research-competencia.js";
 
 const mockReadState = vi.mocked(readEntityState);
@@ -101,6 +105,18 @@ describe("runResearchCompetencia", () => {
     expect(result.entidades[0].error).toContain("Entidad desconocida: ganadero");
     expect(result.entidades[1].entityId).toBe("takenos");
     expect(result.entidades[1].error).toBeUndefined();
+  });
+
+  it("pasa el texto de RRSS al prompt del agente", async () => {
+    await runResearchCompetencia({ entidadIds: ["takenos"] });
+    const facts = vi.mocked(buildEntityPrompt).mock.calls[0][2];
+    expect(facts.socialText).toBe("[instagram @altoke.bo] Promo nueva");
+  });
+
+  it("una falla del scraping social no corta la corrida de la entidad", async () => {
+    vi.mocked(fetchSocialText).mockRejectedValueOnce(new Error("boom"));
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+    expect(result.entidades[0].error).toBeUndefined();
   });
 });
 

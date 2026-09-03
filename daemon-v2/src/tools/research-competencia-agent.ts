@@ -6,6 +6,7 @@ export interface MechanicalFacts {
   ios: { version: string; rating: number | null; releaseNotes: string | null } | null;
   android: { version: string | null; rating: number | null; releaseNotes: string | null } | null;
   siteText: string | null;
+  socialText: string | null;
 }
 
 export function buildEntityPrompt(

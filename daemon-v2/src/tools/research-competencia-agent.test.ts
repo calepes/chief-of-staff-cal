@@ -5,7 +5,7 @@ import { getEntity } from "./research-competencia-entities.js";
 describe("buildEntityPrompt", () => {
   it("incluye el nombre de la entidad, el timeframe y la query de LinkedIn", () => {
     const entity = getEntity("takenos");
-    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null }, 7);
     expect(prompt).toContain("Takenos");
     expect(prompt).toContain("últimos 7 días");
     expect(prompt).toContain(entity.linkedinQuery);
@@ -13,33 +13,33 @@ describe("buildEntityPrompt", () => {
 
   it("marca explícito cuando no hay baseline (primera corrida)", () => {
     const entity = getEntity("meru");
-    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null }, 7);
     expect(prompt).toContain("sin baseline — primera corrida");
   });
 
   it("incluye el baseline serializado cuando existe", () => {
     const entity = getEntity("meru");
     const baseline = { entityId: "meru", updatedAt: "2026-08-01T00:00:00Z", notas: "vio rol de Growth" };
-    const prompt = buildEntityPrompt(entity, baseline, { ios: null, android: null, siteText: null }, 7);
+    const prompt = buildEntityPrompt(entity, baseline, { ios: null, android: null, siteText: null, socialText: null }, 7);
     expect(prompt).toContain("vio rol de Growth");
   });
 
   it("pide un battlecard con nivel de amenaza para Yape", () => {
     const entity = getEntity("meru");
-    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null }, 7);
     expect(prompt).toContain("battlecard");
     expect(prompt).toContain("amenaza");
   });
 
   it("exige que el battlecard nunca quede vacío aunque no haya hallazgos nuevos", () => {
     const entity = getEntity("meru");
-    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null }, 7);
     expect(prompt).toContain("NUNCA deben quedar vacíos");
   });
 
   it("pide repetir del baseline las fortalezas/debilidades que siguen vigentes, sin re-verificar", () => {
     const entity = getEntity("meru");
-    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null }, 7);
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null }, 7);
     expect(prompt).toContain("REPETILAS tal cual");
   });
 });

@@ -1,13 +1,17 @@
 import { getEntity, ENTITIES } from "./research-competencia-entities.js";
 import { fetchIosAppInfo, fetchAndroidAppInfo, fetchSiteText, chunkText } from "./research-competencia-sources.js";
 import { buildEntityPrompt, runEntityAgent, parseAgentJson, type MechanicalFacts } from "./research-competencia-agent.js";
+import { fetchSocialText } from "./research-competencia-social.js";
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
 import { nowInLaPaz } from "../journal-capture.js";
 import type { EntityRunResult, RunResult } from "./research-competencia-types.js";
+import type { StructuredCookie } from "./cookie-jar.js";
 
 export interface RunOpts {
   timeframeDias?: number;
   entidadIds?: string[];
+  /** Proveedor de cookies del Cookie Broker. Sin él, el scraping social corre sin sesión. */
+  getCookies?: (hostname: string) => Promise<StructuredCookie[]>;
 }
 
 export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunResult> {
@@ -35,15 +39,22 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     }
     try {
       const baseline = await readEntityState(entity.id);
-      const [ios, android, siteText] = await Promise.all([
+      const [ios, android, siteText, socialText] = await Promise.all([
         entity.ios ? fetchIosAppInfo(entity.ios) : Promise.resolve(null),
         entity.android ? fetchAndroidAppInfo(entity.android.packageName) : Promise.resolve(null),
         entity.siteUrl ? fetchSiteText(entity.siteUrl) : Promise.resolve(null),
+        // El scraping social no debe poder tumbar la entidad: si tira, se sigue con las demás
+        // fuentes — logueado, para no perder el rastro en un cron desatendido.
+        fetchSocialText(entity, timeframeDias, { getCookies: opts.getCookies }).catch((err) => {
+          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_error", entityId: entity.id, err: String(err) }));
+          return null;
+        }),
       ]);
       const facts: MechanicalFacts = {
         ios: ios ? { version: ios.version, rating: ios.rating, releaseNotes: ios.releaseNotes } : null,
         android: android ? { version: android.version, rating: android.rating, releaseNotes: android.releaseNotes } : null,
         siteText,
+        socialText,
       };
       const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
       const raw = await runEntityAgent(prompt);
