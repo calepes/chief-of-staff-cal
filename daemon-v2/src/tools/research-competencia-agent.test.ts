@@ -42,6 +42,18 @@ describe("buildEntityPrompt", () => {
     const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null }, 7);
     expect(prompt).toContain("REPETILAS tal cual");
   });
+
+  it("incluye el texto de RRSS en el prompt y lo declara como fuente citable", () => {
+    const entity = getEntity("takenos");
+    const prompt = buildEntityPrompt(
+      entity, null,
+      { ios: null, android: null, siteText: null, socialText: "[instagram @takenosapp.bo · 2026-09-01] https://instagram.com/p/x\nCaption: Promo nueva" },
+      7,
+    );
+    expect(prompt).toContain("Promo nueva");
+    expect(prompt).toContain("redes sociales");
+    expect(prompt).toContain("URL del post");
+  });
 });
 
 describe("parseAgentJson", () => {
