@@ -4,6 +4,8 @@ import {
   extractInstagramNodes,
   parseTikTokPosts,
   extractTikTokNodes,
+  parseDomPosts,
+  type RawDomPost,
 } from "./research-competencia-scrapers.js";
 
 /** Handle de la cuenta scrapeada en los tests de extracción — el mismo en Instagram y TikTok. */
@@ -294,5 +296,113 @@ describe("extractTikTokNodes", () => {
     const { nodos } = extractTikTokNodes(scriptTexts, HANDLE);
 
     expect(nodos).toEqual([]);
+  });
+});
+
+describe("parseDomPosts", () => {
+  it("normaliza posts crudos del DOM a SocialPost", () => {
+    const crudos: RawDomPost[] = [{
+      url: "https://x.com/bancosol/status/123",
+      texto: "Nueva campaña de ahorro",
+      fechaIso: "2026-09-01T10:00:00.000Z",
+      imagenes: ["https://pbs.twimg.com/media/a.jpg"],
+      videos: [],
+      autor: "bancosol",
+    }];
+
+    const posts = parseDomPosts(crudos, "x", "bancosol");
+
+    expect(posts[0]).toMatchObject({
+      platform: "x",
+      handle: "bancosol",
+      url: "https://x.com/bancosol/status/123",
+      fecha: "2026-09-01",
+      caption: "Nueva campaña de ahorro",
+      mediaUrls: ["https://pbs.twimg.com/media/a.jpg"],
+      esVideo: false,
+    });
+  });
+
+  it("marca esVideo y prioriza la URL de video sobre la imagen", () => {
+    const crudos: RawDomPost[] = [{
+      url: "https://facebook.com/altoke.bo/posts/1",
+      texto: "Mirá cómo funciona",
+      fechaIso: null,
+      imagenes: ["https://cdn/thumb.jpg"],
+      videos: ["https://cdn/video.mp4"],
+      autor: "altoke.bo",
+    }];
+
+    const posts = parseDomPosts(crudos, "facebook", "altoke.bo");
+
+    expect(posts[0].esVideo).toBe(true);
+    expect(posts[0].mediaUrls).toEqual(["https://cdn/video.mp4"]);
+    expect(posts[0].fecha).toBeNull();
+  });
+
+  it("descarta posts sin url", () => {
+    const crudos = [{ url: "", texto: "x", fechaIso: null, imagenes: [], videos: [], autor: "x" }] as RawDomPost[];
+    expect(parseDomPosts(crudos, "facebook", "x")).toEqual([]);
+  });
+
+  it("descarta un post cuyo autor no es la cuenta scrapeada (retweet / post compartido)", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/bancosol/status/1", texto: "propio", fechaIso: null, imagenes: [], videos: [], autor: "bancosol" },
+      { url: "https://x.com/otrobanco/status/2", texto: "ajeno", fechaIso: null, imagenes: [], videos: [], autor: "otrobanco" },
+    ];
+    const posts = parseDomPosts(crudos, "x", "bancosol");
+    expect(posts).toHaveLength(1);
+    expect(posts[0].caption).toBe("propio");
+  });
+
+  it("descarta un post sin autor identificable (fail-closed)", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/bancosol/status/1", texto: "sin autor", fechaIso: null, imagenes: [], videos: [], autor: null },
+    ];
+    expect(parseDomPosts(crudos, "x", "bancosol")).toEqual([]);
+  });
+
+  it("descarta un post con autor string vacío (fail-closed, no matchea handle vacío)", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/bancosol/status/1", texto: "autor vacío", fechaIso: null, imagenes: [], videos: [], autor: "" },
+    ];
+    expect(parseDomPosts(crudos, "x", "bancosol")).toEqual([]);
+  });
+
+  it("nunca matchea si el handle scrapeado está vacío, aunque el autor también lo esté", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com//status/1", texto: "sin handle", fechaIso: null, imagenes: [], videos: [], autor: "" },
+    ];
+    expect(parseDomPosts(crudos, "x", "")).toEqual([]);
+  });
+
+  it("compara autor y handle sin distinguir mayúsculas/minúsculas", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/BancoSol/status/1", texto: "propio", fechaIso: null, imagenes: [], videos: [], autor: "BANCOSOL" },
+    ];
+    expect(parseDomPosts(crudos, "x", "bancosol")).toHaveLength(1);
+  });
+
+  it("matchea handles reales con punto y guion bajo tal cual, sin normalizar símbolos", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://facebook.com/altoke.bo/posts/1", texto: "post 1", fechaIso: null, imagenes: [], videos: [], autor: "altoke.bo" },
+      { url: "https://facebook.com/bg.com.bo/posts/2", texto: "post 2", fechaIso: null, imagenes: [], videos: [], autor: "bg.com.bo" },
+    ];
+    expect(parseDomPosts(crudos, "facebook", "altoke.bo")).toHaveLength(1);
+    expect(parseDomPosts(crudos, "facebook", "bg.com.bo")).toHaveLength(1);
+  });
+
+  it("descarta silenciosamente una fecha ISO inválida en vez de propagar el error", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/bancosol/status/1", texto: "fecha mala", fechaIso: "no-es-una-fecha", imagenes: [], videos: [], autor: "bancosol" },
+    ];
+    expect(parseDomPosts(crudos, "x", "bancosol")[0].fecha).toBeNull();
+  });
+
+  it("sin imágenes ni videos, mediaUrls queda vacío", () => {
+    const crudos: RawDomPost[] = [
+      { url: "https://x.com/bancosol/status/1", texto: "solo texto", fechaIso: null, imagenes: [], videos: [], autor: "bancosol" },
+    ];
+    expect(parseDomPosts(crudos, "x", "bancosol")[0].mediaUrls).toEqual([]);
   });
 });

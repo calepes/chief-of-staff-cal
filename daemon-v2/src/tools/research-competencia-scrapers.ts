@@ -1,8 +1,9 @@
 // tools/research-competencia-scrapers.ts — scrapers headless por plataforma para el research de
 // competencia (fase 2, redes sociales). Separado de research-competencia-social.ts a propósito:
 // ese archivo se queda con tipos/filtro/formateo/orquestación; acá vive el detalle de Playwright
-// por red social (Instagram y TikTok en esta tarea; Facebook se suma en una tarea posterior, vía
-// `withBrowserContext`).
+// por red social: Instagram y TikTok leen JSON embebido (`extractNodes`/`walkForNodes`); Facebook
+// y X no exponen eso, así que leen el DOM ya renderizado (`collectDomPosts`/`parseDomPosts`). Las
+// cuatro comparten el boilerplate de Playwright vía `withBrowserContext`.
 //
 // Mismo patrón que design-capture.ts: chromium.launch({headless:true}), cookies inyectadas al
 // contexto, try/finally con browser.close(). El LLM no tiene tool de navegación genérica — esto
@@ -11,7 +12,7 @@
 import { chromium } from "playwright";
 import type { Page } from "playwright";
 import type { StructuredCookie } from "./cookie-jar.js";
-import type { SocialPost } from "./research-competencia-social.js";
+import type { SocialPlatform, SocialPost } from "./research-competencia-social.js";
 
 /**
  * Convierte un timestamp Unix (segundos) a fecha calendario `YYYY-MM-DD` en La Paz (UTC-4), no
@@ -129,15 +130,38 @@ function extractNodes(scriptTexts: string[], predicado: NodePredicate): NodeExtr
 // verificable en el battlecard de research de competencia. Por eso el predicado de cada
 // plataforma exige que el nodo declare como autor al `handle` que se está scrapeando, comparando
 // en minúsculas — un nodo sin ese campo, o con un autor distinto, se descarta aunque matchee la
-// forma.
+// forma. Mismo riesgo (y más probable todavía) en Facebook/X — ver `parseDomPosts` más abajo.
+//
+// `handlesMatch` es el fondo común de toda esa validación: fail-closed ante `null`/`undefined`/
+// cualquier tipo que no sea string, Y ante un `handle` vacío — sin ese segundo guard, un nodo con
+// autor `""` matchearía contra un `handle` que también llegara vacío (bug señalado en la revisión
+// de esta tarea, nunca disparado en producción porque el handle siempre lo pasa el orquestador,
+// pero un guard barato de tener).
+function handlesMatch(valor: unknown, handle: string): boolean {
+  return typeof valor === "string" && valor !== "" && handle !== "" && valor.toLowerCase() === handle.toLowerCase();
+}
+
+/**
+ * Generaliza `ownerUsernameMatches`/`authorUniqueIdMatches` (Instagram/TikTok) — las dos leían un
+ * campo anidado y comparaban contra `handle` en minúsculas, idénticas salvo el path. Factorizado
+ * al sumar Facebook/X (nota de diseño de la revisión anterior): un path de campos anidados +
+ * `handlesMatch` sobre el valor final.
+ */
+function fieldEqualsHandleCI(obj: Record<string, unknown>, path: readonly string[], handle: string): boolean {
+  let valor: unknown = obj;
+  for (const key of path) {
+    if (!valor || typeof valor !== "object") return false;
+    valor = (valor as Record<string, unknown>)[key];
+  }
+  return handlesMatch(valor, handle);
+}
+
 function ownerUsernameMatches(obj: Record<string, unknown>, handle: string): boolean {
-  const owner = obj.owner as { username?: unknown } | undefined;
-  return typeof owner?.username === "string" && owner.username.toLowerCase() === handle.toLowerCase();
+  return fieldEqualsHandleCI(obj, ["owner", "username"], handle);
 }
 
 function authorUniqueIdMatches(obj: Record<string, unknown>, handle: string): boolean {
-  const author = obj.author as { uniqueId?: unknown } | undefined;
-  return typeof author?.uniqueId === "string" && author.uniqueId.toLowerCase() === handle.toLowerCase();
+  return fieldEqualsHandleCI(obj, ["author", "uniqueId"], handle);
 }
 
 export interface InstagramExtraction {
@@ -162,8 +186,18 @@ export function extractInstagramNodes(scriptTexts: string[], handle: string): In
 // Ambiente mínimo SOLO para el body de page.evaluate() (corre en el navegador, no en Node) —
 // mismo motivo que design-capture.ts: a propósito no se agrega "DOM" al lib del tsconfig, que
 // aplicaría a todo el paquete y podría chocar con los tipos de fetch/Response/Headers de Node.
+// Ampliado al sumar Facebook/X: `collectDomPosts` (más abajo) necesita recorrer nodos genéricos
+// (`article`/`img`/`video`/`time`/`a`), no solo `<script>` como hacía `collectScriptsByLiteral`.
+interface DomElement {
+  querySelector(selector: string): DomElement | null;
+  querySelectorAll(selector: string): ArrayLike<DomElement>;
+  textContent: string | null;
+  href?: string;
+  src?: string;
+  dateTime?: string;
+}
 declare const document: {
-  querySelectorAll(selector: "script"): ArrayLike<{ textContent: string | null }>;
+  querySelectorAll(selector: string): ArrayLike<DomElement>;
 };
 
 /**
@@ -314,5 +348,141 @@ export async function scrapeTikTok(handle: string, cookies: StructuredCookie[]):
     const scriptTexts = await collectScriptsByLiteral(page, "desc");
     const { nodos, diagnostics } = extractTikTokNodes(scriptTexts, handle);
     return { items: parseTikTokPosts(nodos, handle), diagnostics };
+  });
+}
+
+/**
+ * Post crudo tal como lo extrae `collectDomPosts` del DOM ya renderizado de Facebook/X — a
+ * diferencia de Instagram/TikTok, ninguna de las dos expone un JSON embebido estable, así que acá
+ * el timeline se lee directamente del árbol de nodos. `autor` es `string | null` (no siempre hay
+ * forma de identificarlo) para que `parseDomPosts` pueda aplicar el mismo criterio fail-closed que
+ * `ownerUsernameMatches`/`authorUniqueIdMatches`.
+ */
+export interface RawDomPost {
+  url: string;
+  texto: string;
+  fechaIso: string | null;
+  imagenes: string[];
+  videos: string[];
+  autor: string | null;
+}
+
+/** `fechaIso` → `YYYY-MM-DD` (los primeros 10 chars) si parsea como fecha válida; `null` si no. */
+function parseDomDate(fechaIso: string | null): string | null {
+  if (!fechaIso) return null;
+  return Number.isNaN(new Date(fechaIso).getTime()) ? null : fechaIso.slice(0, 10);
+}
+
+/**
+ * Normaliza los posts crudos del DOM de Facebook/X a `SocialPost` — función pura, sin red, mismo
+ * criterio que `parseInstagramPosts`/`parseTikTokPosts`. Descarta sin `url`, y descarta sin autor
+ * verificado contra `handle` (fail-closed vía `handlesMatch`, ver comentario grande más arriba):
+ * el timeline de X trae retweets/quote-tweets de otras cuentas, y una página de Facebook muestra
+ * posts compartidos de otras páginas — mismo riesgo que llevó a validar autoría en Instagram/
+ * TikTok, y más probable acá.
+ */
+export function parseDomPosts(crudos: RawDomPost[], platform: SocialPlatform, handle: string): SocialPost[] {
+  const posts: SocialPost[] = [];
+  for (const crudo of crudos) {
+    if (!crudo.url) continue;
+    if (!handlesMatch(crudo.autor, handle)) continue;
+    const esVideo = crudo.videos.length > 0;
+    const mediaUrls = esVideo ? [crudo.videos[0]] : crudo.imagenes.length > 0 ? [crudo.imagenes[0]] : [];
+    posts.push({
+      platform,
+      handle,
+      url: crudo.url,
+      fecha: parseDomDate(crudo.fechaIso),
+      caption: crudo.texto,
+      mediaUrls,
+      esVideo,
+    });
+  }
+  return posts;
+}
+
+/**
+ * Extrae posts crudos del DOM ya renderizado — compartida por Facebook y X, corre dentro de
+ * `page.evaluate` (contexto del browser, no de Node).
+ *
+ * ⚠️ SELECTORES PENDIENTES DE VERIFICACIÓN EN VIVO. Esta tarea no navega a las páginas reales (eso
+ * es la tarea 13, con cookies reales) — lo de abajo es el mejor criterio disponible sin poder
+ * confirmarlo, no un hecho verificado:
+ * - `article, [role="article"]` para encontrar cada post: X marca cada tweet `<article>`,
+ *   Facebook usa `role="article"`.
+ * - El permalink sale de `a[href*="/status/"]` (X) / `a[href*="/posts/"]`/`a[href*="/videos/"]`
+ *   (Facebook).
+ * - El autor se deriva del PRIMER segmento de path de ESE permalink (`/{autor}/status/{id}` en X,
+ *   `/{autor}/posts|videos/{id}` en Facebook) — en X esto es estructuralmente robusto ante
+ *   retweets: el permalink de un retweet en el timeline de `handle` sigue apuntando a
+ *   `x.com/{autorOriginal}/status/{id}`, no a `handle`, así que `parseDomPosts` ya lo descarta
+ *   solo con esto. En Facebook es más débil (un post COMPARTIDO por la página puede seguir
+ *   teniendo permalink bajo la propia página) — si la tarea 13 confirma que no alcanza, hay que
+ *   sumar un selector más específico del nombre visible en el header del post.
+ */
+function collectDomPosts(page: Page): Promise<RawDomPost[]> {
+  return page.evaluate(() => {
+    const crudos: RawDomPost[] = [];
+    for (const art of Array.from(document.querySelectorAll('article, [role="article"]'))) {
+      const link = art.querySelector('a[href*="/status/"], a[href*="/posts/"], a[href*="/videos/"]');
+      const url = link?.href ?? "";
+      let autor: string | null = null;
+      if (url) {
+        try {
+          autor = new URL(url).pathname.split("/").filter(Boolean)[0] ?? null;
+        } catch {
+          autor = null;
+        }
+      }
+      const imagenes = Array.from(art.querySelectorAll("img"))
+        .map((img) => img.src ?? "")
+        .filter((src) => src.startsWith("http"));
+      const videos = Array.from(art.querySelectorAll("video"))
+        .map((v) => v.src ?? "")
+        .filter((src) => src.startsWith("http"));
+      crudos.push({
+        url,
+        texto: art.textContent?.trim() ?? "",
+        fechaIso: art.querySelector("time")?.dateTime ?? null,
+        imagenes,
+        videos,
+        autor,
+      });
+    }
+    return crudos;
+  });
+}
+
+/**
+ * Scrapea la página pública de Facebook de `handle` y devuelve sus posts recientes.
+ *
+ * Facebook detecta automatización de forma más agresiva que Instagram (fingerprinting de browser,
+ * challenges anti-bot, muro de login más insistente) — mismo comportamiento ya documentado para
+ * TikTok en `scrapeTikTok`. Si esto devuelve sistemáticamente `[]` (ver `diagnostics` en el log
+ * `research_competencia_scrape_empty`), es señal de bloqueo de plataforma, no un bug del parser:
+ * está anticipado en el spec y el diseño degrada sin romper el research completo de las demás
+ * cuentas/plataformas (ver `withBrowserContext`).
+ */
+export async function scrapeFacebook(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
+  return withBrowserContext("facebook", handle, cookies, async (page) => {
+    await page.goto(`https://www.facebook.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
+    const crudos = await collectDomPosts(page);
+    return { items: parseDomPosts(crudos, "facebook", handle), diagnostics: { articulosEncontrados: crudos.length } };
+  });
+}
+
+/**
+ * Scrapea el perfil público de X de `handle` y devuelve sus posts recientes.
+ *
+ * Facebook detecta automatización de forma más agresiva que Instagram — TikTok también, ver
+ * `scrapeTikTok` — y lo mismo aplica acá: si esto devuelve sistemáticamente `[]`, es señal de
+ * bloqueo de plataforma, no un bug del parser. Diseño anticipado, degrada sin romper el research
+ * completo de las demás cuentas/plataformas (ver `withBrowserContext`).
+ */
+export async function scrapeX(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
+  return withBrowserContext("x", handle, cookies, async (page) => {
+    await page.goto(`https://x.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
+    const crudos = await collectDomPosts(page);
+    return { items: parseDomPosts(crudos, "x", handle), diagnostics: { articulosEncontrados: crudos.length } };
   });
 }
