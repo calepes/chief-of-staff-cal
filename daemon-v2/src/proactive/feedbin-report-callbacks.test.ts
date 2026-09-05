@@ -6,7 +6,7 @@ import {
   type FeedbinReportCallbackDeps,
 } from "./feedbin-report-callbacks.js";
 import { FeedbinReportStore, type FeedbinReportProposal } from "./feedbin-report-store.js";
-import type { FeedbinReportButton, Card } from "./feedbin-report-card.js";
+import { buildKeyboard, type FeedbinReportButton, type Card } from "./feedbin-report-card.js";
 
 /** CfKv falso en memoria, mismo patrón que learning-callbacks.test.ts. */
 class FakeKv {
@@ -142,15 +142,19 @@ describe("handleFeedbinReportCallback", () => {
     expect(edits).toHaveLength(0);
   });
 
-  it("fbr:undo dentro de la ventana pero con la API fallando no toca el KV y deja el grupo marcado", async () => {
+  it("fbr:undo dentro de la ventana pero con la API fallando no toca el KV, deja el grupo marcado y avisa en la tarjeta", async () => {
     markEntriesUnread.mockRejectedValue(new Error("Feedbin API 500"));
-    const reportId = await store.createReport(proposal({ buttons: [{ ...BTN, markedAt: Date.now() - 60_000 }] }));
+    const markedAt = Date.now() - 60_000;
+    const reportId = await store.createReport(proposal({ buttons: [{ ...BTN, markedAt }] }));
 
     await handleFeedbinReportCallback(deps, 99, `fbr:undo:${reportId}:g1`);
 
     const saved = await store.getReport(reportId);
     expect(saved!.buttons[0]!.markedAt).toBeGreaterThan(0); // sigue marcado, no se revirtió a 0
     expect(edits.at(-1)!.card.text).toContain("marcado"); // la tarjeta muestra el estado real
+    expect(edits.at(-1)!.card.text).toContain("No pude deshacer");
     expect(logs.some((l) => l.msg === "feedbin_report_undo_failed")).toBe(true);
+    // el teclado queda igual que antes del intento fallido (botón sigue marcado, con Deshacer)
+    expect(edits.at(-1)!.card.keyboard).toEqual(buildKeyboard(reportId, [{ ...BTN, markedAt }]));
   });
 });

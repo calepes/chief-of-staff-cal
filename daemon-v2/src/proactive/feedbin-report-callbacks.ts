@@ -83,6 +83,11 @@ export async function handleFeedbinReportCallback(
     } catch (err) {
       button.markedAt = previousMarkedAt; // no confirmado — no reflejarlo en la tarjeta
       deps.log({ msg: "feedbin_report_undo_failed", reportId, buttonId, err: String(err) });
+      await deps.editCard(messageId, {
+        text: `${buildReportText(proposal.headerText, proposal.buttons)}\n\n⚠️ No pude deshacer "${esc(button.label)}" — reintentá tocando el botón de nuevo.`,
+        keyboard: buildKeyboard(reportId, proposal.buttons),
+      });
+      return;
     }
   } else {
     deps.log({ msg: "feedbin_report_undo_expired_or_missing", reportId, buttonId });

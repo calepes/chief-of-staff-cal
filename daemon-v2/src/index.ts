@@ -865,6 +865,10 @@ async function processMessage(
     // legacy" más abajo — puesto debajo, `fbr:*` sería código muerto sin rastro en logs (mismo
     // motivo por el que `bklg:*`/`lrn:*` están donde están).
     if (isFeedbinReportCallback(cb.data)) {
+      if (!env.FEEDBIN_USERNAME || !env.FEEDBIN_PASSWORD) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⚠️ Feedbin no está configurado — avisale a Cal").catch(() => {});
+        return;
+      }
       const fchat = cb.message.chat.id;
       const fanchor = cb.message.message_id;
       const lockUserId = cb.from.id;
