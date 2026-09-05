@@ -1,21 +1,28 @@
-// Cron diario: cuántos no leídos hay en Feedbin, agrupados por carpeta, y una recomendación
-// de qué artículos de hoy vale la pena abrir vs marcar como leído sin abrir — usando el
-// perfil de temas que refresca `topics-profile-refresh.ts` semanalmente. Solo SUGIERE,
-// nunca marca nada como leído por su cuenta (decisión explícita de Cal).
+// Cron diario: clasifica TODO el backlog de no leídos en Feedbin (sin techo — antes solo miraba
+// los últimos 60), lo agrupa por tema en dos tandas ("para abrir" y "marcar leído") usando el
+// perfil de temas que refresca `topics-profile-refresh.ts` semanalmente, y ofrece un botón por
+// grupo de baja relevancia para marcarlo como leído en bloque. Nunca marca nada por su cuenta —
+// la ejecución real solo pasa por tocar un botón (ver feedbin-report-callbacks.ts).
 
 import { readFileSync } from "node:fs";
 import { startup } from "@anthropic-ai/claude-agent-sdk";
-import { getAllUnreadEntries, getSubscriptions, getTaggings, type FeedbinCreds, type FeedbinEntry } from "../tools/feedbin-client.js";
+import { getAllUnreadEntries, getSubscriptions, getTaggings, feedbinEntryUrl, type FeedbinCreds, type FeedbinEntry } from "../tools/feedbin-client.js";
+import type { CfKv } from "../cf-kv.js";
 import { TOPICS_PROFILE_PATH } from "./topics-profile-refresh.js";
 import { sendCronMessage } from "./rich-send.js";
+import { groupEntries, type ThemeGroup } from "./feedbin-report-groups.js";
+import { renderAbrirSection, selectMarkButtons, buildReportText, buildKeyboard, type Keyboard } from "./feedbin-report-card.js";
+import { FeedbinReportStore } from "./feedbin-report-store.js";
 
 const MODEL = "claude-haiku-4-5-20251001";
-const MAX_TO_CLASSIFY = 60; // techo de costo — si hay más no leídos, se clasifican los más recientes
+const CLASSIFY_BATCH_SIZE = 60;
+const ABRIR_FALLBACK_LIMIT = 15; // si el agrupado de "abrir" falla, cuántos links planos mostrar
 
 export interface FeedbinDailyReportOpts {
   botToken: string;
   chatId: number;
   feedbin: FeedbinCreds;
+  kv: CfKv;
 }
 
 export interface Recomendacion { id: number; decision: "abrir" | "saltar" }
@@ -80,8 +87,29 @@ async function classifyEntries(perfil: string, entries: FeedbinEntry[]): Promise
   return parseClassifyResult(out);
 }
 
+/** Clasifica TODO el backlog en lotes de CLASSIFY_BATCH_SIZE — un lote que falla se loguea y se
+ * excluye, pero no aborta los siguientes. Reemplaza el viejo techo MAX_TO_CLASSIFY=60. */
+async function classifyAllEntries(perfil: string, entries: FeedbinEntry[]): Promise<Recomendacion[]> {
+  const all: Recomendacion[] = [];
+  for (let i = 0; i < entries.length; i += CLASSIFY_BATCH_SIZE) {
+    const batch = entries.slice(i, i + CLASSIFY_BATCH_SIZE);
+    try {
+      const recs = await classifyEntries(perfil, batch);
+      all.push(...recs);
+    } catch (err) {
+      console.log(JSON.stringify({
+        ts: Date.now(),
+        msg: "feedbin_daily_report_batch_classify_failed",
+        batchIndex: Math.floor(i / CLASSIFY_BATCH_SIZE),
+        err: String(err),
+      }));
+    }
+  }
+  return all;
+}
+
 export async function checkFeedbinDailyReport(opts: FeedbinDailyReportOpts): Promise<void> {
-  const { botToken, chatId, feedbin } = opts;
+  const { botToken, chatId, feedbin, kv } = opts;
 
   let unread: FeedbinEntry[];
   let subs: Awaited<ReturnType<typeof getSubscriptions>>;
@@ -116,50 +144,110 @@ export async function checkFeedbinDailyReport(opts: FeedbinDailyReportOpts): Pro
     const carpeta = feedTagName.get(e.feed_id) ?? feedTitle.get(e.feed_id) ?? "(sin carpeta)";
     porCarpeta.set(carpeta, (porCarpeta.get(carpeta) ?? 0) + 1);
   }
-
-  const lines: string[] = [`📰 <b>Feedbin</b> — ${unread.length} sin leer`];
   const carpetaLine = [...porCarpeta.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([carpeta, count]) => `${carpeta}: ${count}`)
     .join(" · ");
-  lines.push(carpetaLine);
 
   const perfil = readTopicsProfile();
   if (!perfil) {
-    lines.push("");
-    lines.push("<i>Sin perfil de temas todavía (corre el domingo) — sin recomendación por ahora.</i>");
-  } else {
-    const sorted = [...unread].sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime());
-    const truncated = sorted.length > MAX_TO_CLASSIFY;
-    const toClassify = sorted.slice(0, MAX_TO_CLASSIFY);
-
-    let recomendaciones: Recomendacion[] = [];
+    const text = [
+      `📰 <b>Feedbin</b> — ${unread.length} sin leer`,
+      carpetaLine,
+      "",
+      "<i>Sin perfil de temas todavía (corre el domingo) — sin recomendación por ahora.</i>",
+    ].join("\n");
     try {
-      recomendaciones = await classifyEntries(perfil, toClassify);
+      await sendCronMessage(botToken, { chatId, text });
+      console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_sent", unreadCount: unread.length }));
     } catch (err) {
-      console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_classify_error", err: String(err) }));
+      console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_send_failed", err: String(err) }));
     }
+    return;
+  }
 
-    const abrirIds = new Set(recomendaciones.filter((r) => r.decision === "abrir").map((r) => r.id));
-    const entryById = new Map(toClassify.map((e) => [e.id, e]));
-    const recomendados = [...abrirIds].map((id) => entryById.get(id)).filter((e): e is FeedbinEntry => Boolean(e));
-    const saltablesCount = recomendaciones.length - recomendados.length;
+  const entryById = new Map(unread.map((e) => [e.id, e]));
+  const recomendaciones = await classifyAllEntries(perfil, unread);
 
-    lines.push("");
-    if (recomendados.length === 0 && recomendaciones.length === 0) {
-      lines.push("<i>No pude clasificar hoy (falló la síntesis) — revisá la lista completa vos.</i>");
+  if (recomendaciones.length === 0) {
+    const text = [
+      `📰 <b>Feedbin</b> — ${unread.length} sin leer`,
+      carpetaLine,
+      "",
+      "<i>No pude clasificar hoy (falló la síntesis) — revisá la lista completa vos.</i>",
+    ].join("\n");
+    try {
+      await sendCronMessage(botToken, { chatId, text });
+      console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_sent", unreadCount: unread.length }));
+    } catch (err) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_send_failed", err: String(err) }));
+    }
+    return;
+  }
+
+  const abrirEntries = recomendaciones
+    .filter((r) => r.decision === "abrir")
+    .map((r) => entryById.get(r.id))
+    .filter((e): e is FeedbinEntry => Boolean(e));
+  const saltarEntries = recomendaciones
+    .filter((r) => r.decision === "saltar")
+    .map((r) => entryById.get(r.id))
+    .filter((e): e is FeedbinEntry => Boolean(e));
+
+  let abrirGroups: ThemeGroup[] = [];
+  try {
+    abrirGroups = await groupEntries(perfil, abrirEntries);
+  } catch (err) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_group_abrir_failed", err: String(err) }));
+  }
+
+  let saltarGroups: ThemeGroup[] = [];
+  try {
+    saltarGroups = await groupEntries(perfil, saltarEntries);
+  } catch (err) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_group_saltar_failed", err: String(err) }));
+  }
+
+  const headerLines = [`📰 <b>Feedbin</b> — ${unread.length} sin leer`, carpetaLine, ""];
+  headerLines.push(`<b>✅ Para abrir</b> (${abrirEntries.length})`);
+  if (abrirEntries.length === 0) {
+    headerLines.push("<i>Nada para abrir hoy.</i>");
+  } else if (abrirGroups.length > 0) {
+    headerLines.push(renderAbrirSection(abrirGroups, entryById));
+  } else {
+    headerLines.push(
+      abrirEntries
+        .slice(0, ABRIR_FALLBACK_LIMIT)
+        .map((e) => `• <a href="${feedbinEntryUrl(e.id)}">${e.title ?? "(sin título)"}</a>`)
+        .join("\n"),
+    );
+  }
+  const headerText = headerLines.join("\n");
+
+  let text = headerText;
+  let keyboard: Keyboard | undefined;
+
+  if (saltarEntries.length > 0) {
+    if (saltarGroups.length > 0) {
+      const buttons = selectMarkButtons(saltarGroups);
+      const store = new FeedbinReportStore(kv);
+      const reportId = await store.createReport({ headerText, buttons });
+      text = buildReportText(headerText, buttons);
+      keyboard = buildKeyboard(reportId, buttons);
     } else {
-      lines.push(`✅ <b>Para abrir</b> (${recomendados.length}${truncated ? `, de los ${MAX_TO_CLASSIFY} más recientes` : ""})`);
-      for (const e of recomendados.slice(0, 15)) {
-        lines.push(`• <a href="${e.url}">${e.title ?? "(sin título)"}</a>`);
-      }
-      if (saltablesCount > 0) lines.push(`\n⏭️ ${saltablesCount} de baja relevancia — no los toqué, decisión tuya.`);
+      text = `${headerText}\n\n<b>⏭️ Marcar como leído</b> (${saltarEntries.length}) — no pude agrupar, revisalo directo en Feedbin.`;
     }
   }
 
   try {
-    await sendCronMessage(botToken, { chatId, text: lines.join("\n") });
-    console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_sent", unreadCount: unread.length }));
+    await sendCronMessage(botToken, { chatId, text, replyMarkup: keyboard });
+    console.log(JSON.stringify({
+      ts: Date.now(),
+      msg: "feedbin_daily_report_sent",
+      unreadCount: unread.length,
+      abrirCount: abrirEntries.length,
+      saltarCount: saltarEntries.length,
+    }));
   } catch (err) {
     console.log(JSON.stringify({ ts: Date.now(), msg: "feedbin_daily_report_send_failed", err: String(err) }));
   }
