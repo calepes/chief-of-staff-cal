@@ -179,10 +179,80 @@ export async function appendCambios(
   }
 }
 
+function tableCell(texto: string): unknown[] {
+  return [{ type: "text", text: { content: texto } }];
+}
+
+function tableRow(cells: string[]): unknown {
+  return { object: "block", type: "table_row", table_row: { cells: cells.map(tableCell) } };
+}
+
+// Tabla comparativa de KPIs de ads — solo tiene sentido si AL MENOS una entidad trae `adsKpis`
+// (una entidad que falló antes de llegar a ese bloque, ver `r.error` en research-competencia.ts,
+// no lo trae). Va ANTES de las secciones por entidad porque es justamente para COMPARAR entre las
+// 6, no un dato de una sola — a diferencia del resto del informe, organizado por entidad.
+export function buildAdsKpisBlocks(entidades: EntityRunResult[]): unknown[] {
+  if (!entidades.some((e) => e.adsKpis)) return [];
+  const header = ["Entidad", "Creativos activos", "Campañas nuevas", "Duración prom. (días)", "Formato (img/disp/?)"];
+  const filas = entidades.map((e) => {
+    const k = e.adsKpis;
+    return tableRow([
+      e.entityNombre,
+      k ? String(k.creativosActivos) : "—",
+      k ? String(k.campanasNuevas) : "—",
+      k?.duracionPromedioDias != null ? String(k.duracionPromedioDias) : "—",
+      k ? `${k.mixFormato.imagen} / ${k.mixFormato.display} / ${k.mixFormato.desconocido}` : "—",
+    ]);
+  });
+  return [
+    headingBlock("Actividad publicitaria — comparativa"),
+    // Disclaimer explícito pedido por Cal: son proxies de VOLUMEN, nunca gasto real — ni Google Ads
+    // Transparency Center ni Meta Ad Library exponen presupuesto/impresiones/alcance gratis para
+    // anuncios comerciales (ver research-competencia-ads.ts).
+    paragraphBlock(
+      "Proxies de volumen/actividad publicitaria (creativos recuperados, campañas nuevas, duración, formato) — " +
+        "NO son gasto real ni impresiones/alcance: ninguna fuente gratuita los expone para anuncios comerciales.",
+      true,
+    ),
+    {
+      object: "block",
+      type: "table",
+      table: {
+        table_width: header.length,
+        has_column_header: true,
+        has_row_header: false,
+        children: [tableRow(header), ...filas],
+      },
+    },
+  ];
+}
+
+/** "Instagram: 45.231 (+1.302 vs. semana pasada)" — solo si hay al menos un dato de seguidores en
+ * esta corrida. Sin gráficos ni serie completa (YAGNI, pedido explícito) — el delta contra el
+ * punto anterior de `seguidoresHistorial` alcanza para el informe semanal. */
+function buildFollowersLine(snapshot: EntitySnapshot): unknown | null {
+  const historial = snapshot.seguidoresHistorial;
+  if (!historial || historial.length === 0) return null;
+  const actual = historial[historial.length - 1];
+  const anterior = historial.length >= 2 ? historial[historial.length - 2] : undefined;
+  const partes: string[] = [];
+  for (const [label, valor] of [["Instagram", actual.instagram], ["Facebook", actual.facebook]] as const) {
+    if (valor === null) continue;
+    const previo = anterior?.[label === "Instagram" ? "instagram" : "facebook"] ?? null;
+    const delta = previo !== null ? valor - previo : null;
+    const deltaTxt = delta !== null ? ` (${delta >= 0 ? "+" : ""}${delta.toLocaleString("es-BO")} vs. semana pasada)` : "";
+    partes.push(`${label}: ${valor.toLocaleString("es-BO")}${deltaTxt}`);
+  }
+  if (partes.length === 0) return null;
+  return paragraphBlock(`Seguidores — ${partes.join(" · ")}`, true);
+}
+
 export function buildInformeBlocks(entidades: EntityRunResult[]): unknown[] {
-  const blocks: unknown[] = [];
+  const blocks: unknown[] = [...buildAdsKpisBlocks(entidades)];
   for (const e of entidades) {
     blocks.push(headingBlock(e.entityNombre));
+    const followersLine = buildFollowersLine(e.snapshot);
+    if (followersLine) blocks.push(followersLine);
     if (e.error) {
       blocks.push(paragraphBlock(`Error en esta corrida: ${e.error}`, true));
     } else if (e.primeraCorrida) {

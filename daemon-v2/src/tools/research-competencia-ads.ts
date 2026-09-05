@@ -1,4 +1,6 @@
 import type { EntityConfig } from "./research-competencia-entities.js";
+import type { MetaAdCreative } from "./research-competencia-meta-ads.js";
+import type { AdsKpis } from "./research-competencia-types.js";
 
 /**
  * Inteligencia de PUBLICIDAD, complementaria al scraping de contenido orgánico
@@ -256,18 +258,27 @@ async function fetchAdvertiserReal(advertiserId: string): Promise<unknown | null
   }
 }
 
+export interface FetchAdsResult {
+  texto: string | null;
+  /** Creativos YA filtrados por ventana — mismo dato que arma `texto`, expuesto aparte para que el
+   * orquestador calcule KPIs comparables (`computeAdsKpis`) sin repetir el fetch de red. */
+  creativos: AdCreative[];
+}
+
 /**
- * Bloque de texto de publicidad para una entidad. Devuelve null si la entidad no declara
- * anunciantes o si no se recuperó ningún anuncio — mismo contrato que `fetchSocialText`, para que
- * el orquestador los trate igual.
+ * Bloque de texto de publicidad para una entidad, MÁS los creativos crudos que lo componen.
+ * `texto` es null si la entidad no declara anunciantes o si no se recuperó ningún anuncio — mismo
+ * contrato que `fetchSocialText`, para que el orquestador los trate igual; `creativos` es siempre
+ * un array (vacío si no hubo nada), nunca null, porque "cero actividad" es un dato válido para
+ * `computeAdsKpis`.
  */
 export async function fetchAdsText(
   entity: EntityConfig,
   timeframeDias: number,
   deps: FetchAdsDeps = {},
-): Promise<string | null> {
+): Promise<FetchAdsResult> {
   const advertisers = entity.ads?.google ?? [];
-  if (advertisers.length === 0) return null;
+  if (advertisers.length === 0) return { texto: null, creativos: [] };
 
   const fetchAdvertiser = deps.fetchAdvertiser ?? fetchAdvertiserReal;
   const esperar = deps.esperar ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -287,5 +298,44 @@ export async function fetchAdsText(
     todos.push(...filterAdsByTimeframe(creativos, timeframeDias, ahora));
   }
 
-  return formatAdsText(todos, timeframeDias, ahora) || null;
+  return { texto: formatAdsText(todos, timeframeDias, ahora) || null, creativos: todos };
+}
+
+/**
+ * KPIs comparables de actividad publicitaria entre las 6 entidades — ver el docstring de `AdsKpis`
+ * (research-competencia-types.ts) sobre por qué son proxies de volumen, no de gasto. `google` y
+ * `meta` ya vienen filtrados/deduplicados por sus respectivos `fetch*Text` (mismos arrays que
+ * arman el texto del prompt) — esta función solo agrega, no vuelve a tocar red.
+ *
+ * `duracionPromedioDias` clampea cada duración individual a >= 0: `filterAdsByTimeframe` conserva
+ * a propósito creativos con `ultimaVez < primeraVez` (dato inconsistente del RPC, ver su test) —
+ * sin el clamp, uno solo de esos arrastraría el promedio hacia abajo con una duración negativa sin
+ * sentido de negocio.
+ */
+export function computeAdsKpis(
+  google: AdCreative[],
+  meta: MetaAdCreative[],
+  timeframeDias: number,
+  ahora = new Date(),
+): AdsKpis {
+  const desdeCorte = new Date(ahora.getTime() - timeframeDias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const nuevosGoogle = google.filter((a) => esNuevo(a, timeframeDias, ahora)).length;
+  const nuevosMeta = meta.filter((a) => a.desde !== null && a.desde >= desdeCorte).length;
+
+  const duraciones = google
+    .filter((a): a is AdCreative & { primeraVez: string; ultimaVez: string } => !!a.primeraVez && !!a.ultimaVez)
+    .map((a) => Math.max(0, (new Date(a.ultimaVez).getTime() - new Date(a.primeraVez).getTime()) / (24 * 60 * 60 * 1000)));
+  const duracionPromedioDias = duraciones.length > 0
+    ? Math.round((duraciones.reduce((sum, d) => sum + d, 0) / duraciones.length) * 10) / 10
+    : null;
+
+  const mixFormato = { imagen: 0, display: 0, desconocido: 0 };
+  for (const a of google) mixFormato[a.formato]++;
+
+  return {
+    creativosActivos: google.length + meta.length,
+    campanasNuevas: nuevosGoogle + nuevosMeta,
+    duracionPromedioDias,
+    mixFormato,
+  };
 }

@@ -2,24 +2,16 @@ import { describe, it, expect } from "vitest";
 import {
   parseInstagramGridItems,
   parseInstagramPhotoAltDate,
+  parseInstagramFollowerTitle,
+  parseFacebookFollowerText,
   type RawInstagramGridItem,
-  parseTikTokPosts,
-  extractTikTokNodes,
   parseDomPosts,
   deriveAuthorFromPermalink,
   type RawDomPost,
 } from "./research-competencia-scrapers.js";
 
-/** Handle de la cuenta scrapeada en los tests de extracción — el mismo en Instagram y TikTok. */
+/** Handle de la cuenta scrapeada en los tests de extracción. */
 const HANDLE = "altoke.bo";
-
-/** Envuelve `valor` en `n` objetos anidados (`{w0:{w1:{...{valor}}}}`) para simular la anidación
- * real de webpack/relay que produce TikTok alrededor del timeline. */
-function wrapDeep(valor: unknown, n: number): unknown {
-  let out = valor;
-  for (let i = n - 1; i >= 0; i--) out = { [`w${i}`]: out };
-  return out;
-}
 
 describe("parseInstagramPhotoAltDate", () => {
   it("parsea el patrón real 'Photo by {autor} on {Month DD, YYYY}. ...'", () => {
@@ -108,165 +100,6 @@ describe("parseInstagramGridItems", () => {
 
   it("lista vacía sin ítems", () => {
     expect(parseInstagramGridItems([], HANDLE)).toEqual([]);
-  });
-});
-
-describe("parseTikTokPosts", () => {
-  it("extrae descripción, url, fecha y video", () => {
-    const items = [
-      {
-        id: "7500000000000000000",
-        desc: "Así funciona el QR delegado",
-        createTime: 1788307200,
-        video: { playAddr: "https://cdn.tiktok.com/v.mp4" },
-      },
-    ];
-
-    const posts = parseTikTokPosts(items, "altoke.bo");
-
-    expect(posts[0]).toMatchObject({
-      platform: "tiktok",
-      handle: "altoke.bo",
-      url: "https://www.tiktok.com/@altoke.bo/video/7500000000000000000",
-      caption: "Así funciona el QR delegado",
-      esVideo: true,
-      mediaUrls: ["https://cdn.tiktok.com/v.mp4"],
-    });
-    expect(posts[0].fecha).toBe("2026-09-01");
-  });
-
-  it("ignora items sin id", () => {
-    expect(parseTikTokPosts([{ desc: "x" }], "altoke.bo")).toEqual([]);
-  });
-
-  it("usa string vacío de caption si falta desc, y mediaUrls vacío si falta el video", () => {
-    const posts = parseTikTokPosts([{ id: "1" }], "altoke.bo");
-    expect(posts[0]).toMatchObject({ caption: "", mediaUrls: [], esVideo: true });
-  });
-
-  it("ordena más-reciente-primero aunque los items crudos vengan desordenados (IMPORTANTE 4)", () => {
-    const posts = parseTikTokPosts(
-      [
-        { id: "viejo", createTime: 1700000000 },
-        { id: "nuevo", createTime: 1700259200 }, // +3 días
-      ],
-      "altoke.bo",
-    );
-    expect(posts.map((p) => p.url)).toEqual([
-      "https://www.tiktok.com/@altoke.bo/video/nuevo",
-      "https://www.tiktok.com/@altoke.bo/video/viejo",
-    ]);
-  });
-});
-
-/** Item de video válido tal como aparece embebido en el JSON de rehidratación de TikTok. Incluye
- * `author.uniqueId` porque el matcher exige validar autoría (ver comentario de
- * `authorUniqueIdMatches` en la implementación) — sin este campo, `extractTikTokNodes` descarta
- * el item aunque matchee la forma. */
-const ITEM_VALIDO = {
-  id: "7500000000000000001",
-  desc: "Otro video",
-  createTime: 1700000000,
-  video: { playAddr: "https://cdn.tiktok.com/otro.mp4" },
-  author: { uniqueId: HANDLE },
-};
-
-/** Mismo propósito que `scriptTextFor` de arriba, adaptado al script de rehidratación de TikTok
- * (`__UNIVERSAL_DATA_FOR_REHYDRATION__` es JSON puro sin prefijo `window.x =`, pero igual se
- * respeta el patrón de `indexOf("{")` + sin sufijo colgante tras el JSON). */
-function tiktokScriptTextFor(obj: unknown): string {
-  return JSON.stringify(obj);
-}
-
-describe("extractTikTokNodes", () => {
-  it("encuentra un item anidado dentro del tope de profundidad", () => {
-    const scriptTexts = [tiktokScriptTextFor(wrapDeep(ITEM_VALIDO, 3))];
-
-    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([ITEM_VALIDO]);
-    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 1 });
-  });
-
-  it("NO encuentra un item a más de 8 niveles de profundidad — mismo tope que Instagram", () => {
-    const scriptTexts = [tiktokScriptTextFor(wrapDeep(ITEM_VALIDO, 9))];
-
-    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
-    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 0 });
-  });
-
-  it("encuentra el item justo en el límite (8 niveles de profundidad)", () => {
-    const scriptTexts = [tiktokScriptTextFor(wrapDeep(ITEM_VALIDO, 8))];
-
-    const { nodos } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([ITEM_VALIDO]);
-  });
-
-  it("ignora un script sin JSON válido en vez de romper, y no lo cuenta como productivo", () => {
-    const scriptTexts = ["{not valid json here desc video"];
-
-    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
-    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 0 });
-  });
-
-  it("GRAVE: descarta un video recomendado de otra cuenta mezclado en el mismo payload", () => {
-    // El payload de rehidratación del perfil trae también videos recomendados con la misma forma
-    // (id+desc+video) pero de otro `author.uniqueId` — sin validar autoría, este item se
-    // atribuiría igual al handle scrapeado, con una URL bien formada pero falsa. Ver el
-    // comentario de `authorUniqueIdMatches`.
-    const itemAjeno = {
-      id: "9999999999999999999",
-      desc: "Video de otra cuenta",
-      createTime: 1700000000,
-      video: { playAddr: "https://cdn.tiktok.com/ajeno.mp4" },
-      author: { uniqueId: "otra-cuenta" },
-    };
-    const scriptTexts = [tiktokScriptTextFor({ propio: ITEM_VALIDO, recomendado: itemAjeno })];
-
-    const { nodos } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([ITEM_VALIDO]);
-  });
-
-  it("descarta un item con la forma correcta pero sin author.uniqueId (autor no verificable)", () => {
-    const sinAutor = { id: "1", desc: "x", video: { playAddr: "https://cdn.tiktok.com/x.mp4" } };
-    const scriptTexts = [tiktokScriptTextFor(sinAutor)];
-
-    const { nodos } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
-  });
-
-  it("casi matchea: id numérico en vez de string no cuenta (regresión de tipo)", () => {
-    const idNumerico = { id: 12345, desc: "x", video: { playAddr: "https://cdn.tiktok.com/x.mp4" }, author: { uniqueId: HANDLE } };
-    const scriptTexts = [tiktokScriptTextFor(idNumerico)];
-
-    const { nodos } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
-  });
-
-  it("casi matchea: desc+video sin id no cuenta", () => {
-    const sinId = { desc: "x", video: { playAddr: "https://cdn.tiktok.com/x.mp4" }, author: { uniqueId: HANDLE } };
-    const scriptTexts = [tiktokScriptTextFor(sinId)];
-
-    const { nodos } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
-  });
-
-  it("casi matchea: id+video sin desc no cuenta", () => {
-    const sinDesc = { id: "1", video: { playAddr: "https://cdn.tiktok.com/x.mp4" }, author: { uniqueId: HANDLE } };
-    const scriptTexts = [tiktokScriptTextFor(sinDesc)];
-
-    const { nodos } = extractTikTokNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
   });
 });
 
@@ -435,5 +268,49 @@ describe("deriveAuthorFromPermalink", () => {
 
   it("descarta una URL no parseable", () => {
     expect(deriveAuthorFromPermalink("http://[::1")).toBeNull();
+  });
+});
+
+describe("parseInstagramFollowerTitle", () => {
+  it("parsea el title exacto con comas de miles (verificado en vivo: cuenta grande)", () => {
+    expect(parseInstagramFollowerTitle("13,794")).toBe(13794);
+  });
+
+  it("parsea un conteo chico sin separador (verificado en vivo)", () => {
+    expect(parseInstagramFollowerTitle("4,712")).toBe(4712);
+  });
+
+  it("null si no hay title", () => {
+    expect(parseInstagramFollowerTitle(null)).toBeNull();
+  });
+
+  it("null si el title no trae dígitos", () => {
+    expect(parseInstagramFollowerTitle("")).toBeNull();
+    expect(parseInstagramFollowerTitle("—")).toBeNull();
+  });
+});
+
+describe("parseFacebookFollowerText", () => {
+  it("parsea 'N mil seguidores' (formato verificado en vivo, 6 páginas reales)", () => {
+    expect(parseFacebookFollowerText("861 mil seguidores • 64 seguidos")).toBe(861_000);
+    expect(parseFacebookFollowerText("12 mil seguidores • 11 seguidos")).toBe(12_000);
+    expect(parseFacebookFollowerText("19 mil seguidores • 0 seguidos")).toBe(19_000);
+  });
+
+  it("parsea un decimal con coma antes de 'mil' (no verificado en vivo, pero mismo formato)", () => {
+    expect(parseFacebookFollowerText("1,5 mil seguidores")).toBe(1500);
+  });
+
+  it("parsea 'millones'", () => {
+    expect(parseFacebookFollowerText("2 millones seguidores")).toBe(2_000_000);
+  });
+
+  it("parsea un entero simple sin sufijo", () => {
+    expect(parseFacebookFollowerText("958 seguidores")).toBe(958);
+  });
+
+  it("null si el texto no matchea el patrón esperado", () => {
+    expect(parseFacebookFollowerText("Me gusta")).toBeNull();
+    expect(parseFacebookFollowerText("")).toBeNull();
   });
 });

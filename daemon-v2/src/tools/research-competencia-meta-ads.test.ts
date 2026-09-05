@@ -126,16 +126,17 @@ describe("formatMetaAdsText", () => {
 });
 
 describe("fetchMetaAdsText", () => {
-  it("devuelve null si la entidad no declara ads.meta", async () => {
+  it("devuelve null y array vacío si la entidad no declara ads.meta", async () => {
     const entity: EntityConfig = { ...ENTITY, ads: { google: [] } };
-    const texto = await fetchMetaAdsText(entity, 7, { fetchQuery: async () => [tigoCard()] });
+    const { texto, creativos } = await fetchMetaAdsText(entity, 7, { fetchQuery: async () => [tigoCard()] });
     expect(texto).toBeNull();
+    expect(creativos).toEqual([]);
   });
 
-  it("dedupea por libraryId entre distintos términos de búsqueda", async () => {
+  it("dedupea por libraryId entre distintos términos de búsqueda, y expone los creativos deduplicados", async () => {
     const entity: EntityConfig = { ...ENTITY, ads: { google: [], meta: ["tigo bolivia", "tigo"] } };
     let llamadas = 0;
-    const texto = await fetchMetaAdsText(entity, 7, {
+    const { texto, creativos } = await fetchMetaAdsText(entity, 7, {
       fetchQuery: async () => {
         llamadas++;
         return [tigoCard()];
@@ -144,10 +145,12 @@ describe("fetchMetaAdsText", () => {
     });
     expect(llamadas).toBe(2);
     expect(texto?.match(/meta-ads/g)?.length).toBe(1);
+    expect(creativos).toHaveLength(1);
   });
 
-  it("devuelve null si ningún creativo pasa el allowlist", async () => {
-    const texto = await fetchMetaAdsText(ENTITY, 7, { fetchQuery: async () => [tigoCard()] });
+  it("devuelve null y array vacío si ningún creativo pasa el allowlist", async () => {
+    const { texto, creativos } = await fetchMetaAdsText(ENTITY, 7, { fetchQuery: async () => [tigoCard()] });
     expect(texto).toBeNull();
+    expect(creativos).toEqual([]);
   });
 });

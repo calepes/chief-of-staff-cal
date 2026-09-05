@@ -2,12 +2,17 @@ import { getEntity, ENTITIES } from "./research-competencia-entities.js";
 import { fetchIosAppInfo, fetchAndroidAppInfo, fetchSiteText, chunkText } from "./research-competencia-sources.js";
 import { buildEntityPrompt, runEntityAgent, parseAgentJson, type MechanicalFacts } from "./research-competencia-agent.js";
 import { fetchSocialText } from "./research-competencia-social.js";
-import { fetchAdsText } from "./research-competencia-ads.js";
-import { fetchMetaAdsText } from "./research-competencia-meta-ads.js";
+import { fetchAdsText, computeAdsKpis, type AdCreative } from "./research-competencia-ads.js";
+import { fetchMetaAdsText, type MetaAdCreative } from "./research-competencia-meta-ads.js";
+import { fetchInstagramFollowers, fetchFacebookFollowers } from "./research-competencia-scrapers.js";
 import { openResearchBrowserSession, type ResearchBrowserSession } from "./research-competencia-browser.js";
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
 import { nowInLaPaz } from "../journal-capture.js";
-import type { EntityRunResult, RunResult } from "./research-competencia-types.js";
+import type { EntityRunResult, RunResult, FollowerPoint } from "./research-competencia-types.js";
+
+// Techo defensivo del historial de seguidores persistido en el snapshot — ver el comentario de
+// `EntitySnapshot.seguidoresHistorial` (research-competencia-types.ts).
+const MAX_SEGUIDORES_HISTORIAL = 104;
 
 export interface RunOpts {
   timeframeDias?: number;
@@ -166,33 +171,62 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
         // Google (RPC directo) + Meta Ad Library (research-competencia-meta-ads.ts, headless
         // fresco) son complementarios, no alternativos — se juntan en un solo bloque de texto bajo
         // el mismo deadline (`ADS_TIMEOUT_MS`) en vez de sumar un segundo timeout: ninguno de los
-        // dos hace descargas pesadas ni usa la sesión de Chrome compartida del social.
-        const adsTextPromise = Promise.all([
+        // dos hace descargas pesadas ni usa la sesión de Chrome compartida del social. Se llevan
+        // también los arrays de creativos YA filtrados (mismo fetch, sin red extra) para que
+        // `computeAdsKpis` pueda armar la tabla comparativa de KPIs de ads sin repetir pedidos.
+        const adsBlockPromise = Promise.all([
           fetchAdsText(entity, timeframeDias).catch((err) => {
             console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_ads_error", entityId: entity.id, err: String(err) }));
-            return null;
+            return { texto: null, creativos: [] as AdCreative[] };
           }),
           fetchMetaAdsText(entity, timeframeDias).catch((err) => {
             console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_meta_ads_error", entityId: entity.id, err: String(err) }));
-            return null;
+            return { texto: null, creativos: [] as MetaAdCreative[] };
           }),
-        ]).then(([google, meta]) => [google, meta].filter((t): t is string => !!t).join("\n\n") || null);
-        const adsTextWithDeadline = raceWithLoggedTimeout(
-          adsTextPromise, ADS_TIMEOUT_MS, "research_competencia_ads_timeout", entity.id,
+        ]).then(([google, meta]) => ({
+          texto: [google.texto, meta.texto].filter((t): t is string => !!t).join("\n\n") || null,
+          googleCreativos: google.creativos,
+          metaCreativos: meta.creativos,
+        }));
+        const adsBlockWithDeadline = raceWithLoggedTimeout(
+          adsBlockPromise, ADS_TIMEOUT_MS, "research_competencia_ads_timeout", entity.id,
         );
-        const [ios, android, siteText, socialText, adsText] = await Promise.all([
+        // Seguidores semanales (Tarea B) — handle PRINCIPAL de cada plataforma
+        // (`entity.social.instagram[0]`/`facebook[0]`), no todos los handles: el snapshot guarda
+        // UN número por plataforma, no una serie por cuenta. Instagram necesita la sesión de Chrome
+        // compartida (misma detección de bot que el resto del scraping social, ver
+        // research-competencia-browser.ts) — sin browser, queda `null`. Facebook usa un headless
+        // fresco sin login (mismo patrón que fetchMetaAdsQueryReal) — no depende de `browserSession`.
+        const instagramHandle = entity.social?.instagram[0];
+        const facebookHandle = entity.social?.facebook[0];
+        const instagramFollowersPromise = browserSession && instagramHandle
+          ? fetchInstagramFollowers(instagramHandle, browserSession.context).catch((err) => {
+              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "instagram", entityId: entity.id, err: String(err) }));
+              return null;
+            })
+          : Promise.resolve(null);
+        const facebookFollowersPromise = facebookHandle
+          ? fetchFacebookFollowers(facebookHandle).catch((err) => {
+              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "facebook", entityId: entity.id, err: String(err) }));
+              return null;
+            })
+          : Promise.resolve(null);
+        const [ios, android, siteText, socialText, adsBlock, instagramFollowers, facebookFollowers] = await Promise.all([
           entity.ios ? fetchIosAppInfo(entity.ios) : Promise.resolve(null),
           entity.android ? fetchAndroidAppInfo(entity.android.packageName) : Promise.resolve(null),
           entity.siteUrl ? fetchSiteText(entity.siteUrl) : Promise.resolve(null),
           socialTextWithDeadline,
-          adsTextWithDeadline,
+          adsBlockWithDeadline,
+          instagramFollowersPromise,
+          facebookFollowersPromise,
         ]);
+        const adsKpis = computeAdsKpis(adsBlock?.googleCreativos ?? [], adsBlock?.metaCreativos ?? [], timeframeDias);
         const facts: MechanicalFacts = {
           ios: ios ? { version: ios.version, rating: ios.rating, releaseNotes: ios.releaseNotes } : null,
           android: android ? { version: android.version, rating: android.rating, releaseNotes: android.releaseNotes } : null,
           siteText,
           socialText,
-          adsText,
+          adsText: adsBlock?.texto ?? null,
         };
         const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
         // BLOQUEANTE 2 (revisión de salud, 2026-09-03): deadline externo contra `AGENT_TIMEOUT_MS`
@@ -213,6 +247,9 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
         if (!raw.trim()) throw new Error("El agente no devolvió resultado (posible corte por maxTurns)");
         const parsed = parseAgentJson(raw);
 
+        const nuevoPuntoSeguidores: FollowerPoint = { fecha, instagram: instagramFollowers, facebook: facebookFollowers };
+        const seguidoresHistorial = [...(baseline?.seguidoresHistorial ?? []), nuevoPuntoSeguidores].slice(-MAX_SEGUIDORES_HISTORIAL);
+
         const snapshot = {
           entityId: entity.id,
           updatedAt: new Date().toISOString(),
@@ -225,6 +262,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
           siteSnippet: siteText?.slice(0, 3000),
           notas: parsed.notas,
           battlecard: parsed.battlecard,
+          seguidoresHistorial,
         };
 
         resultados.push({
@@ -233,6 +271,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
           primeraCorrida: baseline === null,
           hallazgos: parsed.hallazgos,
           snapshot,
+          adsKpis,
         });
       } catch (err) {
         resultados.push({
@@ -296,6 +335,15 @@ export function formatSummaryHtml(result: RunResult): string {
     for (const e of result.entidades) {
       if (e.hallazgos.length > 0) lines.push(`• <b>${e.entityNombre}</b> — ${e.hallazgos.length}`);
     }
+  }
+  // Un solo renglón comparativo — el detalle completo (creativos activos, duración, mix de formato)
+  // vive en la tabla del informe (research-competencia-notion.ts). Solo se muestra si HAY campañas
+  // nuevas que comparar; en una semana sin actividad publicitaria el renglón no aporta nada.
+  const conCampanasNuevas = result.entidades.filter((e) => (e.adsKpis?.campanasNuevas ?? 0) > 0);
+  if (conCampanasNuevas.length > 0) {
+    const top = conCampanasNuevas.reduce((a, b) => ((b.adsKpis?.campanasNuevas ?? 0) > (a.adsKpis?.campanasNuevas ?? 0) ? b : a));
+    const n = top.adsKpis?.campanasNuevas ?? 0;
+    lines.push(`🏆 Más activo en ads: <b>${top.entityNombre}</b> con ${n} campaña${n !== 1 ? "s" : ""} nueva${n !== 1 ? "s" : ""}`);
   }
   const primeraCorrida = result.entidades.filter((e) => e.primeraCorrida);
   if (primeraCorrida.length > 0) {

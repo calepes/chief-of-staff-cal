@@ -1,7 +1,8 @@
 import type { BrowserContext } from "playwright";
 import { describeImage, analyzeVideo, type VideoAnalysis } from "./research-competencia-media.js";
 import type { EntityConfig } from "./research-competencia-entities.js";
-import { scrapeInstagram, scrapeTikTok, scrapeFacebook, scrapeX } from "./research-competencia-scrapers.js";
+import { scrapeInstagram, scrapeX } from "./research-competencia-scrapers.js";
+import { scrapeFacebookApify, scrapeTikTokApify } from "./research-competencia-apify.js";
 
 export type SocialPlatform = "instagram" | "tiktok" | "facebook" | "x";
 
@@ -243,10 +244,13 @@ export interface FetchSocialDeps {
   presupuestoMs?: number;
 }
 
+// facebook/tiktok vía Apify (research-competencia-apify.ts) desde 2026-09-05 — reemplazan a
+// scrapeFacebook/scrapeTikTok (Playwright/Chrome real), bloqueados por scraping directo. Mismo
+// tipo `ScraperFn` que instagram/x: reciben `context` pero no lo usan (Apify no necesita browser).
 const DEFAULT_SCRAPERS: Record<SocialPlatform, ScraperFn> = {
   instagram: scrapeInstagram,
-  tiktok: scrapeTikTok,
-  facebook: scrapeFacebook,
+  tiktok: scrapeTikTokApify,
+  facebook: scrapeFacebookApify,
   x: scrapeX,
 };
 

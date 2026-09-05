@@ -1,9 +1,14 @@
-// tools/research-competencia-scrapers.ts — scrapers por plataforma para el research de
-// competencia (fase 2, redes sociales). Separado de research-competencia-social.ts a propósito:
-// ese archivo se queda con tipos/filtro/formateo/orquestación; acá vive el detalle de Playwright
-// por red social: Instagram y TikTok leen JSON embebido (`extractNodes`/`walkForNodes`); Facebook
-// y X no exponen eso, así que leen el DOM ya renderizado (`collectDomPosts`/`parseDomPosts`). Las
-// cuatro comparten el boilerplate de Playwright vía `withBrowserContext`.
+// tools/research-competencia-scrapers.ts — scrapers de Instagram/Facebook/X para el research de
+// competencia (fase 2, redes sociales), vía Chrome real + Playwright. TikTok y Facebook YA NO
+// viven acá — Facebook se movió a Apify (research-competencia-apify.ts, 2026-09-05: el feed de
+// Facebook está ofuscado a nivel DOM para scraping directo) y TikTok también (mismo archivo,
+// 2026-09-05: el JSON embebido que leía `extractTikTokNodes` dejó de traer el `itemList` de
+// videos en el HTML inicial). Acá queda Instagram (grid DOM, `parseInstagramGridItems`) y X
+// (DOM, `collectDomPosts`/`parseDomPosts`, sin alternativa a Apify todavía) — más
+// `deriveAuthorFromPermalink`/`RawDomPost`, compartidos por Facebook (vía Apify, no vía DOM) NO,
+// solo por X ahora. `handlesMatch`/`sortPostsByFechaDesc`/`isoDateFromUnix` se exportan para que
+// research-competencia-apify.ts los reuse — mismo criterio de validación de autoría y de orden que
+// el resto del archivo, sin duplicar la lógica.
 //
 // Chrome REAL vía CDP (research-competencia-browser.ts), NO `chromium.launch()` propio — Chromium
 // headless de Playwright se topó con detección de bot en las 4 plataformas (verificado en vivo
@@ -13,7 +18,7 @@
 // navegación genérica — esto es una tool de alto nivel, el detalle de Playwright queda puertas
 // adentro.
 
-import type { BrowserContext, Page } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import type { SocialPlatform, SocialPost } from "./research-competencia-social.js";
 
 /**
@@ -50,126 +55,41 @@ export function isoDateFromUnix(ts: unknown): string | null {
  *
  * `warnIfOrderViolated` deja de ser la única defensa y pasa a red de seguridad: con esto, el
  * `slice` de `enrichPosts` ya no depende del orden implícito de cada scraper.
+ *
+ * Exportada para que research-competencia-apify.ts (Facebook/TikTok) la reuse — mismo criterio de
+ * orden, sin duplicar la lógica.
  */
-function sortPostsByFechaDesc(posts: SocialPost[]): SocialPost[] {
+export function sortPostsByFechaDesc(posts: SocialPost[]): SocialPost[] {
   const conFecha = posts.filter((p) => p.fecha !== null);
   const sinFecha = posts.filter((p) => p.fecha === null);
   conFecha.sort((a, b) => (b.fecha as string).localeCompare(a.fecha as string));
   return [...conFecha, ...sinFecha];
 }
 
-// Tope de profundidad del recorrido recursivo de `extractNodes`. TikTok anida el JSON del
-// timeline dentro de wrappers que cambian de forma entre despliegues — no hay confirmación de que
-// 8 niveles alcancen siempre para la estructura real de producción. Ver el test "no encuentra un
-// nodo a más de 8 niveles de profundidad" en el archivo de test: si el tope no alcanza, el
-// síntoma es `nodos: []` con `scriptsConPatron > 0` y `scriptsConNodosValidos === 0` en el
-// diagnóstico que loguea `withBrowserContext` — esa combinación es la señal de "hay que subir
-// MAX_WALK_DEPTH", no de "cambió la sesión".
-//
-// Ya NO lo usa Instagram (ver `parseInstagramGridItems` más abajo) — Instagram dejó de servir el
-// timeline como JSON embebido en un `<script>` (verificado en vivo 2026-09-05: con Chrome real y
-// sesión logueada, la página es la real, no un muro, pero el patrón `shortcode`+`is_video` que
-// buscaba `extractInstagramNodes` ya no existe en ningún script de la página — Instagram migró a
-// su framework "Comet", con otra forma de datos). Se mantiene para TikTok, que SÍ sigue
-// embebiendo `__UNIVERSAL_DATA_FOR_REHYDRATION__` como JSON — aunque TikTok tiene su propio
-// bloqueo real (ver el comentario de `scrapeTikTok`), no relacionado con esto.
-const MAX_WALK_DEPTH = 8;
-
-type NodePredicate = (obj: Record<string, unknown>) => boolean;
-
-/**
- * Recorrido recursivo genérico compartido por todos los extractores de este archivo (Instagram,
- * TikTok, y Facebook/X en tareas posteriores) — antes había una copia por plataforma, idéntica
- * salvo el predicado de match. `predicado` decide si un nodo matchea; ver los comentarios sobre
- * `ownerUsernameMatches`/`authorUniqueIdMatches` más abajo sobre por qué el predicado tiene que
- * validar autoría, no solo forma.
- */
-function walkForNodes(valor: unknown, predicado: NodePredicate, profundidad: number, out: unknown[]): void {
-  if (profundidad > MAX_WALK_DEPTH || !valor || typeof valor !== "object") return;
-  const obj = valor as Record<string, unknown>;
-  if (predicado(obj)) {
-    out.push(obj);
-    return;
-  }
-  for (const v of Object.values(obj)) walkForNodes(v, predicado, profundidad + 1, out);
-}
-
-interface NodeExtraction {
-  nodos: unknown[];
-  /** Señal diagnóstica para distinguir "no hay posts" de "no pudimos leer la página" — ver withBrowserContext. */
-  diagnostics: { scriptsConPatron: number; scriptsConNodosValidos: number };
-}
-
-/**
- * Recorre los `<script>` candidatos aplicando `predicado` en cada nodo del recorrido recursivo.
- * Movido a Node (fuera de `page.evaluate`) para ser testeable con fixtures — es la parte más
- * frágil del scraper (recorrido recursivo + `JSON.parse` por script) y antes vivía intestable
- * dentro del closure del browser. `extractInstagramNodes`/`extractTikTokNodes` son wrappers de
- * una línea sobre esto, cada uno con su propio predicado.
- */
-function extractNodes(scriptTexts: string[], predicado: NodePredicate): NodeExtraction {
-  const nodos: unknown[] = [];
-  let scriptsConNodosValidos = 0;
-  for (const txt of scriptTexts) {
-    const inicio = txt.indexOf("{");
-    if (inicio < 0) continue;
-    try {
-      const antes = nodos.length;
-      walkForNodes(JSON.parse(txt.slice(inicio)), predicado, 0, nodos);
-      if (nodos.length > antes) scriptsConNodosValidos++;
-    } catch {
-      // Script que no es JSON puro (ej. un script de analytics que también menciona el literal
-      // buscado en un comentario) — se ignora, no es un error del scraper.
-    }
-  }
-  return { nodos, diagnostics: { scriptsConPatron: scriptTexts.length, scriptsConNodosValidos } };
-}
-
-// ⚠️ GRAVE, encontrado en review: el payload de rehidratación de un perfil (Instagram o TikTok)
-// no trae SOLO los posts propios de la cuenta — también trae módulos de contenido
-// recomendado/relacionado precargado, con nodos de EXACTAMENTE la misma forma (mismos campos:
-// shortcode+is_video en Instagram, id+desc+video en TikTok). Sin validar de quién es el post, el
-// matcher por forma puede levantar un video/post de OTRA cuenta y `parseInstagramPosts`/
-// `parseTikTokPosts` lo atribuyen igual al `handle` scrapeado (el handle se pasa por afuera, no
-// se lee del nodo) — el resultado es una URL bien formada pero FALSA, citada después como fuente
-// verificable en el battlecard de research de competencia. Por eso el predicado de cada
-// plataforma exige que el nodo declare como autor al `handle` que se está scrapeando, comparando
-// en minúsculas — un nodo sin ese campo, o con un autor distinto, se descarta aunque matchee la
-// forma. Mismo riesgo (y más probable todavía) en Facebook/X — ver `parseDomPosts` más abajo.
+// ⚠️ GRAVE, encontrado en review (aplicaba originalmente a Instagram/TikTok vía JSON embebido, y
+// sigue aplicando a Facebook/X vía DOM): el timeline de un perfil no trae SOLO los posts propios
+// de la cuenta — también puede traer contenido recomendado/relacionado o compartido de otra
+// cuenta, con exactamente la misma forma. Sin validar de quién es el post, el resultado es una URL
+// bien formada pero FALSA, citada después como fuente verificable en el battlecard de research de
+// competencia. Por eso `parseDomPosts` (más abajo) exige que el post declare como autor al
+// `handle` que se está scrapeando, comparando en minúsculas — un post sin ese campo, o con un
+// autor distinto, se descarta aunque matchee la forma. Mismo criterio en
+// research-competencia-apify.ts (Facebook/TikTok vía Apify), reusando `handlesMatch`.
 //
 // `handlesMatch` es el fondo común de toda esa validación: fail-closed ante `null`/`undefined`/
 // cualquier tipo que no sea string, Y ante un `handle` vacío — sin ese segundo guard, un nodo con
 // autor `""` matchearía contra un `handle` que también llegara vacío (bug señalado en la revisión
 // de esta tarea, nunca disparado en producción porque el handle siempre lo pasa el orquestador,
-// pero un guard barato de tener).
-function handlesMatch(valor: unknown, handle: string): boolean {
+// pero un guard barato de tener). Exportada para que research-competencia-apify.ts la reuse.
+export function handlesMatch(valor: unknown, handle: string): boolean {
   return typeof valor === "string" && valor !== "" && handle !== "" && valor.toLowerCase() === handle.toLowerCase();
-}
-
-/**
- * Generaliza `ownerUsernameMatches`/`authorUniqueIdMatches` (Instagram/TikTok) — las dos leían un
- * campo anidado y comparaban contra `handle` en minúsculas, idénticas salvo el path. Factorizado
- * al sumar Facebook/X (nota de diseño de la revisión anterior): un path de campos anidados +
- * `handlesMatch` sobre el valor final.
- */
-function fieldEqualsHandleCI(obj: Record<string, unknown>, path: readonly string[], handle: string): boolean {
-  let valor: unknown = obj;
-  for (const key of path) {
-    if (!valor || typeof valor !== "object") return false;
-    valor = (valor as Record<string, unknown>)[key];
-  }
-  return handlesMatch(valor, handle);
-}
-
-function authorUniqueIdMatches(obj: Record<string, unknown>, handle: string): boolean {
-  return fieldEqualsHandleCI(obj, ["author", "uniqueId"], handle);
 }
 
 // Ambiente mínimo SOLO para el body de page.evaluate() (corre en el navegador, no en Node) —
 // mismo motivo que design-capture.ts: a propósito no se agrega "DOM" al lib del tsconfig, que
 // aplicaría a todo el paquete y podría chocar con los tipos de fetch/Response/Headers de Node.
-// Ampliado al sumar Facebook/X: `collectDomPosts` (más abajo) necesita recorrer nodos genéricos
-// (`article`/`img`/`video`/`time`/`a`), no solo `<script>` como hacía `collectScriptsByLiteral`.
+// Necesario para `collectDomPosts`/`collectInstagramGridItems` recorrer nodos genéricos
+// (`article`/`img`/`video`/`time`/`a`).
 interface DomElement {
   querySelector(selector: string): DomElement | null;
   querySelectorAll(selector: string): ArrayLike<DomElement>;
@@ -181,6 +101,8 @@ interface DomElement {
   /** Solo lo llenan los `<img>` — dimensión REAL renderizada, no el tamaño del atributo `width/height`. */
   naturalWidth?: number;
   naturalHeight?: number;
+  /** Usado por `collectInstagramFollowerTitle` para caminar hacia arriba desde el `span[title]`. */
+  parentElement: DomElement | null;
 }
 declare const document: {
   querySelectorAll(selector: string): ArrayLike<DomElement>;
@@ -193,23 +115,6 @@ declare const document: {
 // `mediaUrls[0]` se llevaba el avatar en vez de la foto del post. Umbral sujeto a ajuste en la
 // verificación en vivo (tarea 13) — acá no hay forma de confirmar contra el DOM real.
 const MIN_DOM_IMAGE_DIMENSION = 200;
-
-/**
- * Extrae del DOM los `textContent` crudos de los `<script>` que contienen `literal` — es lo
- * mínimo que `page.evaluate` necesita tocar. El parseo real (recorrido recursivo, `JSON.parse`)
- * vive del lado de Node en `extractNodes`. Compartido por Instagram ("shortcode") y TikTok
- * ("desc") — antes eran dos copias idénticas que solo diferían en el literal buscado.
- */
-function collectScriptsByLiteral(page: Page, literal: string): Promise<string[]> {
-  return page.evaluate((lit) => {
-    const textos: string[] = [];
-    for (const script of Array.from(document.querySelectorAll("script"))) {
-      const txt = script.textContent ?? "";
-      if (txt.includes(lit)) textos.push(txt);
-    }
-    return textos;
-  }, literal);
-}
 
 export interface ScrapeOutcome<T> {
   items: T[];
@@ -384,72 +289,63 @@ export async function scrapeInstagram(handle: string, context: BrowserContext): 
 }
 
 /**
- * Parsea los items crudos del feed de TikTok (extraídos del JSON embebido en el script de
- * rehidratación `#__UNIVERSAL_DATA_FOR_REHYDRATION__` de la página de perfil) a `SocialPost`.
- * Función pura — sin red — mismo criterio que `parseInstagramPosts`. Todo post de TikTok es
- * video, así que `esVideo` es siempre `true` (no hay campo equivalente a `is_video` que leer).
+ * Extrae el atributo `title` del span de seguidores del header del perfil. Instagram expone ahí el
+ * conteo EXACTO sin abreviar (ej. `title="13,794"`) aunque el texto visible muestre la versión
+ * abreviada ("13.7K seguidores") — evita tener que parsear sufijos "K"/"mil" con la ambigüedad de
+ * redondeo que eso implica. Verificado en vivo 2026-09-05 contra 4 cuentas reales (altoke.bo,
+ * bancosol_bolivia, bancoganadero, yolopagoapp): en las 4 hay EXACTAMENTE un `span[title]` en toda
+ * la página, y su ancestro directo (nivel 1) siempre contiene el texto "followers"/"seguidores" —
+ * se camina hasta 8 niveles hacia arriba por robustez (mismo margen que otros walks de este
+ * archivo), no porque haga falta en la práctica observada.
  */
-export function parseTikTokPosts(items: unknown[], handle: string): SocialPost[] {
-  const posts: SocialPost[] = [];
-  for (const raw of items) {
-    const n = raw as { id?: string; desc?: string; createTime?: number; video?: { playAddr?: string } };
-    if (!n.id) continue;
-    posts.push({
-      platform: "tiktok",
-      handle,
-      url: `https://www.tiktok.com/@${handle}/video/${n.id}`,
-      fecha: isoDateFromUnix(n.createTime),
-      caption: n.desc ?? "",
-      mediaUrls: n.video?.playAddr ? [n.video.playAddr] : [],
-      esVideo: true,
-    });
-  }
-  return sortPostsByFechaDesc(posts);
-}
-
-export interface TikTokExtraction {
-  nodos: unknown[];
-  /** Señal diagnóstica, mismo criterio que `InstagramExtraction` — ver withBrowserContext. */
-  diagnostics: { scriptsConPatron: number; scriptsConNodosValidos: number };
-}
-
-/**
- * Extrae los items de video de TikTok que pertenecen a `handle` — ver el comentario sobre
- * `authorUniqueIdMatches` más arriba sobre por qué la validación de autoría es obligatoria: el
- * payload de rehidratación de un perfil trae también videos recomendados de otras cuentas, con
- * exactamente la misma forma (`id`+`desc`+`video`).
- */
-export function extractTikTokNodes(scriptTexts: string[], handle: string): TikTokExtraction {
-  return extractNodes(
-    scriptTexts,
-    (obj) =>
-      typeof obj.id === "string" && "desc" in obj && "video" in obj && authorUniqueIdMatches(obj, handle)
-  );
-}
-
-/**
- * Scrapea el perfil público de TikTok de `handle` y devuelve sus videos recientes.
- *
- * TikTok detecta automatización de forma más agresiva que Instagram (fingerprinting de browser,
- * challenges anti-bot) — si esto devuelve sistemáticamente `[]` (ver `diagnostics` en el log
- * `research_competencia_scrape_empty`), es señal de bloqueo de plataforma, no un bug del parser.
- * Este comportamiento está anticipado en el diseño: `withBrowserContext` degrada a `[]` sin
- * romper el research completo de las demás cuentas/plataformas.
- *
- * `mediaUrls` (el `playAddr` de TikTok) es una URL FIRMADA y de vida corta, atada a la sesión que
- * la generó — no es un link permanente como el `display_url`/`video_url` de Instagram. Si quien
- * cablea la orquestación llega a separar "scrapear todo" de "enriquecer todo" (`enrichPosts`
- * descarga esta URL más tarde, en `research-competencia-social.ts`), esas URLs pueden estar
- * muertas para cuando les toque el turno de descargarse — no asumir que sobreviven más allá del
- * mismo ciclo de research.
- */
-export async function scrapeTikTok(handle: string, context: BrowserContext): Promise<SocialPost[]> {
-  return withBrowserContext("tiktok", handle, context, async (page) => {
-    await page.goto(`https://www.tiktok.com/@${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
-    const scriptTexts = await collectScriptsByLiteral(page, "desc");
-    const { nodos, diagnostics } = extractTikTokNodes(scriptTexts, handle);
-    return { items: parseTikTokPosts(nodos, handle), diagnostics };
+function collectInstagramFollowerTitle(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    for (const span of Array.from(document.querySelectorAll("span[title]"))) {
+      let el: DomElement | null = span;
+      for (let i = 0; i <= 8 && el; i++) {
+        if (/follower|seguidor/i.test(el.textContent ?? "")) return span.getAttribute("title");
+        el = el.parentElement;
+      }
+    }
+    return null;
   });
+}
+
+/** Convierte el `title` exacto ("13,794") a `number`. `null` si no hay dígitos — ni una cadena
+ * vacía ni un `null` de origen deben leerse como "0 seguidores". */
+export function parseInstagramFollowerTitle(raw: string | null): number | null {
+  if (!raw) return null;
+  const digits = raw.replace(/[^\d]/g, "");
+  return digits ? Number(digits) : null;
+}
+
+/**
+ * Cuenta de seguidores del handle PRINCIPAL de Instagram de una entidad (Tarea B — seguidores
+ * semanales). Navegación aparte de `scrapeInstagram` a propósito: son datos de naturaleza distinta
+ * (un escalar por cuenta, no un post) y desacoplarlos evita que un cambio futuro en el grid de
+ * posts arrastre el parseo de seguidores, a costa de una segunda carga de la misma página — costo
+ * aceptable frente al resto del pipeline (descargas de imagen/video por post, ver
+ * research-competencia-social.ts). Reusa la sesión de Chrome COMPARTIDA (mismo motivo que
+ * `scrapeInstagram`: Chromium headless propio es detectado como bot). Fail-soft: cualquier falla
+ * devuelve `null` y loguea, nunca tira — un dato de tendencia perdido una semana no debe tumbar el
+ * research de la entidad.
+ */
+export async function fetchInstagramFollowers(handle: string, context: BrowserContext): Promise<number | null> {
+  let page: Page | undefined;
+  try {
+    page = await context.newPage();
+    await page.goto(`https://www.instagram.com/${handle}/`, { waitUntil: "networkidle", timeout: 30_000 });
+    const count = parseInstagramFollowerTitle(await collectInstagramFollowerTitle(page));
+    if (count === null) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_empty", platform: "instagram", handle }));
+    }
+    return count;
+  } catch (err) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "instagram", handle, err: String(err) }));
+    return null;
+  } finally {
+    await page?.close().catch(() => {});
+  }
 }
 
 /**
@@ -489,7 +385,7 @@ function parseDomDate(fechaIso: string | null): string | null {
  * pura de Node (importante en la revisión de calidad: antes vivía inline dentro de
  * `page.evaluate`, sin un solo test, pese a ser la lógica que decide si un retweet o un post
  * compartido se descarta — el riesgo central que motivó esta tarea; mismo criterio que llevó a
- * mover `extractNodes`/`walkForNodes` fuera del closure del browser para Instagram/TikTok).
+ * mover el parseo de Instagram (`parseInstagramGridItems`) fuera del closure del browser).
  *
  * Toma el PRIMER segmento de path (`/{autor}/status/{id}` en X, `/{autor}/posts|videos/{id}` en
  * Facebook) — en X esto es estructuralmente robusto ante retweets: el permalink de un retweet en
@@ -618,32 +514,89 @@ function collectDomPosts(page: Page): Promise<DomPostExtraction[]> {
 // archivo ("Facebook detecta automatización más agresivamente") era una teoría sin verificar,
 // escrita antes de poder probar contra la plataforma real; el síntoma completo era el timeout de
 // espera, no un bloqueo. `PAGE_SETTLE_MS` da tiempo a que el feed hidrate (React) después del
-// `domcontentloaded` — sin esto, `collectDomPosts` corre sobre un DOM todavía vacío.
+// `domcontentloaded` — sin esto, `collectDomPosts`/`collectFacebookFollowerText` corren sobre un
+// DOM todavía vacío. Sigue en pie para X y para `fetchFacebookFollowers` (seguidores) aunque
+// `scrapeFacebook` (posts orgánicos) se haya movido a Apify — ver research-competencia-apify.ts:
+// el bloqueo real de `scrapeFacebook` NO era el timeout de carga, sino que Facebook ofusca el
+// TEXTO del feed a nivel DOM (caracteres reordenados + joiners invisibles, ver el comentario
+// grande de research-competencia-meta-ads.ts) — un problema de contenido, no de timing, que
+// `PAGE_SETTLE_MS` nunca podía resolver.
 const PAGE_SETTLE_MS = 2_000;
 
-/**
- * Scrapea la página pública de Facebook de `handle` y devuelve sus posts recientes.
- *
- * Si esto devuelve sistemáticamente `[]` (ver `diagnostics` en el log
- * `research_competencia_scrape_empty`) puede ser bloqueo real de la plataforma o un cambio de
- * layout — pero un timeout acá (`research_competencia_scrape_error`) YA NO es la señal esperada
- * de bloqueo, ver el comentario de `PAGE_SETTLE_MS`.
- */
-export async function scrapeFacebook(handle: string, context: BrowserContext): Promise<SocialPost[]> {
-  return withBrowserContext("facebook", handle, context, async (page) => {
-    await page.goto(`https://www.facebook.com/${handle}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await page.waitForTimeout(PAGE_SETTLE_MS);
-    const crudos = await collectDomPosts(page);
-    const conAutor: RawDomPost[] = crudos.map((c) => ({ ...c, autor: deriveAuthorFromPermalink(c.url) }));
-    return { items: parseDomPosts(conAutor, "facebook", handle), diagnostics: { articulosEncontrados: crudos.length } };
+// Solo cubre el formato verificado en vivo 2026-09-05 contra 6 páginas reales (altoke.bo,
+// BancoSolidarioBolivia, banco.economico, YoloPagoApp, bg.com.bo, getmeruapp) — TODAS devolvieron
+// "{N} mil seguidores" con N un entero simple ("861 mil", "12 mil", "3 mil"...). Un conteo en
+// millones, o por debajo de 1.000 sin el sufijo "mil", no se confirmó contra ninguna página real
+// — `parseFacebookFollowerText` cubre esos sufijos de todos modos (mismo costo que no cubrirlos)
+// pero sin la misma confianza; si `research_competencia_followers_empty` aparece seguido para una
+// entidad puntual, revisar el formato real de esa página antes de asumir que el parser alcanza.
+const FB_SEGUIDORES_RE = /^([\d]+(?:[.,]\d+)?)\s*(mil|millones|millón)?\s*seguidores/i;
+
+export function parseFacebookFollowerText(texto: string): number | null {
+  const m = FB_SEGUIDORES_RE.exec(texto.trim());
+  if (!m) return null;
+  const num = Number(m[1].replace(",", "."));
+  if (!Number.isFinite(num)) return null;
+  const suf = m[2]?.toLowerCase();
+  if (suf === "mil") return Math.round(num * 1_000);
+  if (suf === "millones" || suf === "millón") return Math.round(num * 1_000_000);
+  return Math.round(num);
+}
+
+/** Busca el primer `<span>` cuyo texto empieza con un número seguido de "seguidores" — mismo
+ * bloque que muestra "Me gusta" al lado, visto en las 6 páginas reales de la verificación. */
+function collectFacebookFollowerText(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    for (const span of Array.from(document.querySelectorAll("span"))) {
+      const t = (span.textContent ?? "").trim();
+      if (/^[\d.,]+\s*(mil|millones|millón)?\s*seguidores/i.test(t)) return t;
+    }
+    return null;
   });
+}
+
+/**
+ * Cuenta de seguidores del handle PRINCIPAL de Facebook de una entidad (Tarea B). SIN login, con
+ * un browser headless FRESCO (mismo patrón que `fetchMetaAdsQueryReal` en
+ * research-competencia-meta-ads.ts) — no la sesión compartida de research-competencia-browser.ts.
+ *
+ * Verificado en vivo 2026-09-05 contra 6 páginas reales: el bloque de seguidores/"Me gusta" del
+ * header del perfil NO tiene la ofuscación de texto que sí bloquea el feed de posts de Facebook
+ * (`RawDomPost`/`collectDomPosts` más arriba, y el comentario grande sobre esto en
+ * research-competencia-meta-ads.ts) — comparado `textContent` contra `innerText` del mismo nodo en
+ * las 6 páginas y coinciden exacto, cuando la ofuscación real (caracteres reordenados + joiners
+ * invisibles) los haría divergir. Es un bloque de metadata separado del texto libre del feed, no
+ * sujeto al mismo tratamiento — confirmado, no asumido.
+ */
+export async function fetchFacebookFollowers(handle: string): Promise<number | null> {
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ locale: "es" });
+    const page = await context.newPage();
+    await page.goto(`https://www.facebook.com/${handle}/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForTimeout(PAGE_SETTLE_MS);
+    const texto = await collectFacebookFollowerText(page);
+    const count = texto ? parseFacebookFollowerText(texto) : null;
+    if (count === null) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_empty", platform: "facebook", handle }));
+    }
+    return count;
+  } catch (err) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "facebook", handle, err: String(err) }));
+    return null;
+  } finally {
+    await browser?.close().catch(() => {});
+  }
 }
 
 /**
  * Scrapea el perfil público de X de `handle` y devuelve sus posts recientes.
  *
- * Mismo criterio que `scrapeFacebook` — ver el comentario de `PAGE_SETTLE_MS`: un timeout acá no
- * es necesariamente bloqueo de plataforma, X tampoco llega nunca a "networkidle" real.
+ * Ver el comentario de `PAGE_SETTLE_MS`: un timeout acá no es necesariamente bloqueo de
+ * plataforma, X tampoco llega nunca a "networkidle" real. Sin alternativa vía Apify (a diferencia
+ * de Facebook/TikTok) — X sigue devolviendo 403 al scraping directo y no se evaluó un actor de
+ * Apify para X en esta pasada.
  */
 export async function scrapeX(handle: string, context: BrowserContext): Promise<SocialPost[]> {
   return withBrowserContext("x", handle, context, async (page) => {

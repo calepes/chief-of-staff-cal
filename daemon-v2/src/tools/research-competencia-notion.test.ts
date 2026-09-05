@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildInformeBlocks, buildBattlecardBlocks } from "./research-competencia-notion.js";
-import type { EntityRunResult, EntitySnapshot } from "./research-competencia-types.js";
+import { buildInformeBlocks, buildBattlecardBlocks, buildAdsKpisBlocks } from "./research-competencia-notion.js";
+import type { EntityRunResult, EntitySnapshot, AdsKpis } from "./research-competencia-types.js";
 
 function entityResult(overrides: Partial<EntityRunResult>): EntityRunResult {
   return {
@@ -68,6 +68,57 @@ describe("buildInformeBlocks", () => {
   it("muestra el error si la entidad falló", () => {
     const blocks = buildInformeBlocks([entityResult({ error: "timeout" })]) as any[];
     expect(richText(blocks[1])).toContain("Error en esta corrida: timeout");
+  });
+
+  it("antepone la tabla comparativa de ads si al menos una entidad trae adsKpis", () => {
+    const kpis: AdsKpis = { creativosActivos: 3, campanasNuevas: 1, duracionPromedioDias: 5, mixFormato: { imagen: 2, display: 1, desconocido: 0 } };
+    const blocks = buildInformeBlocks([entityResult({ adsKpis: kpis })]) as any[];
+    expect(blocks[0].type).toBe("heading_3");
+    expect(richText(blocks[0])).toBe("Actividad publicitaria — comparativa");
+    expect(blocks[1].type).toBe("paragraph");
+    expect(richText(blocks[1])).toContain("NO son gasto real");
+    expect(blocks[2].type).toBe("table");
+  });
+
+  it("sin ninguna entidad con adsKpis, no agrega la tabla comparativa", () => {
+    const blocks = buildInformeBlocks([entityResult({})]) as any[];
+    expect(blocks.some((b) => b.type === "table")).toBe(false);
+  });
+
+  it("muestra la línea de seguidores con delta cuando hay historial de 2+ puntos", () => {
+    const blocks = buildInformeBlocks([
+      entityResult({
+        snapshot: {
+          entityId: "x", updatedAt: "2026-09-05T00:00:00Z",
+          seguidoresHistorial: [
+            { fecha: "2026-08-29", instagram: 4700, facebook: 19000 },
+            { fecha: "2026-09-05", instagram: 4712, facebook: 19500 },
+          ],
+        },
+      }),
+    ]) as any[];
+    expect(richText(blocks[1])).toContain("Instagram: 4.712 (+12 vs. semana pasada)");
+    expect(richText(blocks[1])).toContain("Facebook: 19.500 (+500 vs. semana pasada)");
+  });
+
+  it("sin historial de seguidores no agrega ninguna línea extra", () => {
+    const blocks = buildInformeBlocks([entityResult({})]) as any[];
+    expect(blocks[1].type).not.toBe("paragraph_seguidores");
+    expect(richText(blocks[1])).toContain("Sin novedades");
+  });
+});
+
+describe("buildAdsKpisBlocks", () => {
+  it("array vacío si ninguna entidad trae adsKpis", () => {
+    expect(buildAdsKpisBlocks([entityResult({})])).toEqual([]);
+  });
+
+  it("usa '—' para una entidad sin adsKpis cuando OTRA sí lo trae", () => {
+    const kpis: AdsKpis = { creativosActivos: 1, campanasNuevas: 0, duracionPromedioDias: null, mixFormato: { imagen: 1, display: 0, desconocido: 0 } };
+    const blocks = buildAdsKpisBlocks([entityResult({ entityNombre: "Con datos", adsKpis: kpis }), entityResult({ entityNombre: "Sin datos" })]) as any[];
+    const tabla = blocks.find((b) => b.type === "table");
+    const filaSinDatos = tabla.table.children[2]; // [0]=header, [1]=Con datos, [2]=Sin datos
+    expect(filaSinDatos.table_row.cells.map((c: any) => c[0].text.content)).toEqual(["Sin datos", "—", "—", "—", "—"]);
   });
 });
 

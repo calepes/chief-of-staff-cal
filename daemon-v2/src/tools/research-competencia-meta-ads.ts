@@ -267,19 +267,27 @@ export interface FetchMetaAdsDeps {
   ahora?: Date;
 }
 
+export interface FetchMetaAdsResult {
+  texto: string | null;
+  /** Creativos ya deduplicados por `libraryId` — mismo dato que arma `texto`, expuesto aparte para
+   * `computeAdsKpis` (research-competencia-ads.ts) sin repetir el fetch de red/browser. */
+  creativos: MetaAdCreative[];
+}
+
 /**
- * Bloque de texto de Meta Ads para una entidad — mismo contrato que `fetchAdsText` (Google): null
- * si la entidad no declara `ads.meta` o si no se recuperó ningún anuncio verificado. Dedupea por
- * `libraryId` entre los distintos términos de búsqueda de la misma entidad (ej. "Banco Ganadero" y
- * "YOLO pago" pueden traer el mismo anuncio si ambas cuentas lo republican).
+ * Bloque de texto de Meta Ads para una entidad, más los creativos crudos — mismo contrato que
+ * `fetchAdsText` (Google): `texto` es null si la entidad no declara `ads.meta` o si no se recuperó
+ * ningún anuncio verificado; `creativos` siempre es un array. Dedupea por `libraryId` entre los
+ * distintos términos de búsqueda de la misma entidad (ej. "Banco Ganadero" y "YOLO pago" pueden
+ * traer el mismo anuncio si ambas cuentas lo republican).
  */
 export async function fetchMetaAdsText(
   entity: EntityConfig,
   timeframeDias: number,
   deps: FetchMetaAdsDeps = {},
-): Promise<string | null> {
+): Promise<FetchMetaAdsResult> {
   const queries = entity.ads?.meta ?? [];
-  if (queries.length === 0) return null;
+  if (queries.length === 0) return { texto: null, creativos: [] };
 
   const fetchQuery = deps.fetchQuery ?? fetchMetaAdsQueryReal;
   const ahora = deps.ahora ?? new Date();
@@ -294,5 +302,5 @@ export async function fetchMetaAdsText(
       todos.push(ad);
     }
   }
-  return formatMetaAdsText(todos, timeframeDias, ahora) || null;
+  return { texto: formatMetaAdsText(todos, timeframeDias, ahora) || null, creativos: todos };
 }

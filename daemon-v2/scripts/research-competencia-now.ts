@@ -19,6 +19,7 @@ import { runResearchCompetencia, formatSummaryHtml } from "../src/tools/research
 import { stripHtmlTags } from "../src/proactive/rich-send.js";
 import { sendNotifySummary, notifyFatalError, wantsNoNotify } from "./research-competencia-notify.js";
 import { findMissingEnvVars, formatMissingEnvError } from "./research-competencia-env.js";
+import { resolveApifyToken } from "./research-competencia-apify-token.js";
 
 /**
  * Corre el research de competencia fuera del daemon de Jano — ya no vive ahí, corre standalone
@@ -40,14 +41,27 @@ import { findMissingEnvVars, formatMissingEnvError } from "./research-competenci
  * el binario sigue invocándose vía `node-fda` (`research:now` en `package.json`) porque no hace
  * daño tenerlo y evita otro cambio de infra sin necesidad real, no porque siga siendo requisito.
  *
- * Ya NO hace falta `op run`: sin el Cookie Broker (Cloudflare KV) de por medio, las únicas
- * credenciales que este script necesita (OPENROUTER_API_KEY, ELEVENLABS_API_KEY,
- * NOTIF_BOT_TOKEN) ya llegan en texto plano por los `loadEnv()` de arriba — validadas al arranque
- * más abajo (`findMissingEnvVars`), para fallar fuerte y temprano en vez de a mitad de camino:
- * Jano ya migró a 1Password, y el día que se limpie apps.env este script se rompería en silencio
- * (vision.ts/whisper.ts tragan el error tool-por-tool y el informe sale incompleto sin avisar).
+ * Ya NO hace falta `op run` para las credenciales YA existentes: sin el Cookie Broker (Cloudflare
+ * KV) de por medio, OPENROUTER_API_KEY/ELEVENLABS_API_KEY/NOTIF_BOT_TOKEN ya llegan en texto plano
+ * por los `loadEnv()` de arriba — validadas al arranque más abajo (`findMissingEnvVars`), para
+ * fallar fuerte y temprano en vez de a mitad de camino: Jano ya migró a 1Password, y el día que se
+ * limpie apps.env este script se rompería en silencio (vision.ts/whisper.ts tragan el error
+ * tool-por-tool y el informe sale incompleto sin avisar). Deuda ya documentada, sin resolver acá.
+ *
+ * `APIFY_TOKEN` (Facebook/TikTok orgánico, research-competencia-apify.ts) es la EXCEPCIÓN: por ser
+ * un secreto NUEVO, la regla dura del repo (Personal/Agents/CLAUDE.md) exige vault `Daemons` en
+ * 1Password, nunca sumarlo a apps.env en texto plano — `resolveApifyToken()`
+ * (research-competencia-apify-token.ts) lo resuelve con una llamada puntual a `op read` usando el
+ * Service Account de solo lectura del daemon, sin requerir `op run` para todo el script ni tocar
+ * el plist/wrapper de producción. Fail-soft: si no resuelve, el research sigue corriendo igual —
+ * Facebook/TikTok orgánico quedan sin datos esta corrida.
  */
 async function main(): Promise<void> {
+  if (!process.env.APIFY_TOKEN) {
+    const token = resolveApifyToken();
+    if (token) process.env.APIFY_TOKEN = token;
+  }
+
   const faltantes = findMissingEnvVars(process.env);
   if (faltantes.length > 0) {
     console.error(formatMissingEnvError(faltantes));

@@ -6,9 +6,11 @@ import {
   esNuevo,
   formatAdsText,
   fetchAdsText,
+  computeAdsKpis,
   type AdCreative,
 } from "./research-competencia-ads.js";
 import { getEntity } from "./research-competencia-entities.js";
+import type { MetaAdCreative } from "./research-competencia-meta-ads.js";
 
 function ad(overrides: Partial<AdCreative> = {}): AdCreative {
   return {
@@ -180,16 +182,21 @@ describe("fetchAdsText", () => {
 
   it("null si la entidad no declara anunciantes", () => {
     const entidadSinAds = { ...entity, ads: undefined };
-    return fetchAdsText(entidadSinAds, 7, { ahora }).then((r) => expect(r).toBeNull());
+    return fetchAdsText(entidadSinAds, 7, { ahora }).then((r) => {
+      expect(r.texto).toBeNull();
+      expect(r.creativos).toEqual([]);
+    });
   });
 
-  it("consulta cada advertiserId declarado y arma el texto combinado", async () => {
+  it("consulta cada advertiserId declarado y arma el texto combinado, y expone los creativos", async () => {
     const fetchAdvertiser = vi.fn().mockResolvedValue({
       1: [{ 1: "AR02176363334515818497", 2: "CR1", 6: { 1: "1788868800" }, 7: { 1: "1788955200" }, 12: "Banco Solidario S.A." }],
     });
-    const texto = await fetchAdsText(entity, 7, { fetchAdvertiser, esperar: vi.fn().mockResolvedValue(undefined), ahora });
+    const { texto, creativos } = await fetchAdsText(entity, 7, { fetchAdvertiser, esperar: vi.fn().mockResolvedValue(undefined), ahora });
     expect(fetchAdvertiser).toHaveBeenCalledWith("AR02176363334515818497");
     expect(texto).toContain("Banco Solidario S.A.");
+    expect(creativos).toHaveLength(1);
+    expect(creativos[0].advertiserName).toBe("Banco Solidario S.A.");
   });
 
   it("espacia entre anunciantes (throttle) pero no antes del primero", async () => {
@@ -200,10 +207,11 @@ describe("fetchAdsText", () => {
     expect(esperar).toHaveBeenCalledTimes(1);
   });
 
-  it("null si ningún anunciante devuelve datos (fetcher devuelve null)", async () => {
+  it("null y array vacío si ningún anunciante devuelve datos (fetcher devuelve null)", async () => {
     const fetchAdvertiser = vi.fn().mockResolvedValue(null);
-    const texto = await fetchAdsText(entity, 7, { fetchAdvertiser, esperar: vi.fn().mockResolvedValue(undefined), ahora });
+    const { texto, creativos } = await fetchAdsText(entity, 7, { fetchAdvertiser, esperar: vi.fn().mockResolvedValue(undefined), ahora });
     expect(texto).toBeNull();
+    expect(creativos).toEqual([]);
   });
 
   it("un anunciante roto no tumba a los demás (fail-soft)", async () => {
@@ -211,7 +219,65 @@ describe("fetchAdsText", () => {
     const fetchAdvertiser = vi.fn()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ 1: [{ 1: "B", 2: "CR1", 12: "Banco B" }] });
-    const texto = await fetchAdsText(multi, 7, { fetchAdvertiser, esperar: vi.fn().mockResolvedValue(undefined), ahora });
+    const { texto } = await fetchAdsText(multi, 7, { fetchAdvertiser, esperar: vi.fn().mockResolvedValue(undefined), ahora });
     expect(texto).toContain("Banco B");
+  });
+});
+
+describe("computeAdsKpis", () => {
+  const ahora = new Date("2026-09-10T12:00:00Z");
+  function metaAd(overrides: Partial<MetaAdCreative> = {}): MetaAdCreative {
+    return {
+      libraryId: "1", advertiserName: "X", desde: "2026-09-05", dominio: null,
+      imagenUrl: null, copy: "", url: "https://www.facebook.com/ads/library/?id=1",
+      ...overrides,
+    };
+  }
+
+  it("cero en todo con arrays vacíos", () => {
+    expect(computeAdsKpis([], [], 7, ahora)).toEqual({
+      creativosActivos: 0, campanasNuevas: 0, duracionPromedioDias: null,
+      mixFormato: { imagen: 0, display: 0, desconocido: 0 },
+    });
+  });
+
+  it("suma creativos activos de Google + Meta", () => {
+    const kpis = computeAdsKpis([ad(), ad({ creativeId: "CR2" })], [metaAd()], 7, ahora);
+    expect(kpis.creativosActivos).toBe(3);
+  });
+
+  it("cuenta campañas nuevas de Google (esNuevo) y de Meta (desde dentro de ventana)", () => {
+    const googleNuevo = ad({ primeraVez: "2026-09-08" });
+    const googleViejo = ad({ creativeId: "CR2", primeraVez: "2026-01-01" });
+    const metaNuevo = metaAd({ desde: "2026-09-09" });
+    const metaViejo = metaAd({ libraryId: "2", desde: "2026-01-01" });
+    const kpis = computeAdsKpis([googleNuevo, googleViejo], [metaNuevo, metaViejo], 7, ahora);
+    expect(kpis.campanasNuevas).toBe(2);
+  });
+
+  it("duración promedio solo con creativos de Google que tienen ambas fechas", () => {
+    const kpis = computeAdsKpis(
+      [ad({ primeraVez: "2026-09-01", ultimaVez: "2026-09-05" }), ad({ creativeId: "CR2", primeraVez: null, ultimaVez: "2026-09-05" })],
+      [], 7, ahora,
+    );
+    expect(kpis.duracionPromedioDias).toBe(4);
+  });
+
+  it("duracionPromedioDias null si ningún creativo de Google trae ambas fechas", () => {
+    const kpis = computeAdsKpis([ad({ primeraVez: null, ultimaVez: null })], [], 7, ahora);
+    expect(kpis.duracionPromedioDias).toBeNull();
+  });
+
+  it("clampea a 0 una duración negativa (ultimaVez anterior a primeraVez, dato inconsistente)", () => {
+    const kpis = computeAdsKpis([ad({ primeraVez: "2026-09-05", ultimaVez: "2026-09-01" })], [], 7, ahora);
+    expect(kpis.duracionPromedioDias).toBe(0);
+  });
+
+  it("mixFormato solo cuenta creativos de Google, por formato", () => {
+    const kpis = computeAdsKpis(
+      [ad({ formato: "imagen" }), ad({ creativeId: "CR2", formato: "display" }), ad({ creativeId: "CR3", formato: "desconocido" })],
+      [metaAd()], 7, ahora,
+    );
+    expect(kpis.mixFormato).toEqual({ imagen: 1, display: 1, desconocido: 1 });
   });
 });

@@ -21,10 +21,21 @@ vi.mock("./research-competencia-social.js", () => ({
   fetchSocialText: vi.fn(async () => "[instagram @altoke.bo] Promo nueva"),
 }));
 vi.mock("./research-competencia-ads.js", () => ({
-  fetchAdsText: vi.fn(async () => "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x"),
+  fetchAdsText: vi.fn(async () => ({
+    texto: "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x",
+    creativos: [],
+  })),
+  computeAdsKpis: vi.fn(() => ({
+    creativosActivos: 0, campanasNuevas: 0, duracionPromedioDias: null,
+    mixFormato: { imagen: 0, display: 0, desconocido: 0 },
+  })),
 }));
 vi.mock("./research-competencia-meta-ads.js", () => ({
-  fetchMetaAdsText: vi.fn(async () => null),
+  fetchMetaAdsText: vi.fn(async () => ({ texto: null, creativos: [] })),
+}));
+vi.mock("./research-competencia-scrapers.js", () => ({
+  fetchInstagramFollowers: vi.fn(async () => null),
+  fetchFacebookFollowers: vi.fn(async () => null),
 }));
 vi.mock("./research-competencia-browser.js", () => ({
   openResearchBrowserSession: vi.fn(async () => ({ context: {}, close: vi.fn(async () => {}) })),
