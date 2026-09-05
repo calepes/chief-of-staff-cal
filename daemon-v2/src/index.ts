@@ -34,6 +34,9 @@ import { isBacklogCallback, handleBacklogCallback } from "./backlog-callbacks.js
 import { BacklogStore } from "./backlog-store.js";
 import { isLearningCallback, handleLearningCallback } from "./learning-callbacks.js";
 import { LearningStore } from "./learning-store.js";
+import { isFeedbinReportCallback, handleFeedbinReportCallback } from "./proactive/feedbin-report-callbacks.js";
+import { FeedbinReportStore } from "./proactive/feedbin-report-store.js";
+import { markEntriesRead, markEntriesUnread } from "./tools/feedbin-client.js";
 import { scheduleLearningReflect, LEARNINGS_PATH } from "./proactive/learning-reflect.js";
 import { BACKLOG_ROOT } from "./tools/backlog-discovery.js";
 import { processFuelAlert } from "./proactive/fuel-alert.js";
@@ -213,6 +216,7 @@ const state = new ConversationState(kv, compactHistory);
 const journalStore = new JournalStore(kv);
 const backlogStore = new BacklogStore(kv);
 const learningStore = new LearningStore(kv);
+const feedbinReportStore = new FeedbinReportStore(kv);
 const taskStore = new TaskStore(kv);
 const lendingDateStore = new LendingDateStore(kv);
 
@@ -852,6 +856,49 @@ async function processMessage(
       )
         .catch((err) => log({ msg: "learning_callback_error", err: String(err) }))
         .finally(() => releaseLock(kv, lchat, lockUserId).catch(() => {}));
+      return;
+    }
+
+    // Callbacks del reporte diario de Feedbin (fbr:mark:*/fbr:undo:*) → mecánicos, sin LLM:
+    // marcan/deshacen grupos de "marcar leído" en bloque contra la API real de Feedbin. Mismo
+    // lock anti-doble-tap que jnl:*/bklg:*/lrn:*. Va ARRIBA del catch-all de "Heavy callbacks
+    // legacy" más abajo — puesto debajo, `fbr:*` sería código muerto sin rastro en logs (mismo
+    // motivo por el que `bklg:*`/`lrn:*` están donde están).
+    if (isFeedbinReportCallback(cb.data)) {
+      const fchat = cb.message.chat.id;
+      const fanchor = cb.message.message_id;
+      const lockUserId = cb.from.id;
+
+      const acquired = await tryAcquireLock(kv, fchat, lockUserId, MEETING_FLOW_LOCK_TTL_SEC);
+      if (!acquired) {
+        await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id, "⏳ Todavía estoy procesando tu toque anterior...").catch(() => {});
+        return;
+      }
+      await answerCallbackQuery(env.COS_TELEGRAM_BOT_TOKEN, cb.id).catch(() => {});
+
+      void handleFeedbinReportCallback(
+        {
+          store: feedbinReportStore,
+          feedbin: { username: env.FEEDBIN_USERNAME, password: env.FEEDBIN_PASSWORD },
+          markEntriesRead,
+          markEntriesUnread,
+          log,
+          editCard: async (messageId, card) => {
+            await editMessage(
+              env.COS_TELEGRAM_BOT_TOKEN,
+              fchat,
+              messageId,
+              card.text,
+              "HTML",
+              card.keyboard ?? { inline_keyboard: [] },
+            ).catch((err) => log({ msg: "feedbin_report_edit_failed", err: String(err) }));
+          },
+        },
+        fanchor,
+        cb.data!,
+      )
+        .catch((err) => log({ msg: "feedbin_report_callback_error", err: String(err) }))
+        .finally(() => releaseLock(kv, fchat, lockUserId).catch(() => {}));
       return;
     }
 
@@ -1905,6 +1952,7 @@ function scheduleFeedbinDailyReport(): void {
       botToken: env.COS_TELEGRAM_BOT_TOKEN,
       chatId: ALERT_CHAT_ID,
       feedbin: { username: env.FEEDBIN_USERNAME, password: env.FEEDBIN_PASSWORD },
+      kv,
     }).catch((err) => log({ msg: "feedbin_daily_report_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
   log({ msg: "feedbin_daily_report_scheduled", interval: "daily 08:00" });
@@ -2023,10 +2071,10 @@ async function confirmLendingDate(messageId: string, fecha: string): Promise<voi
 }
 
 function scheduleKpiIngestCheck(): void {
-  cron.schedule("*/15 6-23 * * *", () => {
+  cron.schedule("*/10 7-13 * * *", () => {
     void checkKpiIngest(kpiIngestOpts()).catch((err) => log({ msg: "kpi_ingest_check_unhandled_error", err: String(err) }));
   }, { timezone: "America/La_Paz" });
-  log({ msg: "kpi_ingest_check_scheduled", interval: "every 15min 6-23h" });
+  log({ msg: "kpi_ingest_check_scheduled", interval: "every 10min 7-13h" });
 }
 
 /**
@@ -2155,7 +2203,8 @@ async function loop(): Promise<void> {
   if (env.GMAIL_OAUTH_CLIENT_ID && env.GMAIL_OAUTH_CLIENT_SECRET && env.GMAIL_OAUTH_REFRESH_TOKEN) {
     scheduleKpiIngestCheck();
     scheduleDailyNoteCheck();
-    scheduleTaskEmailCheck();
+    // DESACTIVADO 2026-09-05 (pedido de Cal).
+    // scheduleTaskEmailCheck();
   } else {
     log({ msg: "kpi_ingest_check_skipped_no_credentials" });
     log({ msg: "daily_note_check_skipped_no_credentials" });
