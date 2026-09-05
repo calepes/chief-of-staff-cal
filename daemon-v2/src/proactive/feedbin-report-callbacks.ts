@@ -3,7 +3,7 @@
 // anti-doble-tap que jnl:*/bklg:*/lrn:*/tsk:* en index.ts.
 
 import type { FeedbinCreds } from "../tools/feedbin-client.js";
-import { buildKeyboard, buildReportText, type Card } from "./feedbin-report-card.js";
+import { buildKeyboard, buildReportText, esc, type Card } from "./feedbin-report-card.js";
 import type { FeedbinReportStore } from "./feedbin-report-store.js";
 
 const UNDO_TTL_MS = 10 * 60 * 1000;
@@ -52,18 +52,20 @@ export async function handleFeedbinReportCallback(
   if (!button) return;
 
   if (action === "mark") {
+    const previousMarkedAt = button.markedAt;
     try {
       await deps.markEntriesRead(deps.feedbin, button.entryIds);
+      button.markedAt = Date.now();
+      await deps.store.updateReport(reportId, proposal);
     } catch (err) {
+      button.markedAt = previousMarkedAt; // no confirmado — no reflejarlo en la tarjeta
       deps.log({ msg: "feedbin_report_mark_failed", reportId, buttonId, err: String(err) });
       await deps.editCard(messageId, {
-        text: `${buildReportText(proposal.headerText, proposal.buttons)}\n\n⚠️ No pude marcar "${button.label}" — reintentá tocando el botón de nuevo.`,
+        text: `${buildReportText(proposal.headerText, proposal.buttons)}\n\n⚠️ No pude marcar "${esc(button.label)}" — reintentá tocando el botón de nuevo.`,
         keyboard: buildKeyboard(reportId, proposal.buttons),
       });
       return;
     }
-    button.markedAt = Date.now();
-    await deps.store.updateReport(reportId, proposal);
     await deps.editCard(messageId, {
       text: buildReportText(proposal.headerText, proposal.buttons),
       keyboard: buildKeyboard(reportId, proposal.buttons),
@@ -73,11 +75,13 @@ export async function handleFeedbinReportCallback(
 
   // action === "undo"
   if (button.markedAt > 0 && Date.now() - button.markedAt < UNDO_TTL_MS) {
+    const previousMarkedAt = button.markedAt;
     try {
       await deps.markEntriesUnread(deps.feedbin, button.entryIds);
       button.markedAt = 0;
       await deps.store.updateReport(reportId, proposal);
     } catch (err) {
+      button.markedAt = previousMarkedAt; // no confirmado — no reflejarlo en la tarjeta
       deps.log({ msg: "feedbin_report_undo_failed", reportId, buttonId, err: String(err) });
     }
   } else {

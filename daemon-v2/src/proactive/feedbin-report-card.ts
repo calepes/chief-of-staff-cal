@@ -31,7 +31,7 @@ const MAX_MARK_BUTTONS = 6;
 const UNDO_TTL_MS = 10 * 60 * 1000;
 const BUTTON_LABEL_MAX = 18;
 
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 

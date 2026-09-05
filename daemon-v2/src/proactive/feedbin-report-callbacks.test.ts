@@ -141,4 +141,16 @@ describe("handleFeedbinReportCallback", () => {
     expect(markEntriesRead).not.toHaveBeenCalled();
     expect(edits).toHaveLength(0);
   });
+
+  it("fbr:undo dentro de la ventana pero con la API fallando no toca el KV y deja el grupo marcado", async () => {
+    markEntriesUnread.mockRejectedValue(new Error("Feedbin API 500"));
+    const reportId = await store.createReport(proposal({ buttons: [{ ...BTN, markedAt: Date.now() - 60_000 }] }));
+
+    await handleFeedbinReportCallback(deps, 99, `fbr:undo:${reportId}:g1`);
+
+    const saved = await store.getReport(reportId);
+    expect(saved!.buttons[0]!.markedAt).toBeGreaterThan(0); // sigue marcado, no se revirtió a 0
+    expect(edits.at(-1)!.card.text).toContain("marcado"); // la tarjeta muestra el estado real
+    expect(logs.some((l) => l.msg === "feedbin_report_undo_failed")).toBe(true);
+  });
 });
