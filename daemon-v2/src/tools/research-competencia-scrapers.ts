@@ -1,17 +1,19 @@
-// tools/research-competencia-scrapers.ts — scrapers headless por plataforma para el research de
+// tools/research-competencia-scrapers.ts — scrapers por plataforma para el research de
 // competencia (fase 2, redes sociales). Separado de research-competencia-social.ts a propósito:
 // ese archivo se queda con tipos/filtro/formateo/orquestación; acá vive el detalle de Playwright
 // por red social: Instagram y TikTok leen JSON embebido (`extractNodes`/`walkForNodes`); Facebook
 // y X no exponen eso, así que leen el DOM ya renderizado (`collectDomPosts`/`parseDomPosts`). Las
 // cuatro comparten el boilerplate de Playwright vía `withBrowserContext`.
 //
-// Mismo patrón que design-capture.ts: chromium.launch({headless:true}), cookies inyectadas al
-// contexto, try/finally con browser.close(). El LLM no tiene tool de navegación genérica — esto
-// es una tool de alto nivel, el detalle de Playwright queda puertas adentro.
+// Chrome REAL vía CDP (research-competencia-browser.ts), NO `chromium.launch()` propio — Chromium
+// headless de Playwright se topó con detección de bot en las 4 plataformas (verificado en vivo
+// 2026-09-03: con cookie de sesión válida igual devolvía 0 posts). El `BrowserContext` ya viene
+// ABIERTO desde el orquestador (una sola sesión de Chrome compartida por las 6 entidades, no una
+// por handle) — acá solo se abre/cierra la `Page` de cada llamada. El LLM no tiene tool de
+// navegación genérica — esto es una tool de alto nivel, el detalle de Playwright queda puertas
+// adentro.
 
-import { chromium } from "playwright";
-import type { Page } from "playwright";
-import type { StructuredCookie } from "./cookie-jar.js";
+import type { BrowserContext, Page } from "playwright";
 import type { SocialPlatform, SocialPost } from "./research-competencia-social.js";
 
 /**
@@ -56,62 +58,21 @@ function sortPostsByFechaDesc(posts: SocialPost[]): SocialPost[] {
   return [...conFecha, ...sinFecha];
 }
 
-/**
- * Parsea los nodos crudos del timeline de Instagram (extraídos del JSON embebido en un <script>
- * de la página de perfil) a `SocialPost`. Función pura — sin red — para que sea testeable sin
- * levantar un browser.
- *
- * MENOR 5 (revisión de salud, 2026-09-03): el carrusel de Instagram (`edge_sidecar_to_children`,
- * hasta 10-20 slides) nunca se materializaba — solo se leía `display_url`/`video_url`, un único
- * media por post. Importa porque las promos bancarias suelen publicarse como carrusel, con las
- * condiciones/tarifas en las slides 2 y 3, no en la portada — se perdían en silencio.
- * `edge_sidecar_to_children.edges[].node.display_url` es el nombre de campo tal como lo documenta
- * el payload público de Instagram para este caso, pero **no está verificado contra producción
- * todavía** (esta tarea no navega a Instagram real) — por eso la extracción es defensiva: si el
- * campo no existe o no matchea la forma esperada, `sidecarUrls` queda vacío y cae al comportamiento
- * de siempre (un único `display_url`/`video_url`). Pendiente: confirmar el nombre exacto en la
- * primera corrida real y ajustar si hace falta. `MAX_IMAGES_PER_POST`
- * (research-competencia-social.ts) sigue recortando esto aguas abajo, en `enrichPosts` — acá no
- * hace falta topear, solo entregar las slides en el orden que Instagram las manda.
- */
-export function parseInstagramPosts(nodos: unknown[], handle: string): SocialPost[] {
-  const posts: SocialPost[] = [];
-  for (const raw of nodos) {
-    const n = raw as {
-      shortcode?: string;
-      taken_at_timestamp?: number;
-      is_video?: boolean;
-      display_url?: string;
-      video_url?: string;
-      edge_media_to_caption?: { edges?: Array<{ node?: { text?: string } }> };
-      edge_sidecar_to_children?: { edges?: Array<{ node?: { display_url?: string } }> };
-    };
-    if (!n.shortcode) continue;
-    const esVideo = n.is_video === true;
-    const media = esVideo ? n.video_url : n.display_url;
-    const sidecarUrls = (n.edge_sidecar_to_children?.edges ?? [])
-      .map((e) => e.node?.display_url)
-      .filter((u): u is string => typeof u === "string" && u.length > 0);
-    posts.push({
-      platform: "instagram",
-      handle,
-      url: `https://www.instagram.com/p/${n.shortcode}/`,
-      fecha: isoDateFromUnix(n.taken_at_timestamp),
-      caption: n.edge_media_to_caption?.edges?.[0]?.node?.text ?? "",
-      mediaUrls: sidecarUrls.length > 0 ? sidecarUrls : media ? [media] : [],
-      esVideo,
-    });
-  }
-  return sortPostsByFechaDesc(posts);
-}
-
-// Tope de profundidad del recorrido recursivo de `extractNodes`. Instagram/TikTok anidan el JSON
-// del timeline dentro de wrappers de webpack/relay que cambian de forma entre despliegues — no
-// hay confirmación de que 8 niveles alcancen siempre para la estructura real de producción.
-// Ver el test "no encuentra un nodo a más de 8 niveles de profundidad" en el archivo de test: si
-// el tope no alcanza, el síntoma es `nodos: []` con `scriptsConPatron > 0` y
-// `scriptsConNodosValidos === 0` en el diagnóstico que loguea `withBrowserContext` — esa
-// combinación es la señal de "hay que subir MAX_WALK_DEPTH", no de "cambiaron las cookies".
+// Tope de profundidad del recorrido recursivo de `extractNodes`. TikTok anida el JSON del
+// timeline dentro de wrappers que cambian de forma entre despliegues — no hay confirmación de que
+// 8 niveles alcancen siempre para la estructura real de producción. Ver el test "no encuentra un
+// nodo a más de 8 niveles de profundidad" en el archivo de test: si el tope no alcanza, el
+// síntoma es `nodos: []` con `scriptsConPatron > 0` y `scriptsConNodosValidos === 0` en el
+// diagnóstico que loguea `withBrowserContext` — esa combinación es la señal de "hay que subir
+// MAX_WALK_DEPTH", no de "cambió la sesión".
+//
+// Ya NO lo usa Instagram (ver `parseInstagramGridItems` más abajo) — Instagram dejó de servir el
+// timeline como JSON embebido en un `<script>` (verificado en vivo 2026-09-05: con Chrome real y
+// sesión logueada, la página es la real, no un muro, pero el patrón `shortcode`+`is_video` que
+// buscaba `extractInstagramNodes` ya no existe en ningún script de la página — Instagram migró a
+// su framework "Comet", con otra forma de datos). Se mantiene para TikTok, que SÍ sigue
+// embebiendo `__UNIVERSAL_DATA_FOR_REHYDRATION__` como JSON — aunque TikTok tiene su propio
+// bloqueo real (ver el comentario de `scrapeTikTok`), no relacionado con esto.
 const MAX_WALK_DEPTH = 8;
 
 type NodePredicate = (obj: Record<string, unknown>) => boolean;
@@ -200,31 +161,8 @@ function fieldEqualsHandleCI(obj: Record<string, unknown>, path: readonly string
   return handlesMatch(valor, handle);
 }
 
-function ownerUsernameMatches(obj: Record<string, unknown>, handle: string): boolean {
-  return fieldEqualsHandleCI(obj, ["owner", "username"], handle);
-}
-
 function authorUniqueIdMatches(obj: Record<string, unknown>, handle: string): boolean {
   return fieldEqualsHandleCI(obj, ["author", "uniqueId"], handle);
-}
-
-export interface InstagramExtraction {
-  nodos: unknown[];
-  /** Señal diagnóstica para distinguir "no hay posts" de "no pudimos leer la página" — ver withBrowserContext. */
-  diagnostics: { scriptsConPatron: number; scriptsConNodosValidos: number };
-}
-
-/**
- * Extrae los nodos de post de Instagram que pertenecen a `handle` — ver el comentario sobre
- * `ownerUsernameMatches` arriba sobre por qué la validación de autoría es obligatoria, no un
- * extra: sin ella, un post recomendado de otra cuenta embebido en el mismo payload matchearía
- * igual de bien.
- */
-export function extractInstagramNodes(scriptTexts: string[], handle: string): InstagramExtraction {
-  return extractNodes(
-    scriptTexts,
-    (obj) => typeof obj.shortcode === "string" && "is_video" in obj && ownerUsernameMatches(obj, handle)
-  );
 }
 
 // Ambiente mínimo SOLO para el body de page.evaluate() (corre en el navegador, no en Node) —
@@ -235,6 +173,7 @@ export function extractInstagramNodes(scriptTexts: string[], handle: string): In
 interface DomElement {
   querySelector(selector: string): DomElement | null;
   querySelectorAll(selector: string): ArrayLike<DomElement>;
+  getAttribute(name: string): string | null;
   textContent: string | null;
   href?: string;
   src?: string;
@@ -279,33 +218,35 @@ export interface ScrapeOutcome<T> {
 }
 
 /**
- * Centraliza el boilerplate de Playwright compartido por todos los scrapers de este archivo
- * (Instagram hoy; TikTok/Facebook/X se suman en tareas posteriores y reusan esta misma función):
- * `chromium.launch` → `newContext` → `addCookies` → `newPage` → `scrape(page)` → `browser.close()`
- * en `finally`, MÁS el logging de los dos casos que un scraper roto puede producir en silencio:
+ * Centraliza el boilerplate compartido por todos los scrapers de este archivo: `context.newPage()`
+ * → `scrape(page)` → `page.close()` en `finally`, MÁS el logging de los dos casos que un scraper
+ * roto puede producir en silencio:
  *
  * 1. **Excepción real** (timeout, error de red, navegación fallida) → log
  *    `research_competencia_scrape_error` y devuelve `[]`.
  * 2. **"Cero resultados" sin excepción** (`page.goto` resuelve normal pero el parseo no encontró
- *    nada — típico de una cookie vencida que sirve el muro de login, o un cambio de layout) → log
- *    `research_competencia_scrape_empty` con los `diagnostics` que devuelva el scraper concreto,
- *    para poder distinguir "esta cuenta no publicó nada" de "no pudimos leer la página" sin tener
- *    que deducirlo por descarte (ver punto 1 del review que originó este archivo).
+ *    nada — típico de una sesión vencida que sirve el muro de login, detección de bot, o un cambio
+ *    de layout) → log `research_competencia_scrape_empty` con los `diagnostics` que devuelva el
+ *    scraper concreto, para poder distinguir "esta cuenta no publicó nada" de "no pudimos leer la
+ *    página" sin tener que deducirlo por descarte (ver punto 1 del review que originó este
+ *    archivo).
  *
  * Cualquier falla devuelve `[]` en vez de propagar: esto corre en un cron desatendido, un solo
  * scraper roto no debe tumbar el research completo de las demás cuentas/plataformas.
+ *
+ * Solo cierra la `Page`, NUNCA el `context` — es una sesión de Chrome COMPARTIDA por las 6
+ * entidades de la corrida (research-competencia-browser.ts), abierta y cerrada una sola vez por el
+ * orquestador. Cerrarla acá dejaría a la entidad/handle siguiente sin browser.
  */
 export async function withBrowserContext<T>(
   platform: string,
   handle: string,
-  cookies: StructuredCookie[],
+  context: BrowserContext,
   scrape: (page: Page) => Promise<ScrapeOutcome<T>>
 ): Promise<T[]> {
-  const browser = await chromium.launch({ headless: true });
+  let page: Page | undefined;
   try {
-    const context = await browser.newContext();
-    if (cookies.length > 0) await context.addCookies(cookies);
-    const page = await context.newPage();
+    page = await context.newPage();
     const { items, diagnostics } = await scrape(page);
     if (items.length === 0) {
       console.log(
@@ -319,21 +260,126 @@ export async function withBrowserContext<T>(
     );
     return [];
   } finally {
-    await browser.close();
+    await page?.close().catch(() => {});
   }
+}
+
+/** Post crudo tal como lo extrae `collectInstagramGridItems` del grid ya renderizado del perfil. */
+export interface RawInstagramGridItem {
+  /** Path relativo tal como lo da el DOM, ej. `/altoke.bo/p/DcR5JyFjosl/` o `/altoke.bo/reel/...`. */
+  href: string;
+  /** Miniatura — para fotos es la imagen real; para reels es un frame/poster, NO el video. */
+  imgSrc: string;
+  imgAlt: string | null;
+}
+
+const IG_MESES: Record<string, string> = {
+  January: "01", February: "02", March: "03", April: "04", May: "05", June: "06",
+  July: "07", August: "08", September: "09", October: "10", November: "11", December: "12",
+};
+
+// El `alt` de una FOTO (no reel) sigue el patrón fijo "Photo by {autor} on {Month DD, YYYY}. ..."
+// — es texto de accesibilidad AUTO-GENERADO por Instagram (visión + metadata), no algo que el
+// autor escriba. Verificado en vivo 2026-09-05 contra el perfil real de altoke.bo. Es la ÚNICA
+// fuente de fecha que el grid expone — no hay `<time>` ni timestamp en ningún atributo.
+const IG_PHOTO_ALT_RE = /^Photo by .+ on (January|February|March|April|May|June|July|August|September|October|November|December) (\d{1,2}), (\d{4})\./;
+
+/**
+ * Parsea la fecha embebida en el alt de una foto ("Photo by altoke on August 20, 2026. ...") a
+ * `YYYY-MM-DD`. Parseo manual de string, NO `new Date(alt)`: es una fecha CALENDARIO tal como la
+ * declara Instagram, no un instante que necesite el ajuste de husario -4h que sí aplica a
+ * timestamps Unix en otras partes de este archivo — pasarla por `Date` además dependería del
+ * timezone del proceso que corre el script, innecesario acá.
+ */
+export function parseInstagramPhotoAltDate(alt: string): string | null {
+  const m = IG_PHOTO_ALT_RE.exec(alt);
+  if (!m) return null;
+  const [, mes, dia] = m;
+  return `${m[3]}-${IG_MESES[mes]}-${dia.padStart(2, "0")}`;
+}
+
+/**
+ * Parsea los ítems crudos del grid de Instagram a `SocialPost`. Función pura — sin red — mismo
+ * criterio que el resto de los parsers de este archivo.
+ *
+ * Reemplaza a `parseInstagramPosts`/`extractInstagramNodes` (JSON embebido, descartado 2026-09-05
+ * — ver el comentario de `MAX_WALK_DEPTH`). El grid expone MUCHA menos estructura que el JSON
+ * viejo, y las dos formas de post (foto vs. reel) traen datos casi complementarios — ninguna trae
+ * todo:
+ *
+ * - **Reel** (`href` contiene `/reel/`): el `alt` de la miniatura ES el caption real completo que
+ *   escribió la cuenta (con emojis, hashtags, vigencia de promos) — verificado contra 7 reels
+ *   reales de altoke.bo. Pero SIN fecha: el patrón de fecha solo aparece en fotos.
+ * - **Foto** (`href` contiene `/p/`): el `alt` es una descripción de VISIÓN auto-generada
+ *   ("Photo by altoke on {fecha}. May be a meme of...") — no es un caption real, así que acá
+ *   `caption` queda vacío a propósito (usarlo confundiría al agente: pensaría que es texto propio
+ *   de la marca). Sí trae fecha parseable.
+ *
+ * `esVideo` se fuerza `false` para AMBOS tipos, aunque el href diga `/reel/`: `mediaUrls` acá
+ * SIEMPRE es la miniatura (`imgSrc`), nunca una URL de video real — el grid no la expone, hay que
+ * abrir el reel para conseguirla (no implementado, fuera de alcance de esta pasada). Si `esVideo`
+ * fuera `true`, `enrichPosts` (research-competencia-social.ts) intentaría descargar esa miniatura
+ * JPG con `analyzeVideoFn` como si fuera un archivo de video — fallaría siempre, generando
+ * `research_competencia_video_download_error` en cada reel sin aportar nada. Tratarlo como imagen
+ * (`esVideo:false`) hace que `enrichPosts` corra `describeImageFn` sobre la miniatura, que sí
+ * tiene sentido — se pierde el análisis de video/audio real, pero se gana el caption completo
+ * (antes ni eso: 0 posts).
+ *
+ * NO se ordena con `sortPostsByFechaDesc` a propósito, a diferencia de los demás parsers de este
+ * archivo: el grid YA viene más-reciente-primero (orden nativo de Instagram), y como los reels no
+ * tienen fecha, aplicar ese sort empujaría TODOS los reels al final — exactamente lo contrario de
+ * lo correcto, porque en la muestra real los reels son la mayoría del contenido (7 de 10 ítems) y
+ * el que trae el caption real. Preservar el orden del grid mantiene la intercalación
+ * foto/reel real; el contrato "sin fecha se conserva" de `filterPostsByTimeframe` sigue aplicando
+ * igual aguas abajo.
+ */
+export function parseInstagramGridItems(items: RawInstagramGridItem[], handle: string): SocialPost[] {
+  const posts: SocialPost[] = [];
+  for (const item of items) {
+    const segmentos = item.href.split("/").filter(Boolean);
+    if (!handlesMatch(segmentos[0], handle)) continue; // el grid es de un solo perfil, pero fail-closed igual
+    const esReel = item.href.includes("/reel/");
+    posts.push({
+      platform: "instagram",
+      handle,
+      url: `https://www.instagram.com${item.href}`,
+      fecha: esReel ? null : parseInstagramPhotoAltDate(item.imgAlt ?? ""),
+      caption: esReel ? (item.imgAlt ?? "") : "",
+      mediaUrls: [item.imgSrc],
+      esVideo: false, // ver el comentario grande de arriba — nunca true, no hay URL de video real
+    });
+  }
+  return posts;
+}
+
+/**
+ * Extrae del grid ya renderizado los `<a>` de post/reel con su miniatura — corre dentro de
+ * `page.evaluate` (contexto del browser). El parseo real vive en `parseInstagramGridItems`
+ * (Node, testeable). Descarta ítems sin `href`/`imgSrc` (ej. un placeholder todavía cargando).
+ */
+function collectInstagramGridItems(page: Page): Promise<RawInstagramGridItem[]> {
+  return page.evaluate(() => {
+    const out: { href: string; imgSrc: string; imgAlt: string | null }[] = [];
+    for (const a of Array.from(document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]'))) {
+      const href = a.getAttribute("href");
+      const img = a.querySelector("img");
+      const src = img?.getAttribute("src");
+      if (!href || !src) continue;
+      out.push({ href, imgSrc: src, imgAlt: img?.getAttribute("alt") ?? null });
+    }
+    return out;
+  });
 }
 
 /**
  * Scrapea el perfil público de Instagram de `handle` y devuelve sus posts recientes. Una sola
- * visita, sin scroll — minimiza la huella de automatización sobre la cuenta que presta las
- * cookies.
+ * visita, sin scroll — minimiza la huella de automatización sobre la cuenta que presta la sesión.
  */
-export async function scrapeInstagram(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
-  return withBrowserContext("instagram", handle, cookies, async (page) => {
+export async function scrapeInstagram(handle: string, context: BrowserContext): Promise<SocialPost[]> {
+  return withBrowserContext("instagram", handle, context, async (page) => {
     await page.goto(`https://www.instagram.com/${handle}/`, { waitUntil: "networkidle", timeout: 30_000 });
-    const scriptTexts = await collectScriptsByLiteral(page, "shortcode");
-    const { nodos, diagnostics } = extractInstagramNodes(scriptTexts, handle);
-    return { items: parseInstagramPosts(nodos, handle), diagnostics };
+    const items = await collectInstagramGridItems(page);
+    return { items: parseInstagramGridItems(items, handle), diagnostics: { itemsEnGrid: items.length } };
   });
 }
 
@@ -397,8 +443,8 @@ export function extractTikTokNodes(scriptTexts: string[], handle: string): TikTo
  * muertas para cuando les toque el turno de descargarse — no asumir que sobreviven más allá del
  * mismo ciclo de research.
  */
-export async function scrapeTikTok(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
-  return withBrowserContext("tiktok", handle, cookies, async (page) => {
+export async function scrapeTikTok(handle: string, context: BrowserContext): Promise<SocialPost[]> {
+  return withBrowserContext("tiktok", handle, context, async (page) => {
     await page.goto(`https://www.tiktok.com/@${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
     const scriptTexts = await collectScriptsByLiteral(page, "desc");
     const { nodos, diagnostics } = extractTikTokNodes(scriptTexts, handle);
@@ -574,8 +620,8 @@ function collectDomPosts(page: Page): Promise<DomPostExtraction[]> {
  * está anticipado en el spec y el diseño degrada sin romper el research completo de las demás
  * cuentas/plataformas (ver `withBrowserContext`).
  */
-export async function scrapeFacebook(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
-  return withBrowserContext("facebook", handle, cookies, async (page) => {
+export async function scrapeFacebook(handle: string, context: BrowserContext): Promise<SocialPost[]> {
+  return withBrowserContext("facebook", handle, context, async (page) => {
     await page.goto(`https://www.facebook.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
     const crudos = await collectDomPosts(page);
     const conAutor: RawDomPost[] = crudos.map((c) => ({ ...c, autor: deriveAuthorFromPermalink(c.url) }));
@@ -591,8 +637,8 @@ export async function scrapeFacebook(handle: string, cookies: StructuredCookie[]
  * bloqueo de plataforma, no un bug del parser. Diseño anticipado, degrada sin romper el research
  * completo de las demás cuentas/plataformas (ver `withBrowserContext`).
  */
-export async function scrapeX(handle: string, cookies: StructuredCookie[]): Promise<SocialPost[]> {
-  return withBrowserContext("x", handle, cookies, async (page) => {
+export async function scrapeX(handle: string, context: BrowserContext): Promise<SocialPost[]> {
+  return withBrowserContext("x", handle, context, async (page) => {
     await page.goto(`https://x.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
     const crudos = await collectDomPosts(page);
     const conAutor: RawDomPost[] = crudos.map((c) => ({ ...c, autor: deriveAuthorFromPermalink(c.url) }));

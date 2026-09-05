@@ -17,7 +17,6 @@ delete process.env.ANTHROPIC_API_KEY;
 
 import { runResearchCompetencia, formatSummaryHtml } from "../src/tools/research-competencia.js";
 import { stripHtmlTags } from "../src/proactive/rich-send.js";
-import { makeResearchCompetenciaCookiesProvider } from "../src/tools/research-competencia-cookies.js";
 import { sendNotifySummary, notifyFatalError, wantsNoNotify } from "./research-competencia-notify.js";
 import { findMissingEnvVars, formatMissingEnvError } from "./research-competencia-env.js";
 
@@ -26,25 +25,20 @@ import { findMissingEnvVars, formatMissingEnvError } from "./research-competenci
  * disparado por un cron externo de launchd (el plist se crea/mantiene aparte, fuera de este repo).
  * `npm run research:now -- --timeframe=14 --entidades=takenos,meru [--no-notify]`
  *
- * ⚠️ Requiere Full Disk Access para leer la sesión de Safari (Cookies.binarycookies) —
- * `makeResearchCompetenciaCookiesProvider` (research-competencia-cookies.ts) lee el archivo
- * DIRECTO, sin pasar por el Cookie Broker. Sin FDA, la lectura falla en silencio (queda logueada
- * como `research_competencia_cookies_read_failed`) y el scraping social corre sin sesión —
- * síntoma no obvio: el research "funciona" pero cada red social devuelve el muro de login (por
- * eso `formatSummaryHtml` en research-competencia.ts agrega una advertencia explícita cuando la
- * corrida entera obtuvo 0 cookies — ver el comentario ahí). El FDA está atado al binario
- * `~/.claude/bin/node-fda`, no a "node" en general — un `npm run` normal arranca el `node` del
- * PATH y lo pierde en silencio. Por eso `research:now` (package.json) invoca
- * `node-fda --import tsx/esm scripts/research-competencia-now.ts` en vez de `tsx` directo: `tsx`
- * (el CLI) es en sí un script Node que puede re-exec un subproceso con otras flags, y no hay
- * garantía de que ese subproceso conserve la identidad de `node-fda` — mismo riesgo que perder el
- * FDA vía `npm run`. `--import tsx/esm` es el loader ESM que el propio paquete `tsx` documenta
- * para exactamente este caso (Node 22+, ya lo exige `engines` del repo): es UN SOLO proceso
- * `node-fda`, sin subproceso intermedio, así que el permiso nunca se pierde. Verificado en este
- * entorno: `node-fda --import tsx/esm archivo.ts` corre y tipa TypeScript sin pasar por el CLI de
- * tsx. Precedente del repo (`cookie-jar.ts`, `sync-safari-cookies.mjs`) invoca `node-fda` contra
- * `.mjs` plano, no contra TypeScript — no había un patrón ya validado para `node-fda` + TS, así
- * que esto es la resolución nueva, no una copia de uno existente.
+ * **La sesión social vive en un perfil de Chrome dedicado, no en Safari.** `runResearchCompetencia`
+ * abre Chrome real (research-competencia-browser.ts) con el perfil
+ * `~/.cos-agent/research-competencia-chrome-profile`. La PRIMERA vez (o cuando la sesión expire),
+ * Cal tiene que loguearse a mano en Instagram/Facebook/TikTok/X en ese perfil — correr
+ * `npm run research:chrome-login` (ventana visible, script interactivo) y persiste en disco entre
+ * corridas. Sin login ahí, el scraping social corre igual pero sin sesión (mismo síntoma que
+ * cualquier cuenta sin loguear: `research_competencia_scrape_empty`).
+ *
+ * ⚠️ Reemplaza el diseño anterior (leer Cookies.binarycookies de Safari con Full Disk Access vía
+ * `node-fda`) — descartado 2026-09-03: Chromium headless con cookie de sesión válida seguía
+ * devolviendo 0 posts (detección de bot), y Chrome real vía CDP es la respuesta ya validada en
+ * este repo para ese problema (mismo patrón que `boa-checkin`). Ya NO hace falta FDA para esto —
+ * el binario sigue invocándose vía `node-fda` (`research:now` en `package.json`) porque no hace
+ * daño tenerlo y evita otro cambio de infra sin necesidad real, no porque siga siendo requisito.
  *
  * Ya NO hace falta `op run`: sin el Cookie Broker (Cloudflare KV) de por medio, las únicas
  * credenciales que este script necesita (OPENROUTER_API_KEY, ELEVENLABS_API_KEY,
@@ -67,10 +61,8 @@ async function main(): Promise<void> {
   const timeframeDias = Number.isFinite(timeframeDiasRaw) ? timeframeDiasRaw : undefined;
   const entidadIds = entidadesArg ? entidadesArg.split("=")[1].split(",").map((s) => s.trim()) : undefined;
 
-  const getCookies = makeResearchCompetenciaCookiesProvider();
-
   console.log("Corriendo research de competencia... (puede tardar entre 10 y 45 minutos)");
-  const result = await runResearchCompetencia({ timeframeDias, entidadIds, getCookies });
+  const result = await runResearchCompetencia({ timeframeDias, entidadIds });
   const html = formatSummaryHtml(result);
   console.log(stripHtmlTags(html));
 

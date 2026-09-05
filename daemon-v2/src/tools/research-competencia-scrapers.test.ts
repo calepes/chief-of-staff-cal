@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  parseInstagramPosts,
-  extractInstagramNodes,
+  parseInstagramGridItems,
+  parseInstagramPhotoAltDate,
+  type RawInstagramGridItem,
   parseTikTokPosts,
   extractTikTokNodes,
   parseDomPosts,
@@ -12,231 +13,101 @@ import {
 /** Handle de la cuenta scrapeada en los tests de extracción — el mismo en Instagram y TikTok. */
 const HANDLE = "altoke.bo";
 
-/** Nodo de post válido tal como aparece embebido en el JSON del timeline de Instagram. Incluye
- * `owner.username` porque el matcher exige validar autoría (ver comentario de `ownerUsernameMatches`
- * en la implementación) — sin este campo, `extractInstagramNodes` descarta el nodo aunque matchee
- * la forma. */
-const NODO_VALIDO = {
-  shortcode: "XYZ1",
-  taken_at_timestamp: 1700000000,
-  is_video: false,
-  display_url: "https://cdn.instagram.com/x.jpg",
-  edge_media_to_caption: { edges: [] },
-  owner: { username: HANDLE },
-};
-
 /** Envuelve `valor` en `n` objetos anidados (`{w0:{w1:{...{valor}}}}`) para simular la anidación
- * real de webpack/relay que produce Instagram alrededor del timeline. */
+ * real de webpack/relay que produce TikTok alrededor del timeline. */
 function wrapDeep(valor: unknown, n: number): unknown {
   let out = valor;
   for (let i = n - 1; i >= 0; i--) out = { [`w${i}`]: out };
   return out;
 }
 
-/** Texto de script tal como lo ve `extractInstagramNodes` — con el prefijo JS real antes del JSON,
- * ya que la función busca el primer `{` en vez de asumir que el script es JSON puro. Sin sufijo
- * después del JSON: `JSON.parse` es estricto y un `;` colgante rompería el parseo, igual que le
- * pasaría a la implementación real — el prefijo es lo único que `indexOf("{")` está pensado para
- * saltear. */
-function scriptTextFor(obj: unknown): string {
-  return `window.__additionalData = ${JSON.stringify(obj)}`;
-}
-
-describe("parseInstagramPosts", () => {
-  it("extrae caption, url, fecha y media de los nodos del perfil", () => {
-    const nodos = [
-      {
-        shortcode: "ABC123",
-        taken_at_timestamp: 1788307200, // 2026-09-01 en La Paz (UTC-4); es 2026-09-02T00:00Z
-        is_video: false,
-        display_url: "https://cdn.instagram.com/foto.jpg",
-        edge_media_to_caption: { edges: [{ node: { text: "Promo 2x1 en altoke" } }] },
-      },
-      {
-        shortcode: "DEF456",
-        taken_at_timestamp: 1788393600,
-        is_video: true,
-        video_url: "https://cdn.instagram.com/reel.mp4",
-        display_url: "https://cdn.instagram.com/thumb.jpg",
-        edge_media_to_caption: { edges: [] },
-      },
-    ];
-
-    const posts = parseInstagramPosts(nodos, "altoke.bo");
-
-    // Orden más-reciente-primero (IMPORTANTE 4): DEF456 es un día más nuevo que ABC123 aunque
-    // venga segundo en el array de nodos crudos — sale primero.
-    expect(posts).toHaveLength(2);
-    expect(posts[0]).toMatchObject({
-      platform: "instagram",
-      handle: "altoke.bo",
-      esVideo: true,
-      mediaUrls: ["https://cdn.instagram.com/reel.mp4"],
-      caption: "",
-    });
-    expect(posts[0].fecha).toBe("2026-09-02");
-    expect(posts[1]).toMatchObject({
-      platform: "instagram",
-      handle: "altoke.bo",
-      url: "https://www.instagram.com/p/ABC123/",
-      caption: "Promo 2x1 en altoke",
-      esVideo: false,
-      mediaUrls: ["https://cdn.instagram.com/foto.jpg"],
-    });
-    expect(posts[1].fecha).toBe("2026-09-01");
+describe("parseInstagramPhotoAltDate", () => {
+  it("parsea el patrón real 'Photo by {autor} on {Month DD, YYYY}. ...'", () => {
+    expect(parseInstagramPhotoAltDate("Photo by altoke on August 20, 2026. May be a meme of...")).toBe("2026-08-20");
   });
 
-  it("ignora nodos sin shortcode en vez de romper", () => {
-    expect(parseInstagramPosts([{ is_video: false }], "altoke.bo")).toEqual([]);
+  it("acepta día de un solo dígito sin cero a la izquierda en el texto original", () => {
+    expect(parseInstagramPhotoAltDate("Photo by altoke on September 1, 2026. May be...")).toBe("2026-09-01");
   });
 
-  it("ordena más-reciente-primero aunque los nodos crudos vengan desordenados (IMPORTANTE 4)", () => {
-    const posts = parseInstagramPosts(
-      [
-        { shortcode: "VIEJO", taken_at_timestamp: 1700000000, is_video: false, display_url: "https://cdn/viejo.jpg" },
-        { shortcode: "NUEVO", taken_at_timestamp: 1700259200, is_video: false, display_url: "https://cdn/nuevo.jpg" }, // +3 días
-      ],
-      "altoke.bo",
-    );
-    expect(posts.map((p) => p.url)).toEqual([
-      "https://www.instagram.com/p/NUEVO/",
-      "https://www.instagram.com/p/VIEJO/",
-    ]);
+  it("null si el alt no sigue el patrón (ej. es el caption real de un reel)", () => {
+    expect(parseInstagramPhotoAltDate("💰👀 ¿Duplicar tus ahorros? #altoke")).toBeNull();
   });
 
-  it("conserva los posts sin fecha parseable, pero al final del orden (IMPORTANTE 4)", () => {
-    const posts = parseInstagramPosts(
-      [
-        { shortcode: "SINFECHA" }, // sin taken_at_timestamp
-        { shortcode: "CONFECHA", taken_at_timestamp: 1700000000, is_video: false, display_url: "https://cdn/x.jpg" },
-      ],
-      "altoke.bo",
-    );
-    expect(posts.map((p) => p.url)).toEqual([
-      "https://www.instagram.com/p/CONFECHA/",
-      "https://www.instagram.com/p/SINFECHA/",
-    ]);
+  it("null con string vacío", () => {
+    expect(parseInstagramPhotoAltDate("")).toBeNull();
   });
 
-  it("MENOR 5: extrae todas las slides de un carrusel (edge_sidecar_to_children)", () => {
-    const nodos = [
-      {
-        shortcode: "CARR1",
-        taken_at_timestamp: 1700000000,
-        is_video: false,
-        display_url: "https://cdn.instagram.com/portada.jpg",
-        edge_media_to_caption: { edges: [{ node: { text: "Promo con condiciones en las slides 2 y 3" } }] },
-        edge_sidecar_to_children: {
-          edges: [
-            { node: { display_url: "https://cdn.instagram.com/slide1.jpg" } },
-            { node: { display_url: "https://cdn.instagram.com/slide2.jpg" } },
-            { node: { display_url: "https://cdn.instagram.com/slide3.jpg" } },
-          ],
-        },
-      },
-    ];
-
-    const posts = parseInstagramPosts(nodos, "altoke.bo");
-
-    expect(posts[0].mediaUrls).toEqual([
-      "https://cdn.instagram.com/slide1.jpg",
-      "https://cdn.instagram.com/slide2.jpg",
-      "https://cdn.instagram.com/slide3.jpg",
-    ]);
-  });
-
-  it("sin edge_sidecar_to_children, sigue usando el único display_url/video_url de siempre", () => {
-    const posts = parseInstagramPosts(
-      [{ shortcode: "SOLO1", is_video: false, display_url: "https://cdn.instagram.com/x.jpg" }],
-      "altoke.bo",
-    );
-    expect(posts[0].mediaUrls).toEqual(["https://cdn.instagram.com/x.jpg"]);
-  });
-
-  it("edge_sidecar_to_children vacío o con forma inesperada no rompe — cae al comportamiento single-media", () => {
-    const posts = parseInstagramPosts(
-      [
-        {
-          shortcode: "RARO1",
-          is_video: false,
-          display_url: "https://cdn.instagram.com/x.jpg",
-          edge_sidecar_to_children: { edges: [] },
-        },
-      ],
-      "altoke.bo",
-    );
-    expect(posts[0].mediaUrls).toEqual(["https://cdn.instagram.com/x.jpg"]);
+  it("null si el mes no es un mes en inglés válido", () => {
+    expect(parseInstagramPhotoAltDate("Photo by altoke on Septiembre 1, 2026. May be...")).toBeNull();
   });
 });
 
-describe("extractInstagramNodes", () => {
-  it("encuentra un nodo anidado dentro del tope de profundidad", () => {
-    // El nodo real vive envuelto en unos pocos objetos wrapper (webpack/relay) — caso típico.
-    const scriptTexts = [scriptTextFor(wrapDeep(NODO_VALIDO, 3))];
-
-    const { nodos, diagnostics } = extractInstagramNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([NODO_VALIDO]);
-    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 1 });
-  });
-
-  it("NO encuentra un nodo a más de 8 niveles de profundidad — documenta el tope de MAX_WALK_DEPTH", () => {
-    // Con el nodo envuelto en 9 objetos, el recorrido lo visita en profundidad 9 (>8) y corta
-    // antes de revisar si tiene `shortcode` — se pierde en silencio salvo por el diagnóstico:
-    // scriptsConPatron queda en 1 (el script SÍ tenía el literal "shortcode", solo que dentro del
-    // string JSON, no como propiedad alcanzada) pero scriptsConNodosValidos queda en 0. Si algún
-    // día la estructura real de Instagram anida más profundo que esto, el síntoma en producción es
-    // exactamente esta combinación — ver el comentario de MAX_WALK_DEPTH en la implementación.
-    const scriptTexts = [scriptTextFor(wrapDeep(NODO_VALIDO, 9))];
-
-    const { nodos, diagnostics } = extractInstagramNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
-    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 0 });
-  });
-
-  it("encuentra el nodo justo en el límite (8 niveles de profundidad)", () => {
-    const scriptTexts = [scriptTextFor(wrapDeep(NODO_VALIDO, 8))];
-
-    const { nodos } = extractInstagramNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([NODO_VALIDO]);
-  });
-
-  it("ignora un script sin JSON válido en vez de romper, y no lo cuenta como productivo", () => {
-    const scriptTexts = ["window.foo = {not valid json here shortcode"];
-
-    const { nodos, diagnostics } = extractInstagramNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([]);
-    expect(diagnostics).toEqual({ scriptsConPatron: 1, scriptsConNodosValidos: 0 });
-  });
-
-  it("GRAVE: descarta un post recomendado de otra cuenta mezclado en el mismo payload", () => {
-    // El payload del perfil trae también contenido sugerido/relacionado con la misma forma
-    // (shortcode+is_video) pero de otro `owner.username` — sin validar autoría, este nodo se
-    // atribuiría igual al handle scrapeado. Ver el comentario de `ownerUsernameMatches`.
-    const nodoAjeno = {
-      shortcode: "AJENO1",
-      taken_at_timestamp: 1700000000,
-      is_video: false,
-      display_url: "https://cdn.instagram.com/ajeno.jpg",
-      owner: { username: "otra-cuenta" },
+describe("parseInstagramGridItems", () => {
+  function item(overrides: Partial<RawInstagramGridItem> = {}): RawInstagramGridItem {
+    return {
+      href: "/altoke.bo/p/ABC123/",
+      imgSrc: "https://cdn.instagram.com/foto.jpg",
+      imgAlt: "Photo by altoke on August 20, 2026. May be a meme of...",
+      ...overrides,
     };
-    const scriptTexts = [scriptTextFor({ propio: NODO_VALIDO, sugerido: nodoAjeno })];
+  }
 
-    const { nodos } = extractInstagramNodes(scriptTexts, HANDLE);
-
-    expect(nodos).toEqual([NODO_VALIDO]);
+  it("una FOTO: fecha parseada del alt, caption vacío (el alt es visión auto-generada, no un caption real)", () => {
+    const posts = parseInstagramGridItems([item()], HANDLE);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({
+      platform: "instagram", handle: HANDLE,
+      url: "https://www.instagram.com/altoke.bo/p/ABC123/",
+      fecha: "2026-08-20", caption: "", esVideo: false,
+      mediaUrls: ["https://cdn.instagram.com/foto.jpg"],
+    });
   });
 
-  it("descarta un nodo con la forma correcta pero sin owner.username (autor no verificable)", () => {
-    const sinOwner = { shortcode: "SINOWNER", is_video: false };
-    const scriptTexts = [scriptTextFor(sinOwner)];
+  it("un REEL: el alt ES el caption real completo, pero sin fecha (el patrón de fecha solo existe en fotos)", () => {
+    const caption = "💰👀 ¿Duplicar tus ahorros? Ahorra desde Bs 200. #altoke #bolivia";
+    const posts = parseInstagramGridItems(
+      [item({ href: "/altoke.bo/reel/Dc30ov5AcJ4/", imgAlt: caption })],
+      HANDLE,
+    );
+    expect(posts[0]).toMatchObject({ caption, fecha: null, esVideo: false });
+  });
 
-    const { nodos } = extractInstagramNodes(scriptTexts, HANDLE);
+  it("esVideo SIEMPRE false, incluso para un reel — mediaUrls es la miniatura, no hay URL de video real", () => {
+    const posts = parseInstagramGridItems([item({ href: "/altoke.bo/reel/X/", imgAlt: "caption real" })], HANDLE);
+    expect(posts[0].esVideo).toBe(false);
+    expect(posts[0].mediaUrls).toEqual(["https://cdn.instagram.com/foto.jpg"]);
+  });
 
-    expect(nodos).toEqual([]);
+  it("caption vacío si el alt de una foto es null", () => {
+    const posts = parseInstagramGridItems([item({ imgAlt: null })], HANDLE);
+    expect(posts[0].caption).toBe("");
+    expect(posts[0].fecha).toBeNull();
+  });
+
+  it("descarta un ítem cuyo primer segmento de href no matchea el handle (fail-closed)", () => {
+    const posts = parseInstagramGridItems([item({ href: "/otra-cuenta/p/X/" })], HANDLE);
+    expect(posts).toEqual([]);
+  });
+
+  it("preserva el orden del grid tal cual — NO reordena por fecha (a diferencia de los demás parsers)", () => {
+    // Reel primero (sin fecha), foto después (con fecha) — si se aplicara sortPostsByFechaDesc el
+    // reel iría al final. Acá tiene que quedar en el mismo orden de entrada.
+    const posts = parseInstagramGridItems(
+      [
+        item({ href: "/altoke.bo/reel/R1/", imgAlt: "caption reel" }),
+        item({ href: "/altoke.bo/p/P1/", imgAlt: "Photo by altoke on August 01, 2026. ..." }),
+      ],
+      HANDLE,
+    );
+    expect(posts.map((p) => p.url)).toEqual([
+      "https://www.instagram.com/altoke.bo/reel/R1/",
+      "https://www.instagram.com/altoke.bo/p/P1/",
+    ]);
+  });
+
+  it("lista vacía sin ítems", () => {
+    expect(parseInstagramGridItems([], HANDLE)).toEqual([]);
   });
 });
 

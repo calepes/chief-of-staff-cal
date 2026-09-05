@@ -1,6 +1,6 @@
+import type { BrowserContext } from "playwright";
 import { describeImage, analyzeVideo, type VideoAnalysis } from "./research-competencia-media.js";
 import type { EntityConfig } from "./research-competencia-entities.js";
-import type { StructuredCookie } from "./cookie-jar.js";
 import { scrapeInstagram, scrapeTikTok, scrapeFacebook, scrapeX } from "./research-competencia-scrapers.js";
 
 export type SocialPlatform = "instagram" | "tiktok" | "facebook" | "x";
@@ -225,11 +225,15 @@ export function formatSocialText(posts: EnrichedPost[]): string {
     : texto;
 }
 
-export type ScraperFn = (handle: string, cookies: StructuredCookie[]) => Promise<SocialPost[]>;
+export type ScraperFn = (handle: string, context: BrowserContext) => Promise<SocialPost[]>;
 
 export interface FetchSocialDeps {
   scrapers?: Record<SocialPlatform, ScraperFn>;
-  getCookies?: (hostname: string) => Promise<StructuredCookie[]>;
+  /** Sesión de Chrome REAL ya abierta (research-competencia-browser.ts), compartida por las 6
+   * entidades de la corrida — el orquestador la abre una vez y la pasa acá. Requerido: sin browser
+   * no hay forma de scrapear, y el orquestador ya decide ANTES de llamar a esta función si hay uno
+   * disponible (si `openResearchBrowserSession` falló, ni siquiera llama a `fetchSocialText`). */
+  context: BrowserContext;
   enrichFn?: (posts: SocialPost[]) => Promise<EnrichedPost[]>;
   ahora?: Date;
   /** Reloj inyectable para el presupuesto de tiempo por entidad — permite tests deterministas
@@ -244,13 +248,6 @@ const DEFAULT_SCRAPERS: Record<SocialPlatform, ScraperFn> = {
   tiktok: scrapeTikTok,
   facebook: scrapeFacebook,
   x: scrapeX,
-};
-
-const HOSTNAMES: Record<SocialPlatform, string> = {
-  instagram: "instagram.com",
-  tiktok: "tiktok.com",
-  facebook: "facebook.com",
-  x: "x.com",
 };
 
 // Presupuesto de tiempo por ENTIDAD (no por handle) — sin esto, la multiplicación ya documentada
@@ -319,11 +316,6 @@ export function interleaveByPlatform<T extends { platform: SocialPlatform }>(pos
  * sería indistinguible de una cuenta bloqueada — en un cron desatendido eso obliga a leer código
  * para diagnosticar. Todos identifican plataforma+handle.
  *
- * Log adicional cuando una plataforma corre con 0 cookies (`_no_cookies`) — distinto de "corrió y
- * no encontró posts". Sin esa señal, un Cookie Broker desincronizado (Safari deslogueada, sync
- * rota) produce el MISMO resultado que una cuenta tranquila esta semana, y el reporte a Cal diría
- * "sin novedades" en los dos casos cuando solo el primero merece revisar el Cookie Broker.
- *
  * Presupuesto de tiempo por entidad (`PER_ENTITY_BUDGET_MS`, ver comentario ahí) — al excederse,
  * corta y devuelve lo ya juntado en vez de seguir indefinidamente.
  *
@@ -339,41 +331,20 @@ export function interleaveByPlatform<T extends { platform: SocialPlatform }>(pos
 export async function fetchSocialText(
   entity: EntityConfig,
   timeframeDias: number,
-  deps: FetchSocialDeps = {},
+  deps: FetchSocialDeps,
 ): Promise<string | null> {
   if (!entity.social) return null;
   const social = entity.social;
   const scrapers = deps.scrapers ?? DEFAULT_SCRAPERS;
-  const getCookies = deps.getCookies ?? (async () => []);
   const enrichFn = deps.enrichFn ?? ((posts: SocialPost[]) => enrichPosts(posts));
   const nowFn = deps.nowMs ?? Date.now;
   const presupuestoMs = deps.presupuestoMs ?? PER_ENTITY_BUDGET_MS;
   const startedAt = nowFn();
 
   const todos: EnrichedPost[] = [];
-  platformLoop: for (const platform of Object.keys(HOSTNAMES) as SocialPlatform[]) {
+  platformLoop: for (const platform of Object.keys(social) as SocialPlatform[]) {
     const handles = social[platform];
     if (handles.length === 0) continue;
-
-    // Cookies UNA VEZ por plataforma, reusadas por todos sus handles — no una vez por handle.
-    // bancosol-altoke tiene 2 cuentas de Instagram: pedir la cookie por handle dispararía 2
-    // lookups idénticos al mismo hostname (mismo dominio en el Cookie Broker, mismo resultado).
-    // Si getCookies pega contra el KV real (a diferencia del stub gratis que usan los tests), eso
-    // es un round-trip desperdiciado por cada handle extra de la misma red — cachear por
-    // plataforma lo evita sin que el caller tenga que preocuparse.
-    let cookies: StructuredCookie[];
-    try {
-      cookies = await getCookies(HOSTNAMES[platform]);
-    } catch (err) {
-      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_cookies_error", entityId: entity.id, platform, err: String(err) }));
-      cookies = [];
-    }
-    if (cookies.length === 0) {
-      // Se loguea siempre que quede vacío, sin importar la causa (sin getCookies real, KV vacío,
-      // o el catch de arriba) — las tres comparten el mismo síntoma: si la cuenta requiere sesión,
-      // el scraping de esta plataforma va a chocar contra el muro de login.
-      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_no_cookies", entityId: entity.id, platform }));
-    }
 
     for (const handle of handles) {
       if (nowFn() - startedAt > presupuestoMs) {
@@ -383,7 +354,7 @@ export async function fetchSocialText(
 
       let posts: SocialPost[];
       try {
-        posts = await scrapers[platform](handle, cookies);
+        posts = await scrapers[platform](handle, deps.context);
       } catch (err) {
         console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_scrape_error", platform, handle, err: String(err) }));
         continue;

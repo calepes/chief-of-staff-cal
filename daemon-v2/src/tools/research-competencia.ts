@@ -2,16 +2,15 @@ import { getEntity, ENTITIES } from "./research-competencia-entities.js";
 import { fetchIosAppInfo, fetchAndroidAppInfo, fetchSiteText, chunkText } from "./research-competencia-sources.js";
 import { buildEntityPrompt, runEntityAgent, parseAgentJson, type MechanicalFacts } from "./research-competencia-agent.js";
 import { fetchSocialText } from "./research-competencia-social.js";
+import { fetchAdsText } from "./research-competencia-ads.js";
+import { openResearchBrowserSession, type ResearchBrowserSession } from "./research-competencia-browser.js";
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
 import { nowInLaPaz } from "../journal-capture.js";
 import type { EntityRunResult, RunResult } from "./research-competencia-types.js";
-import type { StructuredCookie } from "./cookie-jar.js";
 
 export interface RunOpts {
   timeframeDias?: number;
   entidadIds?: string[];
-  /** Proveedor de cookies del Cookie Broker. Sin él, el scraping social corre sin sesión. */
-  getCookies?: (hostname: string) => Promise<StructuredCookie[]>;
 }
 
 // Deadline duro del scraping social — carrera contra un timer, no un presupuesto chequeado entre
@@ -58,6 +57,39 @@ export const SOCIAL_TIMEOUT_MS = 10 * 60 * 1000;
 // background hasta que él mismo termine o falle (Node no cancela promesas de verdad).
 const AGENT_TIMEOUT_MS = 5 * 60 * 1000;
 
+// Deadline del bloque de publicidad (research-competencia-ads.ts) — mismo patrón (`Promise.race`
+// contra un timer) que el social y el del agente, por el mismo motivo: `fetch()` de Node no trae
+// timeout propio, así que un `await` colgado ahí bloquearía el `for` secuencial de entidades para
+// siempre. El caso normal es rápido (1-2 anunciantes por entidad, throttle de 2,5s entre pedidos,
+// ver THROTTLE_MS en research-competencia-ads.ts) — sin descargas ni navegador de por medio, muy
+// por debajo de lo que tarda el scraping social. 2 minutos cubre ese caso con margen generoso sin
+// dejar una entidad colgada indefinidamente si Google deja de responder.
+export const ADS_TIMEOUT_MS = 2 * 60 * 1000;
+
+/**
+ * Envuelve `promise` con un deadline que resuelve `null` y loguea `msg` si `promise` no resolvió a
+ * tiempo. Node no cancela promesas de verdad, así que sin `clearTimeout` acá el timer sigue vivo
+ * aunque `promise` gane la carrera — y dispara igual al vencer el plazo original, logueando un
+ * "timeout" fantasma para una entidad cuyo research ya terminó rápido y bien.
+ *
+ * Encontrado en vivo el 2026-09-03 revisando una corrida real: las 6 entidades mostraban
+ * `research_competencia_social_timeout` en el log, pero los timestamps no cuadraban con un cuelgue
+ * real — el `.finally()` que faltaba acá es la causa. Compartido entre el bloque social y el de ads
+ * (research-competencia-ads.ts) para no repetir el mismo bug al sumar el segundo timeout.
+ */
+function raceWithLoggedTimeout<T>(promise: Promise<T | null>, ms: number, msg: string, entityId: string): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        console.log(JSON.stringify({ ts: Date.now(), msg, entityId, timeoutMs: ms }));
+        resolve(null);
+      }, ms);
+    }),
+  ]);
+}
+
 // Guard en proceso contra corridas superpuestas dentro del MISMO proceso de Node — dos llamadas
 // a runResearchCompetencia() en el mismo proceso escribirían sobre las mismas páginas de estado
 // de Notion. Este módulo corre hoy SOLO dentro del script standalone `research:now`
@@ -78,28 +110,23 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     throw new Error("Ya hay un research de competencia en curso — esperá a que termine antes de arrancar otro.");
   }
   researchInFlight = true;
+  // Sesión de Chrome ÚNICA para toda la corrida (research-competencia-browser.ts) — se abre acá,
+  // ANTES del loop de entidades, y se pasa a cada `fetchSocialText`; se cierra en el `finally` de
+  // abajo sin importar cómo termine la corrida. Si falla abrir Chrome (binario no instalado,
+  // puerto CDP que nunca respondió), el research SIGUE igual con Fase 1 + ads — solo el bloque
+  // social queda sin datos esta corrida (mismo criterio de resiliencia que cualquier otra fuente
+  // opcional acá: un componente roto no tumba a los demás).
+  let browserSession: ResearchBrowserSession | null = null;
   try {
     const timeframeDias = opts.timeframeDias ?? 7;
     const targetIds = opts.entidadIds?.length ? opts.entidadIds : ENTITIES.map((e) => e.id);
     const fecha = nowInLaPaz().slice(0, 10);
 
-    // Cuenta cookies acá, envolviendo opts.getCookies, en vez de tocar
-    // research-competencia-social.ts — ese módulo ya tiene su propio log por-plataforma
-    // (`research_competencia_social_no_cookies`) diseñado para diagnóstico fino en el log
-    // estructurado; lo que falta acá es una señal AGREGADA de toda la corrida que llegue al
-    // resumen de Telegram (el único canal de un cron desatendido — los logs a stdout no los ve
-    // nadie bajo launchd). Envolver en este nivel, sin tocar fetchSocialText, mantiene ese
-    // módulo (con sus try/catch deliberadamente resilientes por plataforma/handle) intacto.
-    let socialCookiesIntentos = 0;
-    let socialCookiesEncontradas = 0;
-    const trackedGetCookies = opts.getCookies
-      ? async (hostname: string) => {
-          socialCookiesIntentos++;
-          const cookies = await opts.getCookies!(hostname);
-          if (cookies.length > 0) socialCookiesEncontradas++;
-          return cookies;
-        }
-      : undefined;
+    try {
+      browserSession = await openResearchBrowserSession();
+    } catch (err) {
+      console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_browser_open_failed", err: String(err) }));
+    }
 
     const resultados: EntityRunResult[] = [];
     // Cada entidad dispara un agente SDK one-off (maxTurns:20, WebSearch) — en una prueba real
@@ -126,30 +153,35 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
       }
       try {
         const baseline = await readEntityState(entity.id);
-        const socialTextPromise = fetchSocialText(entity, timeframeDias, { getCookies: trackedGetCookies }).catch((err) => {
-          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_error", entityId: entity.id, err: String(err) }));
+        const socialTextPromise = browserSession
+          ? fetchSocialText(entity, timeframeDias, { context: browserSession.context }).catch((err) => {
+              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_error", entityId: entity.id, err: String(err) }));
+              return null;
+            })
+          : Promise.resolve(null);
+        const socialTextWithDeadline = raceWithLoggedTimeout(
+          socialTextPromise, SOCIAL_TIMEOUT_MS, "research_competencia_social_timeout", entity.id,
+        );
+        const adsTextPromise = fetchAdsText(entity, timeframeDias).catch((err) => {
+          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_ads_error", entityId: entity.id, err: String(err) }));
           return null;
         });
-        const socialTextWithDeadline = Promise.race([
-          socialTextPromise,
-          new Promise<null>((resolve) => {
-            setTimeout(() => {
-              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_timeout", entityId: entity.id, timeoutMs: SOCIAL_TIMEOUT_MS }));
-              resolve(null);
-            }, SOCIAL_TIMEOUT_MS);
-          }),
-        ]);
-        const [ios, android, siteText, socialText] = await Promise.all([
+        const adsTextWithDeadline = raceWithLoggedTimeout(
+          adsTextPromise, ADS_TIMEOUT_MS, "research_competencia_ads_timeout", entity.id,
+        );
+        const [ios, android, siteText, socialText, adsText] = await Promise.all([
           entity.ios ? fetchIosAppInfo(entity.ios) : Promise.resolve(null),
           entity.android ? fetchAndroidAppInfo(entity.android.packageName) : Promise.resolve(null),
           entity.siteUrl ? fetchSiteText(entity.siteUrl) : Promise.resolve(null),
           socialTextWithDeadline,
+          adsTextWithDeadline,
         ]);
         const facts: MechanicalFacts = {
           ios: ios ? { version: ios.version, rating: ios.rating, releaseNotes: ios.releaseNotes } : null,
           android: android ? { version: android.version, rating: android.rating, releaseNotes: android.releaseNotes } : null,
           siteText,
           socialText,
+          adsText,
         };
         const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
         // BLOQUEANTE 2 (revisión de salud, 2026-09-03): deadline externo contra `AGENT_TIMEOUT_MS`
@@ -227,26 +259,23 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     }
 
     const totalHallazgos = resultados.reduce((sum, r) => sum + r.hallazgos.length, 0);
-    return { fecha, timeframeDias, entidades: resultados, totalHallazgos, informeUrl, socialCookiesIntentos, socialCookiesEncontradas };
+    return { fecha, timeframeDias, entidades: resultados, totalHallazgos, informeUrl, socialBrowserAvailable: browserSession !== null };
   } finally {
+    await browserSession?.close().catch(() => {});
     researchInFlight = false;
   }
 }
 
 export function formatSummaryHtml(result: RunResult): string {
   const lines = [`🔎 <b>Research de competencia</b> — ${result.fecha} (últimos ${result.timeframeDias} días)`];
-  // Bloqueante 2 (revisión de salud): con 0 cookies, el research corre igual y emite "sin
-  // novedades" — texto idéntico al de una semana tranquila real. Bajo un cron desatendido, el
-  // resumen de Telegram es el ÚNICO canal (los logs `research_competencia_cookies_read_failed`/
-  // `_social_no_cookies` van a stdout, que nadie mira bajo launchd), así que la advertencia tiene
-  // que vivir acá, no solo en el log estructurado. `socialCookiesIntentos > 0` confirma que hubo
-  // al menos un intento real de leer cookies (evita falsear la advertencia si algún caller no
-  // pasa getCookies, ej. tests) — `=== 0 encontradas` con intentos > 0 significa que TODAS las
-  // plataformas de TODAS las entidades corrieron sin sesión, algo que una semana tranquila normal
-  // no produce (algún handle de las 6 entidades siempre tiene cookie si Safari/FDA están sanos).
-  if (result.socialCookiesIntentos > 0 && result.socialCookiesEncontradas === 0) {
+  // Bloqueante 2 (revisión de salud), adaptado al diseño de Chrome real: si el browser no pudo
+  // abrirse, el research corre igual y emite "sin novedades" — texto idéntico al de una semana
+  // tranquila real. Bajo un cron desatendido, el resumen de Telegram es el ÚNICO canal (el log
+  // `research_competencia_browser_open_failed` va a stdout, que nadie mira bajo launchd), así que
+  // la advertencia tiene que vivir acá, no solo en el log estructurado.
+  if (!result.socialBrowserAvailable) {
     lines.push(
-      "⚠️ 0 cookies de sesión para redes sociales en toda la corrida — Instagram/TikTok/Facebook/X probablemente corrieron contra el muro de login. Los hallazgos de esta corrida NO reflejan RRSS. Revisar Full Disk Access (node-fda) o la sesión de Safari.",
+      "⚠️ No se pudo abrir Chrome para el scraping social esta corrida — Instagram/TikTok/Facebook/X quedaron sin datos. Los hallazgos de esta corrida NO reflejan RRSS. Revisar que Google Chrome esté instalado y el perfil dedicado (~/.cos-agent/research-competencia-chrome-profile).",
     );
   }
   if (result.totalHallazgos === 0) {

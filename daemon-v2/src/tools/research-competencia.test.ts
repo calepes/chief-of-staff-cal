@@ -20,11 +20,19 @@ vi.mock("./research-competencia-notion.js", () => ({
 vi.mock("./research-competencia-social.js", () => ({
   fetchSocialText: vi.fn(async () => "[instagram @altoke.bo] Promo nueva"),
 }));
+vi.mock("./research-competencia-ads.js", () => ({
+  fetchAdsText: vi.fn(async () => "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x"),
+}));
+vi.mock("./research-competencia-browser.js", () => ({
+  openResearchBrowserSession: vi.fn(async () => ({ context: {}, close: vi.fn(async () => {}) })),
+}));
 
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
 import { buildEntityPrompt, runEntityAgent, parseAgentJson } from "./research-competencia-agent.js";
 import { fetchSocialText } from "./research-competencia-social.js";
-import { runResearchCompetencia, formatSummaryHtml, SOCIAL_TIMEOUT_MS } from "./research-competencia.js";
+import { fetchAdsText } from "./research-competencia-ads.js";
+import { openResearchBrowserSession } from "./research-competencia-browser.js";
+import { runResearchCompetencia, formatSummaryHtml, SOCIAL_TIMEOUT_MS, ADS_TIMEOUT_MS } from "./research-competencia.js";
 
 const mockReadState = vi.mocked(readEntityState);
 const mockWriteState = vi.mocked(writeEntityState);
@@ -32,6 +40,7 @@ const mockAppendCambios = vi.mocked(appendCambios);
 const mockCreateInforme = vi.mocked(createInformePage);
 const mockRunAgent = vi.mocked(runEntityAgent);
 const mockParseJson = vi.mocked(parseAgentJson);
+const mockOpenBrowser = vi.mocked(openResearchBrowserSession);
 
 describe("runResearchCompetencia", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -161,41 +170,69 @@ describe("runResearchCompetencia", () => {
     expect(facts.socialText).toBe("[instagram @altoke.bo] Promo nueva");
   });
 
-  it("sin getCookies en opts, no cuenta intentos de cookies (bloqueante 2)", async () => {
+  it("pasa el texto de ads al prompt del agente", async () => {
+    await runResearchCompetencia({ entidadIds: ["takenos"] });
+    const facts = vi.mocked(buildEntityPrompt).mock.calls[0][2];
+    expect(facts.adsText).toBe("[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x");
+  });
+
+  it("una falla del bloque de ads no corta la corrida de la entidad", async () => {
+    vi.mocked(fetchAdsText).mockRejectedValueOnce(new Error("boom"));
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
-    expect(result.socialCookiesIntentos).toBe(0);
-    expect(result.socialCookiesEncontradas).toBe(0);
+    expect(result.entidades[0].error).toBeUndefined();
   });
 
-  it("cuenta intentos y hallazgos de cookies sociales a través de todos los llamados a getCookies (bloqueante 2)", async () => {
-    const getCookies = vi.fn(async (hostname: string) =>
-      hostname === "instagram.com" ? [{ name: "a", value: "b", domain: ".instagram.com", path: "/" }] : [],
-    );
-    vi.mocked(fetchSocialText).mockImplementationOnce(async (_entity, _timeframeDias, deps) => {
-      await deps?.getCookies?.("instagram.com");
-      await deps?.getCookies?.("tiktok.com");
-      return "texto";
-    });
+  it("un bloque de ads colgado no traba la entidad — corta al deadline y sigue con adsText null", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetchAdsText).mockImplementationOnce(() => new Promise(() => {})); // nunca resuelve
+      const resultPromise = runResearchCompetencia({ entidadIds: ["takenos"] });
+      await vi.advanceTimersByTimeAsync(ADS_TIMEOUT_MS + 1);
+      const result = await resultPromise;
 
-    const result = await runResearchCompetencia({ entidadIds: ["takenos"], getCookies });
-
-    expect(result.socialCookiesIntentos).toBe(2);
-    expect(result.socialCookiesEncontradas).toBe(1);
+      expect(result.entidades[0].error).toBeUndefined();
+      const facts = vi.mocked(buildEntityPrompt).mock.calls[0][2];
+      expect(facts.adsText).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("un getCookies que tira sigue contando el intento pero no el hallazgo", async () => {
-    const getCookies = vi.fn(async () => {
-      throw new Error("FDA rota");
-    });
-    vi.mocked(fetchSocialText).mockImplementationOnce(async (_entity, _timeframeDias, deps) => {
-      await deps?.getCookies?.("instagram.com").catch(() => []);
-      return null;
-    });
+  it("abre el browser UNA vez para toda la corrida (no una por entidad) y lo cierra al terminar", async () => {
+    await runResearchCompetencia({ entidadIds: ["takenos", "meru"] });
+    expect(mockOpenBrowser).toHaveBeenCalledTimes(1);
+    const session = await mockOpenBrowser.mock.results[0].value;
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
 
-    const result = await runResearchCompetencia({ entidadIds: ["takenos"], getCookies });
+  it("pasa el mismo context de la sesión a cada llamada de fetchSocialText", async () => {
+    await runResearchCompetencia({ entidadIds: ["takenos", "meru"] });
+    const session = await mockOpenBrowser.mock.results[0].value;
+    const contexts = vi.mocked(fetchSocialText).mock.calls.map(([, , deps]) => deps.context);
+    expect(contexts).toEqual([session.context, session.context]);
+  });
 
-    expect(result.socialCookiesIntentos).toBe(1);
-    expect(result.socialCookiesEncontradas).toBe(0);
+  it("resultado trae socialBrowserAvailable:true cuando el browser abrió bien", async () => {
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+    expect(result.socialBrowserAvailable).toBe(true);
+  });
+
+  it("si el browser no puede abrirse, la corrida sigue sin social pero el resto funciona", async () => {
+    mockOpenBrowser.mockRejectedValueOnce(new Error("Chrome no encontrado"));
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+
+    expect(result.socialBrowserAvailable).toBe(false);
+    expect(result.entidades[0].error).toBeUndefined();
+    expect(fetchSocialText).not.toHaveBeenCalled();
+    const facts = vi.mocked(buildEntityPrompt).mock.calls[0][2];
+    expect(facts.socialText).toBeNull();
+  });
+
+  it("cierra el browser aunque una entidad falle en el medio", async () => {
+    mockRunAgent.mockRejectedValueOnce(new Error("boom"));
+    await runResearchCompetencia({ entidadIds: ["takenos", "meru"] });
+    const session = await mockOpenBrowser.mock.results[0].value;
+    expect(session.close).toHaveBeenCalledTimes(1);
   });
 
   it("una falla del scraping social no corta la corrida de la entidad", async () => {
@@ -232,18 +269,18 @@ describe("runResearchCompetencia", () => {
   });
 });
 
-// Campos de cookies con valores "sanos" por default (hubo intentos, y encontraron cookies) — así
-// cada test de abajo que no le importa el bloqueante 2 no dispara la advertencia sin querer.
-const COOKIES_OK = { socialCookiesIntentos: 4, socialCookiesEncontradas: 4 };
+// Browser "sano" por default — así cada test de abajo que no le importa la advertencia de Chrome
+// no la dispara sin querer.
+const BROWSER_OK = { socialBrowserAvailable: true };
 
 describe("formatSummaryHtml", () => {
   it("dice 'sin novedades' cuando no hay hallazgos", () => {
-    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, ...COOKIES_OK });
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, ...BROWSER_OK });
     expect(html).toContain("Sin novedades relevantes");
   });
 
   it("incluye el link al informe cuando existe", () => {
-    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, informeUrl: "https://notion.so/x", ...COOKIES_OK });
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, informeUrl: "https://notion.so/x", ...BROWSER_OK });
     expect(html).toContain("https://notion.so/x");
   });
 
@@ -252,7 +289,7 @@ describe("formatSummaryHtml", () => {
       fecha: "2026-08-31",
       timeframeDias: 7,
       totalHallazgos: 0,
-      ...COOKIES_OK,
+      ...BROWSER_OK,
       entidades: [
         { entityId: "takenos", entityNombre: "Takenos", primeraCorrida: true, hallazgos: [], snapshot: { entityId: "takenos", updatedAt: "" } },
       ],
@@ -261,34 +298,27 @@ describe("formatSummaryHtml", () => {
     expect(html).toContain("Takenos");
   });
 
-  it("sin advertencia de cookies cuando encontró al menos una", () => {
-    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialCookiesIntentos: 4, socialCookiesEncontradas: 1 });
-    expect(html).not.toContain("0 cookies de sesión");
+  it("sin advertencia de browser cuando abrió bien", () => {
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialBrowserAvailable: true });
+    expect(html).not.toContain("No se pudo abrir Chrome");
   });
 
-  it("sin advertencia de cookies cuando no hubo ningún intento (caller sin getCookies)", () => {
-    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialCookiesIntentos: 0, socialCookiesEncontradas: 0 });
-    expect(html).not.toContain("0 cookies de sesión");
+  it("advierte cuando el browser no pudo abrirse (bloqueante 2, adaptado a Chrome real)", () => {
+    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialBrowserAvailable: false });
+    expect(html).toContain("No se pudo abrir Chrome");
   });
 
-  it("advierte cuando hubo intentos de cookies pero ninguno encontró sesión (bloqueante 2)", () => {
-    const html = formatSummaryHtml({ fecha: "2026-08-31", timeframeDias: 7, entidades: [], totalHallazgos: 0, socialCookiesIntentos: 6, socialCookiesEncontradas: 0 });
-    expect(html).toContain("0 cookies de sesión");
-    expect(html).toContain("Full Disk Access");
-  });
-
-  it("la advertencia de cookies aparece aunque también haya hallazgos reales", () => {
+  it("la advertencia de browser aparece aunque también haya hallazgos reales", () => {
     const html = formatSummaryHtml({
       fecha: "2026-08-31",
       timeframeDias: 7,
       totalHallazgos: 1,
-      socialCookiesIntentos: 6,
-      socialCookiesEncontradas: 0,
+      socialBrowserAvailable: false,
       entidades: [
         { entityId: "takenos", entityNombre: "Takenos", primeraCorrida: false, hallazgos: [{ dimension: "Producto", descripcion: "x", fuente: "" }], snapshot: { entityId: "takenos", updatedAt: "" } },
       ],
     });
-    expect(html).toContain("0 cookies de sesión");
+    expect(html).toContain("No se pudo abrir Chrome");
     expect(html).toContain("1 hallazgo");
   });
 });

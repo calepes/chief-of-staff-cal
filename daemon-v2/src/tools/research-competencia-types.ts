@@ -50,14 +50,16 @@ export interface RunResult {
   totalHallazgos: number;
   informeUrl?: string;
   /**
-   * Cuántas veces se pidieron cookies de redes sociales durante la corrida (una vez por
-   * plataforma con handles configurados, por entidad) y en cuántas de esas se obtuvo al menos
-   * una cookie. Señal para `formatSummaryHtml`: si `socialCookiesIntentos > 0` y
-   * `socialCookiesEncontradas === 0`, TODAS las plataformas corrieron sin sesión — lectura de
-   * cookies rota (falta FDA, sesión de Safari vencida), no "semana tranquila". Ver el comentario
-   * en runResearchCompetencia (research-competencia.ts) para por qué se mide acá y no en
-   * research-competencia-social.ts.
+   * `false` si `openResearchBrowserSession` (research-competencia-browser.ts) falló esta corrida
+   * (Chrome no instalado, puerto CDP que nunca respondió, etc.) — en ese caso NINGUNA entidad tuvo
+   * scraping social, y `formatSummaryHtml` lo advierte explícito: bajo un cron desatendido, el
+   * resumen de Telegram es el único canal que Cal realmente ve (los logs a stdout no los mira
+   * nadie bajo launchd). Reemplaza a los contadores `socialCookiesIntentos`/`socialCookiesEncontradas`
+   * del diseño anterior (lectura de cookies de Safari) — con Chrome real + perfil dedicado ya no
+   * hay cookies que contar, solo "¿pudo abrir el browser o no?". No cubre el caso más sutil de
+   * "el browser abrió bien pero cada plataforma devolvió 0 posts por detección de bot" — ese sigue
+   * visible solo en el log (`research_competencia_scrape_empty`), a propósito: es indistinguible en
+   * agregado de "semana tranquila real" sin una heurística mucho más elaborada.
    */
-  socialCookiesIntentos: number;
-  socialCookiesEncontradas: number;
+  socialBrowserAvailable: boolean;
 }

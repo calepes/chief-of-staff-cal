@@ -5,6 +5,18 @@ export interface SocialHandles {
   x: string[];
 }
 
+export interface AdsSources {
+  /**
+   * IDs de anunciante (`AR...`) en Google Ads Transparency Center, región Bolivia — descubiertos
+   * a mano el 2026-09-03 (ver research-competencia-ads.ts) buscando por dominio/nombre y quedándose
+   * con el anunciante real que reconcilia (no el primer resultado). Más de un ID cuando Google
+   * separa la cuenta corporativa de la del producto (ver ganadero-yolopago) — el consumidor los
+   * consulta a todos y junta los creativos. Array vacío = se buscó y no se encontró un anunciante
+   * confiable en Bolivia (ver peso-app), no un olvido.
+   */
+  google: string[];
+}
+
 export interface EntityConfig {
   id: string;
   nombre: string;
@@ -18,6 +30,8 @@ export interface EntityConfig {
   // `?? []` en cada punto de uso. Un array vacío es una afirmación explícita ("buscamos y no
   // hay"), distinta de un olvido — nunca se inventa un handle para completar.
   social?: SocialHandles;
+  /** Ver AdsSources. Opcional: entidades sin fuente de ads confirmada no lo declaran. */
+  ads?: AdsSources;
 }
 
 export const ENTITIES: EntityConfig[] = [
@@ -34,6 +48,7 @@ export const ENTITIES: EntityConfig[] = [
       facebook: ["altoke.bo", "BancoSolidarioBolivia"],
       x: ["bancosol"],
     },
+    ads: { google: ["AR02176363334515818497"] }, // Banco Solidario S.A.
   },
   {
     id: "ganadero-yolopago",
@@ -48,6 +63,9 @@ export const ENTITIES: EntityConfig[] = [
       facebook: ["YoloPagoApp", "bg.com.bo"],
       x: ["yolo_pago"],
     },
+    // Dos IDs: Google separa la cuenta corporativa (bg.com.bo) de la del producto (yolopago.app),
+    // ambas "Banco Ganadero S.A.".
+    ads: { google: ["AR04961682164644052993", "AR14366527289993199617"] },
   },
   {
     // Nombre real del producto: "ZAS" (no "Zaz" — corregido tras verificar con búsqueda web).
@@ -63,6 +81,7 @@ export const ENTITIES: EntityConfig[] = [
       facebook: ["banco.economico"],
       x: [],
     },
+    ads: { google: ["AR09289408292902141953"] }, // Banco Economico
   },
   {
     id: "takenos",
@@ -79,6 +98,9 @@ export const ENTITIES: EntityConfig[] = [
       facebook: [],
       x: ["takenosapp"],
     },
+    // Anunciante real es "GLOBAL FLOW S.A." (razón social detrás de Takenos), no "Takenos" —
+    // confirmado buscando por dominio takenos.com y verificando que reconcilia.
+    ads: { google: ["AR04876554873455247361"] },
   },
   {
     id: "meru",
@@ -93,6 +115,9 @@ export const ENTITIES: EntityConfig[] = [
       facebook: ["getmeruapp"],
       x: ["getmeru"],
     },
+    // Anunciante real es "R3mit Solutions Inc." (razón social detrás de Meru), no "Meru" —
+    // confirmado buscando por dominio getmeru.com.
+    ads: { google: ["AR09222401735023132673"] },
   },
   {
     id: "peso-app",
@@ -107,6 +132,9 @@ export const ENTITIES: EntityConfig[] = [
       facebook: [],
       x: [],
     },
+    // Sin `ads`: se buscó por "Peso App", "pesoapp.com", "peso.com.bo" y variantes en el
+    // Transparency Center (2026-09-03) sin encontrar un anunciante boliviano confiable — no es un
+    // olvido, es que no se identificó. Revisar si aparece en una búsqueda futura.
   },
 ];
 

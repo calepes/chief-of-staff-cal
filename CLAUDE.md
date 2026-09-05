@@ -671,6 +671,115 @@ log reportaba `contextWindow: 200000` en cada turno; con 0.3.220, una query mín
 en los tipos pero está documentado como "Sonnet 4/4.5 only" y NO se usa.
 La misma prueba confirmó que 0.3.220 arranca bien con OAuth Max y acepta `effort`.
 
+## Research de competencia (Yape Bolivia) — Fase 1 2026-08-31, Fase 2 2026-09-02/03, Chrome real 2026-09-04/05
+
+**Standalone, NO vive en el daemon.** `daemon-v2/scripts/research-competencia-now.ts`, disparado por
+un cron externo de launchd (`launchd/com.cal.jano-research-competencia.plist`, lunes 06:00 La Paz —
+instalado a mano por Cal, no se autoinstala). Sin tool de Telegram ni cron interno — decisión
+explícita desde el spec Fase 1 (`docs/superpowers/specs/2026-08-31-research-competencia-design.md`).
+6 entidades fijas (`research-competencia-entities.ts`): bancosol-altoke, ganadero-yolopago,
+economico-zas, takenos, meru, peso-app.
+
+Por entidad, 4 fuentes en paralelo (`research-competencia.ts`, cada una con su propio deadline vía
+`raceWithLoggedTimeout` — un `Promise.race` contra un timer, con `.finally()` para no dejar el timer
+huérfano logueando un "timeout" fantasma después de que la promesa real ya ganó):
+1. **Fase 1 — mecánico + agente LLM**: App Store/Google Play + sitio propio + LinkedIn/prensa vía
+   WebSearch, un agente SDK one-off por entidad (`research-competencia-agent.ts`, maxTurns 20,
+   timeout 5 min).
+2. **Fase 2 — social orgánico**: Instagram/TikTok/Facebook/X (`research-competencia-social.ts` +
+   `-scrapers.ts`, timeout externo 10 min, presupuesto interno 7 min).
+3. **Ads**: Google Ads Transparency Center (`research-competencia-ads.ts`, timeout 2 min).
+4. Notion: baseline + battlecard previo (`research-competencia-notion.ts`).
+
+Resultado por entidad: hallazgos por dimensión (Producto/Estrategia/GTM/Hiring) + battlecard vivo
+(resumen/fortalezas/debilidades/amenaza), escrito a Notion y resumido a Telegram vía @ClaudeCalbot
+(`formatSummaryHtml`) — NOTIF_BOT_TOKEN, no el bot de Jano.
+
+### Social orgánico — Chrome real, no cookies de Safari (rediseño 2026-09-04)
+- **Diseño original (Fase 2):** Chromium headless de Playwright + cookies inyectadas leídas de
+  `Cookies.binarycookies` de Safari (requería Full Disk Access vía `node-fda`).
+- **Descartado el mismo día de la primera corrida real:** con cookie de sesión de Instagram VÁLIDA
+  (verificado: 10 cookies reales, incluidas `sessionid`/`ds_user_id`), el scraper igual devolvía 0
+  posts — Instagram le sirve una página degradada a Chromium headless, sesión válida o no. No era
+  un problema de login.
+- **Fix: Chrome real vía CDP** (`research-competencia-browser.ts`) — mismo patrón ya validado en
+  este repo para `boa-checkin` (el WAF de BoA bloqueaba Chromium propio, Chrome real vía
+  `connectOverCDP` no). Perfil dedicado persistente
+  `~/.cos-agent/research-competencia-chrome-profile` — Cal se loguea UNA VEZ
+  (`npm run research:chrome-login`, ventana visible) y la sesión sobrevive entre corridas, sin FDA
+  ni Cookie Broker. Una sola sesión de Chrome COMPARTIDA por las 6 entidades (abierta/cerrada por
+  `runResearchCompetencia`, no por cada scraper) — **headless en el cron real** (decisión de Cal:
+  nada de ventana visible en una corrida desatendida de las 6am).
+- `RunResult.socialBrowserAvailable` reemplaza los contadores `socialCookiesIntentos`/
+  `socialCookiesEncontradas` del diseño viejo — `false` si `openResearchBrowserSession()` falló
+  (Chrome no instalado, puerto CDP sin responder), advertido en el resumen de Telegram. NO cubre
+  "el browser abrió bien pero cada plataforma dio 0 posts por bloqueo" — eso sigue siendo
+  indistinguible de "semana tranquila" en el agregado, visible solo en el log
+  (`research_competencia_scrape_empty`).
+
+**Resultado verificado en vivo 2026-09-05, con Cal ya logueado en el perfil dedicado
+(`npm run research:chrome-login`): confirmó la apuesta — el diagnóstico previo de "detección de
+bot" era incompleto.**
+
+- **Instagram: RESUELTO.** Con Chrome real + sesión logueada, la página que llega es la REAL — sin
+  muro, sin degradación (confirmado con screenshot: perfil completo, avatar de Cal, botón
+  "Following"). El único problema real era que `parseInstagramPosts`/`extractInstagramNodes`
+  (JSON embebido `shortcode`+`owner.username`) buscaban una estructura que Instagram YA NO SIRVE —
+  migraron a su framework "Comet", forma de datos completamente distinta. **Reescrito 2026-09-05**
+  a extracción por DOM del grid ya renderizado (`parseInstagramGridItems`/
+  `collectInstagramGridItems`, mismo espíritu que `parseDomPosts` de Facebook/X) — funciona: 11
+  posts reales de altoke.bo en la primera corrida de prueba. Las dos formas de post traen datos
+  casi complementarios, ninguna trae todo:
+  - **Reel** (`href` con `/reel/`): el `alt` de la miniatura ES el caption real completo (emojis,
+    hashtags, vigencia de promo) — pero SIN fecha parseable.
+  - **Foto** (`href` con `/p/`): el `alt` es descripción de VISIÓN auto-generada por Instagram
+    ("Photo by altoke on {fecha}. May be..."), no un caption real — se descarta a propósito
+    (`caption:""`) para no confundir al agente con texto que la marca no escribió. Sí trae fecha.
+  - `esVideo` se fuerza `false` para los dos tipos — el grid nunca expone una URL de video real,
+    solo la miniatura, y tratarlo como video le pasaría esa miniatura a `analyzeVideoFn` como si
+    fuera un archivo descargable (fallaría siempre). Se pierde el análisis de audio/frames del
+    reel; se gana el caption completo, que antes ni eso.
+  - El grid NO se reordena por fecha (a diferencia del resto de los parsers del archivo): como
+    Instagram ya lo entrega más-reciente-primero y los reels no tienen fecha, aplicar el sort
+    genérico empujaría TODOS los reels (mayoría del contenido real, 7 de 10 en la muestra) al
+    final — se preserva el orden nativo del grid en su lugar.
+- **TikTok: BLOQUEADO por captcha real, no por login ni por parser.** Con Chrome real + sesión
+  logueada, cargar el perfil dispara un slider captcha ("Drag the slider to fit the puzzle") antes
+  de mostrar el grid de videos — mismo tipo de bloqueo que ya se evaluó y se descartó automatizar
+  para Multicine (`mcp-servers` CLAUDE.md, ficha `cine`: "resolver/evadir un captcha no es algo
+  que corresponda automatizar"). `scrapeTikTok`/`extractTikTokNodes` (JSON embebido) NO se
+  tocaron — de todos modos el `itemList` de videos ya no viene en el HTML inicial (TikTok lo trae
+  con un fetch aparte del cliente), así que aunque no hubiera captcha, ese extractor seguiría
+  necesitando la misma reescritura DOM-based que Instagram. Sin plan de retomar esto salvo que
+  aparezca una vía sin captcha.
+- Facebook/X sin cambios — ya usaban extracción DOM (`parseDomPosts`), sin verificar en vivo
+  todavía si su parser sigue vigente contra la estructura real de esas dos plataformas.
+
+### Ads — Google Ads Transparency Center (agregado 2026-09-03/04)
+- Complementario al orgánico, no lo reemplaza: dice en qué gasta publicidad la entidad y a quién le
+  habla, no qué publica orgánicamente.
+- **Evaluado en vivo contra las alternativas — ninguna otra sirve para Bolivia:** la Ad Library API
+  oficial de Meta exige identity confirmation y fuera de UK/UE solo da anuncios políticos; TikTok
+  Creative Center/Commercial Content Library no cubren Bolivia (LatAm = solo AR/BR/CO/MX; Content
+  Library = solo EEE/UK/Suiza/Turquía); X Ads Repository solo cubre los 27 de la UE. Google Ads
+  Transparency sí expone `region=BO` con búsqueda por anunciante, sin login.
+- Endpoint NO oficial (RPC interno `SearchService/SearchCreatives`). IDs de anunciante (`AR...`)
+  descubiertos a mano y hardcodeados en `EntityConfig.ads.google`
+  (research-competencia-entities.ts) — 5 de 6 entidades resueltas (Peso App sin anunciante
+  boliviano confiable identificado todavía). El anunciante real casi nunca coincide con el nombre
+  de marca (Takenos → "GLOBAL FLOW S.A.", Meru → "R3mit Solutions Inc." — la razón social detrás
+  del producto).
+- **⚠️ Rate limit real de Google, más duro de lo esperado — verificado en vivo 2026-09-03/04:** tras
+  ~40-50 requests en un día (descubrimiento manual de IDs + pruebas + 2 corridas reales), Google
+  devolvió 429 en TODO el dominio `adstransparency.google.com` (no solo el RPC — la página HTML
+  plana también) y seguía bloqueado 20+ horas después. Es un baneo de IP, no un throttle de ráfaga
+  — `THROTTLE_MS` (2,5s entre pedidos, en `research-competencia-ads.ts`) ayuda contra el caso fácil
+  pero no es garantía contra un umbral acumulado de horas/días. El uso real del cron (~7
+  pedidos/semana) es mucho menor al volumen que lo disparó — probablemente seguro en la práctica,
+  sin forma de confirmarlo sin corridas reales sostenidas en el tiempo. Sin mitigación adicional
+  implementada a propósito: no hay fix técnico real contra un bloqueo de IP opaco de un endpoint no
+  documentado.
+
 ## Notion
 - Integración "Claude CoS" (DB Tareas + People). Prefijo MCP: `mcp__claude_ai_Notion__*`.
 - **Ese MCP es SOLO del daemon.** En sesión interactiva de Claude Code no existe — usar el CLI `ntn` (skill `notion-ntn`) para cualquier query/escritura a Notion sobre este repo (ej. sync de docs a la DB "Agentes AI").

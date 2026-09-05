@@ -232,6 +232,9 @@ describe("enrichPosts", () => {
 });
 
 describe("fetchSocialText", () => {
+  // Stub — ningún scraper mockeado en estos tests toca el context de verdad, así que un objeto
+  // vacío alcanza (Playwright nunca lo tipa en runtime, solo en compile-time).
+  const fakeContext = {} as import("playwright").BrowserContext;
   const scrapersOk = {
     instagram: async (h: string) => [post({ platform: "instagram", handle: h, caption: `IG de ${h}` })],
     tiktok: async (h: string) => [post({ platform: "tiktok", handle: h, caption: `TikTok de ${h}` })],
@@ -240,7 +243,7 @@ describe("fetchSocialText", () => {
   };
   const deps = {
     scrapers: scrapersOk,
-    getCookies: async () => [],
+    context: fakeContext,
     enrichFn: async (posts: SocialPost[]) => posts.map((p) => ({ ...p, imagenes: [] })),
   };
 
@@ -291,29 +294,17 @@ describe("fetchSocialText", () => {
     expect(logged).toBe(true);
   });
 
-  it("loguea explícito cuando una plataforma corre con 0 cookies — distinguible de 'corrió y no encontró posts'", async () => {
-    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-    await fetchSocialText(getEntity("bancosol-altoke"), 7, deps); // deps.getCookies = async () => []
-    const logged = spy.mock.calls.some(([line]) => {
-      const s = String(line);
-      return s.includes("research_competencia_social_no_cookies") && s.includes("instagram");
-    });
-    spy.mockRestore();
-    expect(logged).toBe(true);
-  });
-
-  it("si getCookies tira, la plataforma sigue con cookies=[] en vez de abortar la corrida entera", async () => {
-    const getCookies = async () => { throw new Error("KV caído"); };
-    let cookiesRecibidas: unknown = "no-llamado";
+  it("pasa el mismo context a cada scraper — es la sesión de Chrome compartida por toda la corrida", async () => {
+    let contextRecibido: unknown = "no-llamado";
     const scrapers = {
       ...scrapersOk,
-      instagram: async (h: string, cookies: unknown) => {
-        cookiesRecibidas = cookies;
+      instagram: async (h: string, context: unknown) => {
+        contextRecibido = context;
         return [post({ platform: "instagram" as const, handle: h, caption: `IG de ${h}` })];
       },
     };
-    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, getCookies, scrapers });
-    expect(cookiesRecibidas).toEqual([]);
+    const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, scrapers });
+    expect(contextRecibido).toBe(fakeContext);
     expect(text).toContain("IG de altoke.bo");
   });
 
@@ -364,15 +355,6 @@ describe("fetchSocialText", () => {
   it("devuelve null si ninguna plataforma trajo posts", async () => {
     const scrapers = { instagram: async () => [], tiktok: async () => [], facebook: async () => [], x: async () => [] };
     expect(await fetchSocialText(getEntity("takenos"), 7, { ...deps, scrapers })).toBeNull();
-  });
-
-  it("pide las cookies UNA VEZ por plataforma, no por handle repetido en la misma red", async () => {
-    let calls = 0;
-    const getCookies = async () => { calls++; return []; };
-    await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, getCookies });
-    // bancosol-altoke: instagram×2, tiktok×1, facebook×2, x×1 = 6 handles, 4 plataformas con
-    // handles. Sin cachear por plataforma esto daría 6 llamadas (una por handle).
-    expect(calls).toBe(4);
   });
 });
 

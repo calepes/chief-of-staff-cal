@@ -11,18 +11,16 @@
     imágenes y videos, escribe hallazgos y battlecards en Notion, y notifica el resumen por
     @ClaudeCalbot (NOTIF_BOT_TOKEN, no el bot de Jano).
 
-    Precedente del patrón (FDA + node-fda, sin `npm run`/`bash -lc` en el medio):
+    Precedente del patrón (node-fda, sin `npm run`/`bash -lc` en el medio):
     ~/Library/LaunchAgents/com.cal.cookie-jar-sync.plist.
 
-    ⚠️ Requiere Full Disk Access — el research lee la sesión de Safari (Cookies.binarycookies)
-    DIRECTO para inyectar cookies logueadas en el scraping social (research-competencia-cookies.ts,
-    lista de dominios propia y congelada — NO pasa por el Cookie Broker ni su whitelist global, ver
-    el spec). El permiso está atado al binario `~/.claude/bin/node-fda`, NO a "node" en general:
-    `npm run research:now` perdería el permiso en silencio (arranca el `node` del PATH). Por eso
-    ProgramArguments invoca `node-fda` directo con `--import tsx/esm`, un solo proceso, sin `tsx`
-    (el CLI) ni `bash -lc` de por medio — cualquiera de esos podría re-exec en un subproceso que no
-    conserve la identidad de node-fda. Mismo razonamiento documentado en el header de
-    research-competencia-now.ts.
+    Sesión social: Chrome REAL vía CDP con perfil dedicado (research-competencia-browser.ts,
+    `~/.cos-agent/research-competencia-chrome-profile`) — NO Full Disk Access ni cookies de Safari
+    (diseño anterior, descartado 2026-09-03: Chromium headless con cookie válida igual devolvía 0
+    posts por detección de bot). Cal se loguea UNA VEZ en ese perfil con
+    `npm run research:chrome-login` (ventana visible) — la sesión persiste en disco entre corridas.
+    `node-fda` sigue invocándose acá por inercia del patrón (no hace daño tenerlo), pero ya no es
+    REQUISITO para esta parte — ver el header de research-competencia-now.ts.
 
     Horario — lunes 06:00 hora La Paz (America/La_Paz, UTC-4, sin DST):
     - Fase 1 corría lunes 07:00, pero ese horario hoy choca con com.claude.heartbeat (arranca
