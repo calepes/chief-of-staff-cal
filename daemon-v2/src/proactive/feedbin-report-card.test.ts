@@ -70,7 +70,7 @@ describe("selectMarkButtons", () => {
     const buttons = selectMarkButtons(groups);
 
     expect(buttons).toHaveLength(7); // 6 + resto
-    expect(buttons[6]).toMatchObject({ id: "resto", count: 2 }); // 2 grupos sobrantes, 1 item c/u
+    expect(buttons[6]).toEqual({ id: "resto", label: "el resto", count: 2, entryIds: [6, 7], markedAt: 0 }); // 2 grupos sobrantes, 1 item c/u, payload completo verificado
   });
 
   it("does not add a 'resto' bucket when there are 6 or fewer groups", () => {
