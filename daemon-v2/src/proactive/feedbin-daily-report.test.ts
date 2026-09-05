@@ -157,6 +157,33 @@ describe("checkFeedbinDailyReport", () => {
     expect(text).toContain("...y 125 más"); // 130 - 5 mostrados
   });
 
+  it("continues classifying remaining batches when one batch fails, silently excluding its entries", async () => {
+    const entries = Array.from({ length: 61 }, (_, i) => entry(i + 1, `Título ${i + 1}`));
+    mockUnread.mockResolvedValue(entries);
+    mockSubs.mockResolvedValue([]);
+    mockTaggings.mockResolvedValue([]);
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    const { TOPICS_PROFILE_PATH } = await import("./topics-profile-refresh.js");
+    mkdirSync(dirname(TOPICS_PROFILE_PATH), { recursive: true });
+    writeFileSync(TOPICS_PROFILE_PATH, "perfil de prueba", "utf8");
+
+    const sdk = await import("@anthropic-ai/claude-agent-sdk");
+    // Lote 1 (60 entries, ids 1-60) tiene éxito, todas "abrir".
+    const batch1Ids = Array.from({ length: 60 }, (_, i) => i + 1);
+    queueHaikuResponse(sdk as never, JSON.stringify({ recomendaciones: batch1Ids.map((id) => ({ id, decision: "abrir" })) }));
+    // Lote 2 (1 entry, id 61) falla.
+    vi.mocked(sdk.startup).mockRejectedValueOnce(new Error("Haiku caído"));
+    // Agrupado de "abrir" — solo ve los 60 reales (61 nunca llegó a clasificarse).
+    queueHaikuResponse(sdk as never, JSON.stringify({ grupos: [{ tema: "Todo", ids: batch1Ids }] }));
+
+    await checkFeedbinDailyReport({ botToken: "t", chatId: 1, feedbin: creds, kv: kv as never });
+
+    const text = mockSend.mock.calls[0][1].text;
+    expect(text).toContain("Para abrir</b> (60)"); // no 61 — el lote fallido se excluye, no rompe nada
+    expect(text).not.toContain("Título 61");
+  });
+
   it("builds mark-as-read buttons from the grouped 'saltar' entries", async () => {
     const entries = [entry(1, "A"), entry(2, "B"), entry(3, "C")];
     mockUnread.mockResolvedValue(entries);

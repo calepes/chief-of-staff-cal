@@ -11,7 +11,7 @@ import type { CfKv } from "../cf-kv.js";
 import { TOPICS_PROFILE_PATH } from "./topics-profile-refresh.js";
 import { sendCronMessage } from "./rich-send.js";
 import { groupEntries, type ThemeGroup } from "./feedbin-report-groups.js";
-import { renderAbrirSection, selectMarkButtons, buildReportText, buildKeyboard, type Keyboard } from "./feedbin-report-card.js";
+import { renderAbrirSection, selectMarkButtons, buildReportText, buildKeyboard, esc, type Keyboard } from "./feedbin-report-card.js";
 import { FeedbinReportStore } from "./feedbin-report-store.js";
 
 const MODEL = "claude-haiku-4-5-20251001";
@@ -218,7 +218,7 @@ export async function checkFeedbinDailyReport(opts: FeedbinDailyReportOpts): Pro
     headerLines.push(
       abrirEntries
         .slice(0, ABRIR_FALLBACK_LIMIT)
-        .map((e) => `• <a href="${feedbinEntryUrl(e.id)}">${e.title ?? "(sin título)"}</a>`)
+        .map((e) => `• <a href="${feedbinEntryUrl(e.id)}">${esc(e.title ?? "(sin título)")}</a>`)
         .join("\n"),
     );
   }
