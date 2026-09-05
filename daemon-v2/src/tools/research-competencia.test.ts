@@ -23,6 +23,9 @@ vi.mock("./research-competencia-social.js", () => ({
 vi.mock("./research-competencia-ads.js", () => ({
   fetchAdsText: vi.fn(async () => "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x"),
 }));
+vi.mock("./research-competencia-meta-ads.js", () => ({
+  fetchMetaAdsText: vi.fn(async () => null),
+}));
 vi.mock("./research-competencia-browser.js", () => ({
   openResearchBrowserSession: vi.fn(async () => ({ context: {}, close: vi.fn(async () => {}) })),
 }));

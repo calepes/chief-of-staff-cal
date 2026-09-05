@@ -3,6 +3,7 @@ import { fetchIosAppInfo, fetchAndroidAppInfo, fetchSiteText, chunkText } from "
 import { buildEntityPrompt, runEntityAgent, parseAgentJson, type MechanicalFacts } from "./research-competencia-agent.js";
 import { fetchSocialText } from "./research-competencia-social.js";
 import { fetchAdsText } from "./research-competencia-ads.js";
+import { fetchMetaAdsText } from "./research-competencia-meta-ads.js";
 import { openResearchBrowserSession, type ResearchBrowserSession } from "./research-competencia-browser.js";
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
 import { nowInLaPaz } from "../journal-capture.js";
@@ -162,10 +163,20 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
         const socialTextWithDeadline = raceWithLoggedTimeout(
           socialTextPromise, SOCIAL_TIMEOUT_MS, "research_competencia_social_timeout", entity.id,
         );
-        const adsTextPromise = fetchAdsText(entity, timeframeDias).catch((err) => {
-          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_ads_error", entityId: entity.id, err: String(err) }));
-          return null;
-        });
+        // Google (RPC directo) + Meta Ad Library (research-competencia-meta-ads.ts, headless
+        // fresco) son complementarios, no alternativos — se juntan en un solo bloque de texto bajo
+        // el mismo deadline (`ADS_TIMEOUT_MS`) en vez de sumar un segundo timeout: ninguno de los
+        // dos hace descargas pesadas ni usa la sesión de Chrome compartida del social.
+        const adsTextPromise = Promise.all([
+          fetchAdsText(entity, timeframeDias).catch((err) => {
+            console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_ads_error", entityId: entity.id, err: String(err) }));
+            return null;
+          }),
+          fetchMetaAdsText(entity, timeframeDias).catch((err) => {
+            console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_meta_ads_error", entityId: entity.id, err: String(err) }));
+            return null;
+          }),
+        ]).then(([google, meta]) => [google, meta].filter((t): t is string => !!t).join("\n\n") || null);
         const adsTextWithDeadline = raceWithLoggedTimeout(
           adsTextPromise, ADS_TIMEOUT_MS, "research_competencia_ads_timeout", entity.id,
         );

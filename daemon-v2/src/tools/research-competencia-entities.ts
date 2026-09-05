@@ -15,6 +15,15 @@ export interface AdsSources {
    * confiable en Bolivia (ver peso-app), no un olvido.
    */
   google: string[];
+  /**
+   * Nombres de página de Facebook/Instagram en la Meta Ad Library, verificados en vivo el
+   * 2026-09-05 (ver research-competencia-meta-ads.ts). Cumplen DOBLE función: término de búsqueda
+   * Y allowlist de nombres aceptados — la búsqueda por palabra clave de la Ad Library trae ruido
+   * (negocios sin relación), así que un creativo cuyo anunciante no está EXACTO acá se descarta.
+   * Array ausente o vacío = no se encontró un anunciante boliviano confiable (mismo criterio que
+   * `google` vacío en peso-app).
+   */
+  meta?: string[];
 }
 
 export interface EntityConfig {
@@ -48,7 +57,7 @@ export const ENTITIES: EntityConfig[] = [
       facebook: ["altoke.bo", "BancoSolidarioBolivia"],
       x: ["bancosol"],
     },
-    ads: { google: ["AR02176363334515818497"] }, // Banco Solidario S.A.
+    ads: { google: ["AR02176363334515818497"], meta: ["altoke"] }, // Banco Solidario S.A.
   },
   {
     id: "ganadero-yolopago",
@@ -65,7 +74,10 @@ export const ENTITIES: EntityConfig[] = [
     },
     // Dos IDs: Google separa la cuenta corporativa (bg.com.bo) de la del producto (yolopago.app),
     // ambas "Banco Ganadero S.A.".
-    ads: { google: ["AR04961682164644052993", "AR14366527289993199617"] },
+    ads: {
+      google: ["AR04961682164644052993", "AR14366527289993199617"],
+      meta: ["Banco Ganadero", "YOLO pago"],
+    },
   },
   {
     // Nombre real del producto: "ZAS" (no "Zaz" — corregido tras verificar con búsqueda web).
@@ -81,7 +93,7 @@ export const ENTITIES: EntityConfig[] = [
       facebook: ["banco.economico"],
       x: [],
     },
-    ads: { google: ["AR09289408292902141953"] }, // Banco Economico
+    ads: { google: ["AR09289408292902141953"], meta: ["Banco Económico"] },
   },
   {
     id: "takenos",
@@ -100,6 +112,8 @@ export const ENTITIES: EntityConfig[] = [
     },
     // Anunciante real es "GLOBAL FLOW S.A." (razón social detrás de Takenos), no "Takenos" —
     // confirmado buscando por dominio takenos.com y verificando que reconcilia.
+    // Sin `meta`: se buscó "takenos" en la Ad Library (2026-09-05) y solo devolvió negocios sin
+    // relación — no se encontró un anunciante real de Takenos corriendo ads en Meta ahora mismo.
     ads: { google: ["AR04876554873455247361"] },
   },
   {
@@ -117,6 +131,8 @@ export const ENTITIES: EntityConfig[] = [
     },
     // Anunciante real es "R3mit Solutions Inc." (razón social detrás de Meru), no "Meru" —
     // confirmado buscando por dominio getmeru.com.
+    // Sin `meta`: se buscó "meru" en la Ad Library (2026-09-05) y solo devolvió negocios sin
+    // relación — no se encontró un anunciante real de Meru corriendo ads en Meta ahora mismo.
     ads: { google: ["AR09222401735023132673"] },
   },
   {
@@ -134,7 +150,8 @@ export const ENTITIES: EntityConfig[] = [
     },
     // Sin `ads`: se buscó por "Peso App", "pesoapp.com", "peso.com.bo" y variantes en el
     // Transparency Center (2026-09-03) sin encontrar un anunciante boliviano confiable — no es un
-    // olvido, es que no se identificó. Revisar si aparece en una búsqueda futura.
+    // olvido, es que no se identificó. Revisar si aparece en una búsqueda futura. Se probó también
+    // "peso app bolivia" en la Meta Ad Library (2026-09-05), mismo resultado: puro ruido.
   },
 ];
 

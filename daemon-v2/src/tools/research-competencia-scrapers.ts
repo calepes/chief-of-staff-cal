@@ -610,19 +610,29 @@ function collectDomPosts(page: Page): Promise<DomPostExtraction[]> {
   }, MIN_DOM_IMAGE_DIMENSION);
 }
 
+// Facebook y X nunca llegan a "networkidle" — las dos tienen actividad de red constante en
+// segundo plano (chat, notificaciones en vivo, streams) que no para nunca, así que `page.goto`
+// con `waitUntil:"networkidle"` siempre tira TimeoutError a los 30s, incluso con sesión real y
+// válida. Verificado en vivo 2026-09-05 contra la cuenta real de Cal: con `domcontentloaded` la
+// página carga perfecto (sesión logueada, contenido real, sin muro) — el comentario viejo de este
+// archivo ("Facebook detecta automatización más agresivamente") era una teoría sin verificar,
+// escrita antes de poder probar contra la plataforma real; el síntoma completo era el timeout de
+// espera, no un bloqueo. `PAGE_SETTLE_MS` da tiempo a que el feed hidrate (React) después del
+// `domcontentloaded` — sin esto, `collectDomPosts` corre sobre un DOM todavía vacío.
+const PAGE_SETTLE_MS = 2_000;
+
 /**
  * Scrapea la página pública de Facebook de `handle` y devuelve sus posts recientes.
  *
- * Facebook detecta automatización de forma más agresiva que Instagram (fingerprinting de browser,
- * challenges anti-bot, muro de login más insistente) — mismo comportamiento ya documentado para
- * TikTok en `scrapeTikTok`. Si esto devuelve sistemáticamente `[]` (ver `diagnostics` en el log
- * `research_competencia_scrape_empty`), es señal de bloqueo de plataforma, no un bug del parser:
- * está anticipado en el spec y el diseño degrada sin romper el research completo de las demás
- * cuentas/plataformas (ver `withBrowserContext`).
+ * Si esto devuelve sistemáticamente `[]` (ver `diagnostics` en el log
+ * `research_competencia_scrape_empty`) puede ser bloqueo real de la plataforma o un cambio de
+ * layout — pero un timeout acá (`research_competencia_scrape_error`) YA NO es la señal esperada
+ * de bloqueo, ver el comentario de `PAGE_SETTLE_MS`.
  */
 export async function scrapeFacebook(handle: string, context: BrowserContext): Promise<SocialPost[]> {
   return withBrowserContext("facebook", handle, context, async (page) => {
-    await page.goto(`https://www.facebook.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
+    await page.goto(`https://www.facebook.com/${handle}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForTimeout(PAGE_SETTLE_MS);
     const crudos = await collectDomPosts(page);
     const conAutor: RawDomPost[] = crudos.map((c) => ({ ...c, autor: deriveAuthorFromPermalink(c.url) }));
     return { items: parseDomPosts(conAutor, "facebook", handle), diagnostics: { articulosEncontrados: crudos.length } };
@@ -632,14 +642,13 @@ export async function scrapeFacebook(handle: string, context: BrowserContext): P
 /**
  * Scrapea el perfil público de X de `handle` y devuelve sus posts recientes.
  *
- * Facebook detecta automatización de forma más agresiva que Instagram — TikTok también, ver
- * `scrapeTikTok` — y lo mismo aplica acá: si esto devuelve sistemáticamente `[]`, es señal de
- * bloqueo de plataforma, no un bug del parser. Diseño anticipado, degrada sin romper el research
- * completo de las demás cuentas/plataformas (ver `withBrowserContext`).
+ * Mismo criterio que `scrapeFacebook` — ver el comentario de `PAGE_SETTLE_MS`: un timeout acá no
+ * es necesariamente bloqueo de plataforma, X tampoco llega nunca a "networkidle" real.
  */
 export async function scrapeX(handle: string, context: BrowserContext): Promise<SocialPost[]> {
   return withBrowserContext("x", handle, context, async (page) => {
-    await page.goto(`https://x.com/${handle}`, { waitUntil: "networkidle", timeout: 30_000 });
+    await page.goto(`https://x.com/${handle}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForTimeout(PAGE_SETTLE_MS);
     const crudos = await collectDomPosts(page);
     const conAutor: RawDomPost[] = crudos.map((c) => ({ ...c, autor: deriveAuthorFromPermalink(c.url) }));
     return { items: parseDomPosts(conAutor, "x", handle), diagnostics: { articulosEncontrados: crudos.length } };
