@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { unlinkSync } from "node:fs";
 
 vi.mock("../tools/feedbin-client.js", () => ({
   getAllUnreadEntries: vi.fn(),
@@ -77,6 +78,14 @@ describe("checkFeedbinDailyReport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     kv = new FakeKv();
+  });
+
+  afterEach(() => {
+    try {
+      unlinkSync("/tmp/does-not-exist-topics-profile.md");
+    } catch {
+      /* no existía, no pasa nada */
+    }
   });
 
   it("reports 'sin artículos' when there's nothing unread", async () => {
