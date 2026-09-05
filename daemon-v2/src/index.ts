@@ -888,14 +888,16 @@ async function processMessage(
           markEntriesUnread,
           log,
           editCard: async (messageId, card) => {
-            await editMessage(
-              env.COS_TELEGRAM_BOT_TOKEN,
-              fchat,
+            // A diferencia de jnl:/bklg:/lrn:/tsk:, esta tarjeta puede crecer mucho (backlog
+            // completo agrupado por tema) y superar el límite de 4096 chars del HTML clásico —
+            // por eso usa editCronMessage (Rich Messages, 32K, con fallback a HTML clásico), el
+            // mismo mecanismo que ya usa lend: más abajo, en vez de editMessage directo.
+            await editCronMessage(env.COS_TELEGRAM_BOT_TOKEN, {
+              chatId: fchat,
               messageId,
-              card.text,
-              "HTML",
-              card.keyboard ?? { inline_keyboard: [] },
-            ).catch((err) => log({ msg: "feedbin_report_edit_failed", err: String(err) }));
+              text: card.text,
+              replyMarkup: card.keyboard ?? { inline_keyboard: [] },
+            }).catch((err) => log({ msg: "feedbin_report_edit_failed", err: String(err) }));
           },
         },
         fanchor,
