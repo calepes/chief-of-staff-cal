@@ -179,91 +179,22 @@ el selector de Telegram antes de procesar el comprobante.
   registrados del junte.
 - **Límite:** no hay validación automática de duplicados por decisión de Cal.
 
-## Telegram Rich Messages (@cal/telegram) — migrado y activado 2026-08-06
+## Telegram Rich Messages (@cal/telegram)
 
-Jano fue el 3er (y último) bot migrado a la librería compartida `@cal/telegram`
-(`Personal/Agents/shared-telegram/`, repo propio en `github.com/calepes/shared-telegram`) —
-Vesta y Pecunia ya estaban migrados desde el 2026-08-05. Detalle completo del contexto/decisiones
-compartidas: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md` y memoria
-`project_telegram_rich_messages_shared_lib`.
+Jano usa la librería compartida `@cal/telegram` (`Personal/Agents/shared-telegram/`), igual que
+Vesta/Pecunia. **Historia completa de la migración: `CHANGELOG.md`, entrada `2026-08-06`; contexto/
+decisiones compartidas entre los 3 bots: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md`.**
 
-- **Migración de la librería (mecánica, casi gratis):** `shared-v2/src/telegram.ts` (169 líneas
-  propias) → re-export NOMBRADO de `@cal/telegram` (NO `export *` — `shared-v2/src/types.ts` tiene
-  su propio `TelegramUpdate`, más rico, que chocaría). `shared-v2/package.json` con
-  `"@cal/telegram": "file:../../shared-telegram"`. Cero call sites de `daemon-v2`/`worker-v2`
-  necesitaron cambiar de firma — 799/800 tests sin tocar (1 falla preexistente sin relación,
-  `SDK_SESSIONS_DIR`). Único hallazgo aparte, no relacionado y no tocado: `worker-v2/src/index.ts:27`
-  tiene un error de tipos preexistente con Hono + status `204`. Plan:
-  `docs/superpowers/plans/2026-08-05-jano-cal-telegram-migration.md`.
-- **Rich Messages activado el mismo día, sesión separada** (mismo patrón que Vesta/Pecunia:
-  "migrar la librería" y "activar Rich Messages" van en dos tandas). `system-prompt.ts` gana una
-  sección nueva "## Rich Messages (formato enriquecido)" con la política **"diseño activo, no
-  reactivo"** (headings/listas/tablas son la herramienta por defecto cuando el contenido tiene esa
-  forma, no un lujo ocasional) — mismo texto base que Vesta, adaptado a la voz de Jano. La regla
-  preexistente de "dato repetitivo denso" (agrupar en vez de `·` corrido) ahora prefiere `<table>`
-  real en vez del agrupamiento por línea. El bloque SCQA/STORYLINE de PPT (sección "wizard de
-  slides") se dejó explícitamente con `<pre>` — es contenido para copiar tal cual, no dato a
-  formatear.
-- **`daemon-v2/src/index.ts` — el único call site del reply libre del modelo** (a diferencia de
-  Vesta, que tiene 3: normal/menu_action/callback legacy — Jano solo llama `runAgent()` una vez)
-  pasa a `editRichMessage` con fallback de 3 niveles (rich → HTML clásico con chunking de 4096 →
-  texto plano vía `stripHtmlTags`), logueando `rich_message_failed`/`html_parse_failed` en cada
-  nivel. El chunking (`chunkText`, límite 4096) solo corre DENTRO del fallback — Rich Messages
-  soporta 32.768 chars, así que el caso común (bajo ese límite) no trocea nada. Mismo tratamiento
-  en la rama de fallback de TTS (cuando ElevenLabs falla y se manda como texto). Los 3 crons
-  proactivos que llaman `runAgent()` (`flight-checkin`, `foco-check`, `fuel-alert`) están
-  **desactivados** (ver "Automatización — dos capas" más abajo) — no se tocaron, quedan con
-  `sendMessage`/`editMessage` clásico si algún día se reactivan.
-- **`stripHtmlTags` nueva en `index.ts`** (Jano no tenía una — Vesta/Pecunia sí): copia del
-  hardening que se encontró primero en Vesta (2026-08-05) — inserta `\n`/`•`/` · ` en los bordes de
-  bloque (`h1`-`h6`, `tr`, `li`, `details`/`summary`, `table`/`ul`/`ol`) antes de despojar el resto
-  de las tags, para que un texto plano de emergencia (Rich Messages Y HTML clásico fallaron los
-  dos) no quede pegado e ilegible (ej. una fila de tabla como "Formato2D14:00...").
-- **`format.ts` → `convertMarkdownTables` — mismo bonus fix que Pecunia:** el safety net de
-  Markdown (por si el modelo genera `| col | col |` pese a la instrucción) pasó de emitir `<pre>`
-  con columnas alineadas a mano a emitir `<table>` real. Como las celdas dejan de estar dentro de
-  un `<pre>`, el pase de bold que corre después (`**texto**` → `<b>texto</b>`) ahora SÍ convierte
-  contenido dentro de una celda — antes quedaba literal. Sin test propio (no existía antes);
-  validado a mano contra el `dist/` compilado.
-- **`convertNewlinesToBr` (el fix de `\n`→`<br>` de Rich Messages) se hereda automático** de la
-  librería — no hizo falta tocar nada del lado de Jano para eso (mismo mecanismo que Vesta/Pecunia).
-- **Gap de `PRESERVE_BLOCK_RE` — RESUELTO 2026-08-06 en la librería compartida** (commit `c2e4d58`
-  de `shared-telegram`, no específico de Jano): `details` agregado al regex, 2 tests de regresión.
-  Aplica solo en el próximo restart del daemon (dependencia `file:` con symlink, ya recogido acá).
-- **Crons proactivos activos migrados a Rich Messages también (2026-08-06, mismo día, sesión
-  aparte):** el reply del modelo (arriba) no cubre a los 6 crons activos — construyen su HTML en
-  código, sin pasar por `runAgent()`, así que la migración de arriba no les tocaba nada. Cal vio en
-  vivo que el reporte del cron de KPIs salía en HTML clásico (no tablas) y pidió parejo.
-  `proactive/rich-send.ts` (nuevo) centraliza el patrón: `sendCronMessage()` intenta
-  `sendRichMessage` y cae a `sendMessage`/HTML clásico si falla — **sin** nivel de texto plano
-  (a diferencia del reply del modelo): el HTML acá lo arma el propio código del cron, no el LLM,
-  así que un fallo doble es un problema real de Telegram/red, no de HTML mal formado. Los 6 crons
-  activos (`health-sync-check`, `journal-sweep`, `learning-reflect`, `daily-note-check`,
-  `task-check` ×2 call sites, `kpi-ingest-check`) pasaron de `sendMessage` directo a
-  `sendCronMessage`. Los 3 crons desactivados (`flight-checkin`/`foco-check`/`fuel-alert`) NO se
-  tocaron — igual que el reply del modelo, quedan con `sendMessage` clásico si se reactivan algún
-  día.
-  - **`kpi-ingest-check.ts` → `formatPdfSuccessReport` reescrito a `<table>` real** (el caso
-    concreto que Cal vio): las 5 métricas del PDF (Afiliaciones diarias, Afiliados 7d, TRX, TRX
-    Promedio 7d, Activos DAU) con sus columnas Día/Sem. de tendencia pasan de líneas sueltas con
-    `trendSuffix()` a una tabla `Métrica | Valor | Día | Sem.` — dato comparable en 2 ejes, el caso
-    exacto de la política "diseño activo". `trendSuffix()` se eliminó (sin más call sites).
-    `sendReport()` intenta el texto completo por `sendCronMessage` de una (Rich Messages soporta
-    32.768 chars, el reporte con `MAX_REPORT_LINES=25` rara vez se acerca) y solo pagina a 4000
-    chars si ese intento entero falla (paginar antes cortaría de más el caso común). Los demás
-    reportes (CSV, Lending, errores) quedaron como líneas de texto — no son claramente tabulares
-    (Lending ya comunica el funnel con flechas `→`, convertirlo a tabla perdería esa semántica).
-  - Tests: `proactive/rich-send.test.ts` nuevo (4 casos: rich ok, replyMarkup, fallback a HTML,
-    propagación si fallan los dos niveles). `kpi-ingest-check.test.ts`/`daily-note-check.test.ts`/
-    `task-check.test.ts` — mocks de `@cos/shared`/`sendMessage` migrados a `./rich-send.js`/
-    `sendCronMessage` (mismo boundary que ahora usa el código real); assertions de
-    `formatPdfSuccessReport` reescritas para la tabla. 804/805 tests (mismo preexistente sin
-    relación), typecheck y build limpios.
-- Daemon reiniciado en producción con confirmación explícita de Cal en cada restart (2 restarts:
-  uno tras la migración de la librería, otro tras activar Rich Messages), arranque limpio
-  verificado en logs ambas veces, prueba real por Telegram confirmada en las dos ("respondió como
-  antes" en la migración de librería; Rich Messages con tablas reales confirmado por Cal el mismo
-  día).
+- **Política "diseño activo, no reactivo"** (`system-prompt.ts`, sección "Rich Messages"):
+  headings/listas/tablas son la herramienta por defecto cuando el contenido tiene esa forma, no un
+  lujo ocasional. El bloque SCQA/STORYLINE de PPT (wizard de slides) es la única excepción
+  explícita — se deja en `<pre>` porque es contenido para copiar tal cual.
+- **`index.ts` (reply del modelo) tiene fallback de 3 niveles:** rich → HTML clásico (chunking a
+  4096) → texto plano (`stripHtmlTags`). Rich Messages soporta 32.768 chars, así que el chunking
+  solo corre si cae al segundo nivel.
+- **Los crons proactivos activos NO pasan por ese fallback** — construyen su HTML en código y usan
+  `sendCronMessage()` (`proactive/rich-send.ts`, rich → HTML clásico, sin nivel de texto plano). Los
+  3 crons desactivados (flight-checkin/foco-check/fuel-alert) siguen con `sendMessage` clásico.
 
 ## .env / secrets — carga en runtime (migrado a 1Password 2026-08-30)
 Fuente: `daemon-v2/src/index.ts`.
@@ -563,113 +494,15 @@ Mismo flujo replicado en sesión interactiva vía el skill `guardar-referencia-d
   mínimo con `declare const` dentro del propio módulo — queda acotado a ese archivo (es un módulo
   con import/export, no un `.d.ts` global), sin tocar el resto del proyecto.
 
-## Runtime del SDK — modelo, effort, turnos y sesión (2026-07-27)
+## Runtime del SDK — modelo, effort, turnos y sesión
 
-Origen: Cal pidió *"toma los valores de los sábados, ¿a este ritmo cuándo llegamos a 5MM?"* y recibió
-"⚠️ No pude procesar tu mensaje". El log mostró `agent_error: Reached maximum number of turns (12)` —
-el turno quemó los 12 turnos en `ToolSearch` con nombre corto (falla; hay que usar el nombre COMPLETO
-`mcp__cos-tools__X`), 6 llamadas a `notionCli` que fallaban con `400 invalid_json` (ver abajo) y una
-query sin filtro que devolvió 352 KB. Auditando eso salió el resto.
+**Historia completa (bug de `notionApi` doble-encodeando el body, upgrade 0.2.122→0.3.220): `CHANGELOG.md`, entrada `2026-07-27 — Runtime del SDK`.** Referencia operativa vigente:
 
-- **`notionApi` doble-encodeaba el body — RESUELTO 2026-07-27 (commit `d0b9789`).** Era la causa real
-  del `400 invalid_json`, y el fix quedó fuera de la primera tanda de cambios: `notionApi` hacía
-  `JSON.stringify(body)` asumiendo que `body` siempre llega como objeto, pero el modelo lo manda como
-  **string con JSON adentro** bastante seguido — y `JSON.stringify('{"a":1}')` produce
-  `"{\"a\":1}"`, un string JSON donde Notion espera un objeto.
-  - **Costó dos turnos reales de Cal el mismo día**, 14 llamadas fallidas entre ambos: el primero
-    murió por agotar los turnos, el segundo respondió sin datos tras 233 s y $1.55.
-  - **Se diagnostica pésimo desde afuera:** el error de Notion dice *"Error parsing JSON body"*, que
-    se lee como "el conector está caído" — Jano de hecho le dijo eso a Cal y le ofreció reintentar
-    más tarde, cosa que nunca hubiera funcionado. Y los `GET` andaban perfecto (no llevan body), así
-    que token, permisos y conectividad daban verde. El modelo reintentó 14 veces variando el
-    *contenido* del body y el endpoint, cuando el problema era la *serialización*.
-  - **Fix:** `serializeBody()` en `tools/notion-cli.ts` — objeto → `stringify`; string que ya es JSON
-    válido → pasa tal cual; string que no es JSON → `stringify` (ahí sí la intención era un literal).
-    7 tests de regresión. Se reforzó además la descripción del tool ("body va como OBJETO, no como
-    string") y se lo apunta a `consultarJson` para queries grandes.
-  - **Verificado end-to-end** contra la Notion real llamando al `dist` compilado con el body string
-    exacto que había mandado el modelo: devuelve filas.
-
-- **SDK actualizado 0.2.122 → 0.3.220.** Estaba 98 versiones atrasado; los comentarios del 0.2.x
-  todavía decían `'xhigh' — Opus 4.7 only`, o sea era pre-Opus 5. El upgrade exige
-  `@anthropic-ai/sdk >= 0.93` como peer. Esa dependencia **no se importa en ningún `.ts` del repo**
-  (verificado con grep), pero **no es huérfana**: en 0.3.x el agent SDK la movió a `peerDependencies`
-  junto con `@modelcontextprotocol/sdk`, y sus tipos hacen `import type` desde ahí — sacarla rompería
-  el typecheck. Las dos quedan declaradas explícitas en `daemon-v2/package.json`; antes
-  `@modelcontextprotocol/sdk` solo existía porque npm la auto-instaló como peer, y un
-  `--legacy-peer-deps` o una regeneración del lock habría roto el build.
-  Los breaking changes documentados del SDK (`systemPrompt` ya no es default, `settingSources`) son
-  de **v0.1.0** — Jano ya los tenía pasados y pasa `systemPrompt` explícito.
-- **`maxTurns` 12 → 25** (`index.ts`). El techo existe para cortar loops, no para acotar trabajo
-  legítimo; con 12, un pedido analítico real moría aunque fuera correcto.
-- **`effort` (nuevo, `effort.ts`).** Antes sin setear. Default `high` (override con env `JANO_EFFORT`),
-  y Cal sube a `xhigh` en un turno puntual con prefijo `/deep`, `/fondo` o `++`. **Prefijos explícitos
-  a propósito** — una heurística que adivine "esto parece analítico" gastaría cuota de Claude Max
-  (la MISMA de Cal) sin que él sepa por qué, y al fallar al revés dejaría los pedidos difíciles en
-  effort bajo justo cuando importa.
-- **Techo de 20 turnos por sesión** (`JANO_MAX_SESSION_TURNS`). `resume` reintroduce a propósito el
-  crecimiento monotónico de contexto que "startup() fresco por mensaje" había eliminado — el modo de
-  falla que tumbó a Jano **4 veces** ("Autocompact is thrashing"). El TTL de 12 h no es un techo: en un
-  día activo entran decenas de turnos. Al tope, el chat arranca sesión nueva y vuelve al historial de
-  KV: se pierde el detalle de tool calls viejas, no la conversación — o sea el peor caso es "como
-  antes de este cambio", no peor. Monitorear `grep sdk_diagnostic_leak ~/Library/Logs/cos-agent-v2.out.log`
-  los primeros días y ajustar el número si aparece.
-- **`resume` por chat (`session-store.ts`) — cierra el gap de contexto de raíz.** El SDK ya venía
-  persistiendo cada sesión COMPLETA (tool calls + resultados crudos) en
-  `~/.claude/projects/<proj>/<sessionId>.jsonl` — 245 archivos había cuando se encontró — y Jano las
-  tiraba: cada mensaje arrancaba de cero y reconstruía desde 40 mensajes de TEXTO en KV. Ese era
-  exactamente el bug del PNR de BoA (2026-07-14, ver más arriba). Ahora el `sessionId` se guarda por
-  chat en `~/.cos-agent/sessions.json` (IO **sync** a propósito: se lee en el camino crítico justo
-  antes de `takeWarm()`, y un round-trip a KV comería el solapamiento que ese `takeWarm()` temprano
-  existe para ganar) y se pasa como `resume`. Detalles que importan:
-  - **TTL 12 h, igual que el historial en KV** — desincronizarlos daría el peor caso: sesión viva con
-    historial vencido, o al revés.
-  - **Si hubo resume, `runAgent` NO reinyecta el historial de texto de KV** (`deps.resumed`): el SDK ya
-    lo tiene, y duplicarlo le daría al modelo dos versiones del pasado — la real y una resumida por
-    Haiku que puede contradecirla. KV pasó de fuente primaria a **fallback**.
-  - **Fallback si el resume falla** (`.jsonl` borrado, vacío o corrupto): `takeWarm` reintenta limpio
-    y `onResumeFailed` borra el sessionId roto. **Verificado empíricamente** contra el SDK real: los
-    tres casos tiran `Error: No conversation found with session ID: …`, así que el `catch` los cubre
-    de verdad — no es una suposición. Sin eso, un resume roto dejaba el chat muerto hasta que a Cal
-    se le ocurriera mandar `/reset`.
-  - **`/deep` por voz funciona** (`ensureWarmEffort`): el prefijo viene dentro del audio, así que el
-    effort se recalcula después de transcribir y el warm se rehace solo si cambió. Sin esto el dial
-    se ignoraba en silencio en la mitad de los mensajes de Cal, que usa voz seguido.
-  - **`/reset` ahora limpia KV *y* sessionId.** Limpiar solo KV lo dejaba sin efecto real: el turno
-    siguiente retomaba la sesión y traía de vuelta todo lo que Cal quiso borrar.
-- **Tool `consultarJson({path, jqExpr})`** (`tools/consultar-json.ts`) — corre `jq` sobre un
-  persisted-output **sin traerlo al contexto**. Es la capacidad que faltaba: `readPersistedOutput`
-  trae el archivo entero, que sobre un dump de Notion de 350 KB es el problema mismo que el
-  persisted-output quería evitar. `system-prompt.ts` ahora instruye preferir `consultarJson` para
-  datos estructurados y dejar `readPersistedOutput` para cuando de verdad se necesita todo el texto.
-  - **Corre `execFile` ASÍNCRONO, nunca `spawnSync`.** `spawnSync` congela el proceso entero — y este
-    daemon es uno solo: se frenarían el poll loop (todos los chats), los updates de progreso, el
-    watchdog del webhook y los 4 crons proactivos. Hasta 10 s de parálisis global por una consulta.
-  - **`realpathSync` ANTES de validar el path.** El regex de la allowlist acepta `..` en sus
-    segmentos `[^/]+`, así que `~/.claude/projects/../../tool-results/toolu_x.json` pasaba el chequeo
-    y apuntaba fuera del árbol. Resolver primero colapsa el `..` y además sigue symlinks. **La misma
-    debilidad sigue en `read-persisted.ts`**, que tiene el regex idéntico — no se tocó en este
-    cambio, pero está ahí.
-  - **⚠️ Gotcha de seguridad, verificado en vivo: `jq` expone el entorno del proceso** vía `env` y
-    `$ENV` (`FOO=secreto jq -n 'env.FOO'` devuelve `"secreto"`). El daemon corre con `NOTION_TOKEN`,
-    `COS_TELEGRAM_BOT_TOKEN` y todo `apps.env` cargado, así que el spawn va con
-    `env: { PATH: "/usr/bin:/bin" }`. Sin eso, una expresión con `env` — escrita por error por el
-    modelo o inducida por prompt injection en contenido web que Jano haya leído — volcaría todos los
-    secretos de Cal al contexto y de ahí a Telegram. Hay tests de regresión para `env` y `$ENV`.
-  - **`maxBuffer` 64 MB:** `spawnSync` corta en 1 MB por default y devuelve `ENOBUFS`. Lo encontró un
-    test, no la revisión — sin esto, cualquier consulta amplia fallaba con error críptico en vez de
-    truncar. El truncado real lo hace `MAX_OUTPUT_CHARS` (20 K), que sí es explícito.
-  - NO es un `Bash` general: `Bash` sigue en `DISALLOWED_BUILTINS`. Es un binario fijo, sin shell,
-    con allowlist de paths (la misma de `read-persisted.ts`).
-
-**El upgrade del SDK desbloqueó 5× de contexto (confirmado con prueba de humo real).** Con 0.2.122 el
-log reportaba `contextWindow: 200000` en cada turno; con 0.3.220, una query mínima contra el mismo
-`claude-sonnet-5` reporta **`contextWindow: 1000000`** y `maxOutputTokens: 64000`. O sea el techo de
-200K no era un límite del modelo ni del harness: eran las tablas de modelos desactualizadas del SDK
-0.2.x (esa rama es anterior a Opus 5 / Sonnet 5 — sus propios comentarios todavía decían
-`'xhigh' — Opus 4.7 only`). No hizo falta ningún flag beta: `context-1m-2025-08-07` sigue existiendo
-en los tipos pero está documentado como "Sonnet 4/4.5 only" y NO se usa.
-La misma prueba confirmó que 0.3.220 arranca bien con OAuth Max y acepta `effort`.
+- **`maxTurns` = 25** (`index.ts`) — el techo corta loops, no trabajo legítimo.
+- **`effort`** (`effort.ts`): default `high` (override `JANO_EFFORT`); Cal sube a `xhigh` con prefijo explícito `/deep`, `/fondo` o `++` — nunca heurística automática, para no gastar cuota de Claude Max sin que Cal sepa por qué.
+- **Techo de 20 turnos por sesión** (`JANO_MAX_SESSION_TURNS`) — al tope, el chat arranca sesión nueva y vuelve al historial de KV (se pierde detalle de tool calls viejas, no la conversación). Monitorear `grep sdk_diagnostic_leak ~/Library/Logs/cos-agent-v2.out.log` si aparece "Autocompact is thrashing" de nuevo.
+- **`resume` por chat** (`session-store.ts`, `sessionId` en `~/.cos-agent/sessions.json`, TTL 12h igual que KV): KV pasó de fuente primaria a fallback — con resume exitoso, `runAgent` NO reinyecta el historial de texto de KV (duplicaría el pasado real + uno resumido por Haiku que puede contradecirlo). Fallback automático si el `.jsonl` está borrado/vacío/corrupto. `/deep` por voz recalcula el effort post-transcripción. `/reset` limpia KV **y** sessionId (limpiar solo uno no tiene efecto real).
+- **`consultarJson({path, jqExpr})`** (`tools/consultar-json.ts`) — corre `jq` sobre un persisted-output sin traerlo al contexto (preferir sobre `readPersistedOutput` para datos estructurados grandes). `execFile` async, nunca `spawnSync` (congelaría el daemon entero). `realpathSync` ANTES de validar el path (mismo regex con debilidad a `..` que `read-persisted.ts`, sin resolver ahí). **⚠️ `jq` expone el entorno del proceso vía `env`/`$ENV`** — el spawn va con `env: { PATH: "/usr/bin:/bin" }` explícito; sin eso, una expresión (por error o prompt injection) volcaría todos los secretos de Cal a Telegram. `maxBuffer` 64 MB (default de `spawnSync` es 1 MB → `ENOBUFS`). No es `Bash` general — binario fijo, sin shell, con allowlist de paths.
 
 ## Research de competencia (Yape Bolivia) — Fase 1 2026-08-31, Fase 2 2026-09-02/03, Chrome real 2026-09-04/05
 
@@ -818,104 +651,41 @@ Hay dos mecanismos de proactividad independientes:
 - **`scheduleKpiCardDaily()` — ELIMINADO 2026-07-24** (cron fijo `0 10 * * *`, pedido de Cal). La tarjeta PNG (TRX + Activos DAU + % vs. semana anterior, `@napi-rs/canvas`, `enviarFotoLocal`) ya NO espera un horario fijo — se dispara sola desde el pipeline PDF de `scheduleKpiIngestCheck()` (ver abajo) apenas ese mail se procesa con éxito, porque los 4 campos que la tarjeta muestra son 100% del PDF (el CSV no le aporta nada). Idempotente por fecha vía `state.cardSent` en `kpi-ingest-state.json`; un fallo en la tarjeta no rompe el resto de la ingesta (try/catch propio) ni deja de marcar el mail como procesado. Sigue disponible **on-demand** sin cambios vía el tool `generarKpiCardYape` (chat con Jano) — la función `checkKpiCardDaily()` (`kpi-card-daily.ts`) no se tocó, solo cambió QUIÉN la llama y CUÁNDO.
   - **Bug visual, encontrado por Cal viendo la tarjeta real (2026-07-24): esquinas negras en vez de blancas.** `renderKpiCardImage()` (`kpi-card-image.ts`) crea el canvas (transparente por default) y solo pintaba blanco DENTRO del `roundRect()` (`ctx.fill()`) — los 4 triángulos de esquina que quedan AFUERA de la curva redondeada nunca se tocaban, quedaban transparentes, y Telegram los mostraba como negro sólido. **Fix:** `ctx.fillRect(0, 0, card.size, card.size)` con el mismo blanco ANTES de trazar el `roundRect` — pinta el canvas entero primero; el `roundRect` de abajo queda solo como borde decorativo (`stroke()`, ya no `fill()`). Test de regresión con `getImageData(0,0,1,1)` verificando que el píxel de esquina sea opaco y blanco (antes: alpha=0) — confirmado que reproduce el bug con el código viejo antes de aplicar el fix.
 - `scheduleJournalSweep()` — **ACTIVO 2026-07-27** (pedido de Cal, ver sección "Journal de reflexión" abajo). Cron `0 19 * * 0` (domingos 19:00 La Paz) — junta las entradas `Sin revisar` de los últimos 7 días de la DB Journal y manda un selector para destilarlas a Resonate Calendar. Dedup en CF KV (TTL 7 días). Es la **tercera excepción** a la arquitectura reactiva decidida el 2026-07-14.
-- `scheduleKpiIngestCheck()` — **ACTIVO 2026-07-23** (implementado 2026-07-22, credenciales conectadas y cron corriendo desde 2026-07-23; ampliado el mismo día a doble pipeline — pedido de Cal, ver `docs/superpowers/specs/2026-07-22-kpi-ingest-email-notion-design.md`). Cron `*/15 6-23 * * *`, mecánico (sin agente SDK) — detecta los mails diarios de BCP, espera 15 min desde que llegan, hace upsert de los KPIs raw por Fecha en "KPIs diarios" y completa los derivados que falten en todo el histórico. Si las credenciales no están configuradas, el cron queda sin registrar al arrancar (no rompe el daemon). No vive en Yapito — el trigger es el Gmail personal de Cal, que solo Jano tiene conectado.
-  - **Credenciales Gmail — el plan original del spec (`gcloud auth application-default login` con scope `gmail.readonly`) no funcionó:** Google bloquea al cliente OAuth propio de `gcloud` para scopes sensibles como Gmail en apps no verificadas ("This app is blocked"). **Fix real:** reusar cross-project el OAuth que ya existe para el Ulanzi (`gmail-update.sh`, proyecto Google Cloud `jano-youtube`, ver [[reference_youtube_oauth_playlist]]) — `index.ts` lee `GMAIL_OAUTH_CLIENT_ID`/`GMAIL_OAUTH_CLIENT_SECRET` desde `YOUTUBE_OAUTH_CLIENT_ID`/`YOUTUBE_OAUTH_CLIENT_SECRET` y `GMAIL_OAUTH_REFRESH_TOKEN` desde `GMAIL_OAUTH_REFRESH_TOKEN_LEPESQUEUR`, todas ya en `~/.claude/secrets/apps.env` (cargado como fallback por todo daemon, ver `Personal/Agents/CLAUDE.md`). **No duplicar estas credenciales en `~/.cos-agent/.env`** — son un recurso cross-project, un solo origen en `apps.env`.
-  - **Bug real, resuelto el mismo día del primer run (2026-07-23):** el primer arranque encontró 4 mails atrasados (backlog desde que se implementó el cron sin credenciales) y los procesó en cadena — esperado, no se repite (de acá en más 1 mail/día). Pero el reporte del 4to mail (~6600 caracteres) nunca llegó a Telegram: `sendReport()` truncaba el texto a lo bruto con `.slice(0, 4076)` cuando superaba 4096 chars, y el corte cayó a mitad de la etiqueta `<b>Derivados:</b>` — Telegram rechazó el mensaje entero por HTML mal formado (`can't parse entities`). Los datos SÍ se habían escrito bien en Notion, solo faltó la confirmación. **Fix (siguiendo la sección "Paginación de mensajes >4096 chars" del skill `telegram-bot-ux`):** `sendReport()` ahora usa `paginateReport()` — corta en el último `\n\n`/`\n`/espacio antes del límite (nunca a mitad de una etiqueta, porque los tags `<b>...</b>` del reporte siempre viven dentro de una sola línea) y manda los chunks resultantes como mensajes secuenciales en vez de truncar y perder información. Aplica el mismo patrón a cualquier otro reporte de texto largo por cron (`health-sync-check.ts`, `kpi-card-daily.ts`) si algún día crece más allá de 4096 chars — hoy no les pasa, pero el riesgo es el mismo.
-  - **Ampliado a doble pipeline (2026-07-23) — replica el agente de Notion AI que hacía esto antes a mano.** Cal encontró que la Fecha de "Seguimiento Diario Yape Bolivia" (PDF de BCP, subject exacto, `has:attachment`) llega CASI al mismo segundo que el "Self-Service" (CSV) para la misma fecha — son dos formatos del mismo reporte diario, no fuentes independientes. Antes de este cambio existía un agente nativo de Notion (AI Agent, `app.notion.com/agent/...`, NO expuesto por la API pública) que procesaba solo el PDF, con lógica de detección de fallo y archivado — se replicó su comportamiento en vez de descartarlo. Reparto de campos para que las dos fuentes nunca se pisen:
-    - **PDF-only (autoritativo):** `Afiliaciones diarias`, `TRX`, `Activos DAU` (el CSV YA NO los escribe — `PDF_OWNED_RAW_PROPS` en `kpi-ingest-check.ts`), más `Afiliados 7d` (antes solo calculado, ahora directo del PDF — `fillDerivedFields()` sigue de fallback si el PDF no llegó), `TRX Promedio 7d` (propiedad que ya existía en la DB pero nunca se llenaba), y las 6 `vs. Ayer (%)`/`vs. Sem. anterior (%)` de Afiliaciones/TRX/DAU (propiedades ya existentes, antes fuera de scope del cron — el PDF las trae directas, sin esperar el cálculo D/D-7).
-    - **CSV-only:** todo lo demás (`Activos 30d`, `Stock Afiliados`, `Saldo`, `Remesas (cantidad/USD)`, `Activos 30d %`, `Activos DAU %`, `DAU Promedio 7d`, `Ingresos Recaudacion/Recargas/PDS`) — el PDF no los reporta.
-    - **Parser del PDF (`kpi-ingest-pdf.ts`):** `pdf-parse` (mismo patrón `createRequire`+`PDFParse` que `schedule-cal.ts`/`index.ts`) extrae texto plano; `extractPdfKpis()` busca líneas EXACTAS ("Afiliaciones diarias", "TRX", "Activos DAU", "Afiliados 7d", "TRX Promedio 7d" — nunca por prefijo, para no confundir con las etiquetas de los gráficos tipo "Afiliaciones diarias\tAfiliaciones (Prom. 7d)") y lee el valor + las 2 líneas "vs. Día anterior"/"vs. Sem." dentro de un lookahead corto. **Gotcha real encontrado en un PDF real:** el bloque de "Afiliados 7d" trae un typo de Yape ("vs. Sem. **anteior**", sin r) — el match es por prefijo `vs. Sem.` para no depender de la ortografía exacta.
-    - **Fecha del reporte:** del FILENAME del adjunto (`"Seguimiento Diario Yape | DD/MM/YYYY.PDF"`, `parseReportDateFromFilename()`) — más confiable que el Subject o el `internalDate` de recepción.
-    - **Reporte fallido ("updated fail"):** `isFailedReport()` — regex case-insensitive sobre el texto completo (sin verificar todavía contra un PDF real fallido, solo contra el flujo documentado del agente de Notion — si el patrón no dispara con un caso real, ajustar). Si dispara: NO se tocan los 3 campos raw ni los derivados de esa fecha, se escribe la propiedad **Notas** (rich_text) con `PDF_FAIL_NOTE` (`markPdfReportFailed()`, conserva cualquier nota manual previa concatenando), NO se archiva el mail, y el reporte a Telegram lo dice explícito. Un reintento posterior no-fallido limpia la nota (`clearPdfFailNote()`, solo remueve el texto de la marca, conserva el resto).
-    - **Archivado + marcar leído (`archiveAndMarkRead()`, requiere scope `gmail.modify`):** decisión de Cal, replica al agente viejo. ✅ **Resuelto 2026-08-08:** Cal regeneró `GMAIL_OAUTH_REFRESH_TOKEN_LEPESQUEUR` con scope `gmail.modify` vía el flujo OAuth loopback (mismo patrón que `reference_youtube_oauth_playlist` / el `gmail-update.sh` original), reemplazado en `apps.env` (mismo criterio cross-project — Ulanzi sigue andando igual, `gmail.modify` incluye lectura). Verificado en vivo 2026-08-09 contra la API real de Google (`tokeninfo`): el access token del refresh token vigente devuelve `scope: gmail.modify`. Las últimas fallas `kpi_ingest_archive_failed` en los logs son del 2026-08-07 (antes del cambio) — el daemon corre con el token nuevo desde el restart del 2026-08-09.
-    - **Las dos búsquedas (CSV y PDF) corren en el mismo tick, cada una con su propio estado pending/processed compartiendo el mismo `kpi-ingest-state.json`** (los IDs de mensaje son únicos en todo el buzón, sin colisión entre los dos subjects) — `pollAndProcess()` genérico parametrizado por `searchFn`/`processFn`. No hay pairing/merge por fecha: cada pipeline procesa y reporta de forma independiente: Cal recibe 2 mensajes de Telegram por día (uno por fuente), nunca 1 fusionado — más simple y sin ventana de carrera por asincronía de llegada.
-  - **UX del reporte, iterado con Cal el mismo día (2026-07-24, aplicando el skill `telegram-bot-ux`):**
-    - Header separa la fuente con `·` en vez de paréntesis; con 2+ fechas en un mismo tick de CSV se antepone el conteo — antes una corrida de 20 fechas era pura pared de texto sin ningún resumen arriba. **Reemplazado el 2026-07-29 por el rediseño de abajo** (el conteo se fundió en la línea de resumen).
-    - **Tercer caso de ruido — el reporte del CSV entero, rediseñado el 2026-07-29 a pedido de Cal ("es demasiado ruido"):** los dos fixes anteriores atacaron la sección "Derivados", pero el bloque **Ingesta** era el problema grande y estaba mal diagnosticado. El comentario original hablaba de "catch-up", como si varias fechas en un tick fueran la excepción: **no lo son**. El CSV del Self-Service trae el **mes-a-la-fecha completo todos los días** (verificado en `kpi_ingest_full_report`: los últimos 5 reportes arrancaban todos en `2026-07-01`), así que la corrida NORMAL desglosaba ~27 fechas, cada una repitiendo los MISMOS 9 nombres de campo. La pared crecía un renglón por jornada y a fin de mes tocaba `MAX_REPORT_LINES` y se truncaba sola. Nada de eso era accionable: el mensaje contestaba "¿qué hizo el robot?" en vez de "¿algo necesita tu atención?". **Fix:** `formatSuccessReport()` recibe ahora `CsvIngestRow[]` (structured) en vez de strings ya formateados, y colapsa el caso normal a **dos líneas** (`✅ KPIs diarios · Self-Service` + `📅 {última fecha} · {N} fechas · {M} campos`). El desglose por fecha SOLO aparece bajo `⚠️ Revisar:` y solo para lo que se sale de la norma: fecha `created` (registro nuevo), `fieldsWritten` vacío, un conteo de campos distinto al **modal** de la corrida (`modalFieldCount()` — así se detecta una columna que dejó de venir), columnas ilegibles o no mapeadas. El detalle completo sigue yendo al log estructurado `kpi_ingest_full_report` (ahora con `ingestRows` en vez de `ingestSummary` — ojo si tenés greps viejos sobre ese campo).
-    - **`Derivados: • nada pendiente` se dejó de imprimir** (mismo cambio, aplicado a los reportes de CSV **y** de PDF): una línea fija que aparecía en cada corrida y nunca comunicó nada. La sección entera se omite cuando no hay completados ni huecos recientes. El principio detrás de los tres casos es el mismo: **reportar la excepción, no la confirmación** — si algo se imprime siempre, no es información.
-    - El reporte del PDF (`formatPdfSuccessReport`) muestra los VALORES reales (no solo qué campos se tocaron), con separador de miles, y la tendencia día/semana que ya trae el propio PDF (`▲ +0.4% día · ▼ -10.3% sem.`) — emojis de categoría documentados en el lexicon del skill: 👥 afiliaciones, 🔁 TRX, 📊 DAU. El CSV se dejó sin esto (sus 9 campos son heterogéneos — dinero, actividad, personas — forzar un solo emoji no comunica nada real).
-    - **Bug de ruido real, encontrado por Cal viendo el reporte en vivo:** la sección "Derivados" listaba TODOS los "no calculables" de fillDerivedFields() en CADA corrida — incluidas ~25-49 fechas de enero 2026 que son permanentemente no-calculables (no existe D-7 porque ahí arranca el histórico) y NUNCA van a cambiar. Resultado: el mismo bloque de 40+ líneas repetido idéntico en todos y cada uno de los reportes, para siempre. **Fix:** `formatDerivedLines()` ahora filtra los "no calculables" a los de los últimos 30 días (`isRecentFecha()`, sobre `Date.now()`) — solo lo reciente es accionable (indicaría un hueco real que vale revisar); lo viejo se sigue viendo completo en el log estructurado (`kpi_ingest_(pdf_)?full_report`), solo se sacó del mensaje de Telegram. Los "completados" (valores nuevos rellenados) no se filtran — son intrínsecamente raros y siempre informativos.
-    - **Segundo caso de ruido, mismo día, encontrado corriendo el fix anterior con datos reales:** después del filtro de 30 días seguían quedando ~4 líneas — "Afiliaciones vs. Sem. anterior (%) → no calculable (falta afiliacionesDiarias el {domingo})". Causa: `applySundayRule` pone "Afiliaciones diarias" en `null` TODOS los domingos (restricción SEGIP) — así que ese derivado nunca se puede calcular ningún domingo, para siempre, y con el filtro de recencia esos domingos siempre están "dentro de la ventana", rotando semana a semana. Mismo patrón que el bug de enero (permanente, no accionable), solo que recurrente en vez de histórico. **Fix:** `isPermanentSundayGap()` filtra ese caso puntual (domingo + motivo `"falta afiliacionesDiarias el ..."`) además del filtro de recencia.
-    - **Arquitectura de recálculo, pedido por Cal el mismo día:** `fillDerivedFields()` ya no recorre TODO el histórico buscando huecos en cada tick — solo evalúa/escribe sobre las fechas recién tocadas por ESE mail (`onlyFechas`, 2do parámetro; `CSV` pasa todas las fechas del batch, `PDF` pasa `[fecha]`). El fetch de historial completo se sigue haciendo igual (hace falta como contexto para el cálculo D-7), pero el loop externo y el reporte quedan acotados. Sin `onlyFechas` (parámetro omitido) sigue haciendo el reproceso completo de siempre — es el modo "recalcular todo", disponible para cuando Cal lo pida.
-    - **Reproceso manual, dos vías:** (1) **por acá** (sesión interactiva de Claude Code) — llamar `fillDerivedFields(notionToken)` sin `onlyFechas` directo desde un script `tsx`/`node`, igual que se hizo para inspeccionar durante el desarrollo. (2) **por Jano** (chat) — tool nuevo `mcp__cos-tools__reprocesarKpisDerivadosYape({ fechas? })` (`agent-tools.ts`, guía de uso en `system-prompt.ts` sección "Reprocesar KPIs derivados de Yape") — Cal le pide a Jano "reprocesa los KPIs derivados" (todo el histórico) o "reprocesa el 15 de julio" (fecha puntual) y el LLM llama la tool. Auto-allowlisteada vía el mapeo `sdkTools.map(t => mcp__cos-tools__${t.name})` en `index.ts` — no hace falta tocar `agent-options.ts` para tools nuevos de `cos-tools`.
+- `scheduleKpiIngestCheck()` — **ACTIVO** (solo si hay credenciales Gmail, ver arriba). Cron
+  `*/15 6-23 * * *`, mecánico (sin agente SDK) — detecta los mails diarios de BCP, espera 15 min,
+  hace upsert en "KPIs diarios" y en "KPIs Yape Lending" (DB separada, dominio Riesgos) y completa
+  derivados D/D-7. Reemplaza a mano lo que hacía un AI Agent nativo de Notion no expuesto por la
+  API pública. **Historia completa (build del doble pipeline CSV+PDF, triple pipeline Lending,
+  bugs de truncado/ruido/reconciliación): `CHANGELOG.md`, entrada `2026-07-22 a 2026-08-09`.**
+  Referencia operativa que sigue vigente:
+  - **Reparto de campos, KPIs diarios:** PDF es autoritativo para `Afiliaciones diarias`/`TRX`/
+    `Activos DAU`/`Afiliados 7d`/`TRX Promedio 7d` + las 6 `vs. Ayer/Sem (%)`; el CSV trae el resto
+    (Activos 30d, Saldo, Remesas, Ingresos...). Parser (`kpi-ingest-pdf.ts`) tolera un typo real de
+    Yape ("vs. Sem. **anteior**", sin r) matcheando por prefijo, y pega el % con la label siguiente
+    sin salto de línea real en algunos PDFs (`matchLabelSuffix()`).
+  - **Lending: validación 100% aritmética** (`reconcileLendingFunnel()`, no por %, posición
+    inconsistente entre bloques) — si falta EXACTAMENTE un campo de los 15 y las ecuaciones lo
+    determinan sin ambigüedad, se completa por reparación (`deriveMissingField()`) en vez de
+    rechazar. "EN PROCESO" aparece 2 veces en el PDF — se resuelve por ancla de contexto, no orden.
+  - **Gotcha sin auditar, riesgo latente real:** `fillDerivedFields()`/`fillLendingDerivedFields()`
+    saltan cualquier derivado D-1 que ya tenga valor — un reenvío del mismo reporte con números
+    CORREGIDOS deja el derivado viejo stale (bug real, resuelto solo para Lending vía `onlyFechas`
+    forzando recálculo; el mismo patrón en KPIs diarios no se auditó todavía).
+  - **Gap conocido sin resolver:** la fecha de Lending viene del CUERPO del mail (no del filename)
+    — si nunca se determina, el mail queda huérfano en `state.pending` sin aviso de abandono.
+  - Reproceso manual: tool `mcp__cos-tools__reprocesarKpisDerivadosYape({ fechas? })` (chat) o
+    `fillDerivedFields(notionToken)` sin `onlyFechas` desde un script (recalcula todo el histórico).
 
-  - **Ampliado a TRIPLE pipeline (2026-07-27) — 3er dominio, DB Notion separada.** Cal reenvió el primer "Reporte diario Créditos Yape Lending - Riesgos" (Milton Silva, Risk Specialist Yape, `msilva@bcp.com.bo`, reenviado vía `CLepesqueur@bcp.com.bo` — mismo patrón de origen que los otros 2). Dashboard Power BI del "Funnel Piloto Yape Lending" (créditos): 15 nodos ACUMULADOS desde el arranque del piloto (Leads→Vistos→Me Interesa→Contactado→Derivados→Agencia→Desembolso, con sus ramas negativas) — dominio de negocio distinto (Riesgos, no afiliación/TRX/DAU), así que va a una DB Notion **separada** ("KPIs Yape Lending", `KPI_LENDING_DB_ID = 3aac4876-09dd-8164-8905-e287a7b16f40`, bajo el mismo parent page que "KPIs diarios") — no se mezcló en la DB existente.
-    - **Archivos:** `kpi-ingest-lending-pdf.ts` (parser) + `kpi-lending-notion.ts` (upsert/derivados) nuevos; `kpi-ingest-gmail.ts` ganó `searchLendingReportEmails()` + `extractPlainTextBody()` (nuevo, genérico — DFS sobre `payload.parts`, `GmailMessageDetail.bodyText` opcional para no romper CSV/PDF); `kpi-ingest-check.ts` ganó `processLendingMessage()` como una 3ra llamada a `pollAndProcess()` dentro de `checkKpiIngest()`, reusando el mismo `kpi-ingest-state.json` (IDs de Gmail únicos, sin colisión). `index.ts` sin cambios — mismo cron `*/15 6-23 * * *`, mismas env vars (reusa `NOTION_TOKEN` + `GMAIL_OAUTH_*`).
-    - **Fecha del reporte viene del CUERPO del mail, no del filename** (`parseReportDateFromBody()`, regex sobre "cierre de la jornada de YYYY-MM-DD") — a diferencia del PDF de Seguimiento Diario, `LENDING.pdf` no trae fecha en el nombre. Si no matchea → `throw` SIN marcar `processed` (reintenta hasta 3 días, ventana de `newer_than:3d` de la query) — **gap conocido, no resuelto:** si nunca se encuentra la fecha, el mail sale de la ventana de búsqueda al día 4 y queda huérfano en `state.pending` para siempre, sin ningún aviso final de "abandono" (Cal solo deja de recibir el error dedupeado, puede leerse como que se resolvió solo). Mismo patrón preexistente en `processPdfMessage` (fecha no determinable por filename) — no es nuevo de Lending, decisión pendiente si vale la pena un aviso explícito de abandono en los 3 pipelines.
-    - **Gotcha real del PDF, encontrado con los 4 primeros reportes reales:** `pdf-parse` a veces pega el porcentaje del bloque anterior justo antes de la label siguiente SIN salto de línea real (`"27,1 %NO DERIVADOS"` en una sola línea, visto en 3 de 4 PDFs) — el matcher de labels acepta esto vía `matchLabelSuffix()` (label al final de la línea con un residuo puramente numérico/% antes; residuos con letras, como en "NO VISTOS" vs. label "VISTOS", se rechazan). También "SIN INTERACCIÓN" apareció sin tilde en uno de los 4 reportes reales — normalización NFD de diacríticos antes de comparar.
-    - **"EN PROCESO" aparece 2 veces** (una rama Derivados→Agencia, otra Agencia→Desembolso) — se resuelve por **ancla de contexto** (última label simple vista antes: `DESEMBOLSO`→rama Agencia, `DERIVADOS`→rama pre-Agencia), no por orden ordinal. Robusto si Power BI reordena SECCIONES completas; asume que el orden interno Agencia-antes-de-Desembolso se mantiene (confirmado en los 4 reportes reales) — si algún día cambia, falla explícito ("sin ancla reconocible"), nunca asigna a la rama equivocada en silencio.
-    - **Validación de integridad 100% aritmética, no por %:** los porcentajes del PDF no se parsean (posición inconsistente entre bloques). `reconcileLendingFunnel()` — 6 igualdades que cubren los 15 campos — verificadas contra los 4 días reales (cierran exacto) y contra un test que corrompe cada uno de los 15 campos +1 uno por uno confirmando que las 6 ecuaciones lo detectan. Si no reconcilia: `markLendingReportFailed(fecha, detalle)` (nota variable en `Notas`, a diferencia del `PDF_FAIL_NOTE` fijo del pipeline de Seguimiento Diario — el motivo de fallo acá es distinto cada vez) + aviso Telegram + sí marca processed (reintentar el mismo mail no cambia su contenido).
-    - **Derivados:** `Incremento Desembolso (D-1)` / `Incremento Derivados (D-1)` — resta simple contra el registro de exactamente un día antes (`isoDaysBefore(fecha,1)` + `rows.find`, nunca `rows[index-1]` para no asumir contigüidad) — a diferencia de los `vs. Sem. anterior (%)` de "KPIs diarios", que son %. Sin D-1 real (primer registro del histórico, o hueco de reporte — ej. 2026-07-24/25 no se generaron) → no calculable, explícito.
-    - **Backfill inicial (2026-07-27):** 4 correos reenviados por Cal (cierres 21/22/23/26 jul, falta el 24 — no se generó reporte ese día) cargados a mano vía `scripts/verify-lending-parse.ts FECHA=RUTA.pdf [--write]` (parsea, muestra los 15 campos + reconciliación, y con `--write` hace upsert real) — confirmado en Notion que coinciden con los números verificados a mano contra el dashboard antes de activar el cron.
-    - **Reviewed por `daemon-health-reviewer`:** sin bloqueantes. 2 warnings (el gap de abandono silencioso de arriba, y que la ancla de "EN PROCESO" asume orden fijo Agencia-antes-de-Desembolso) — ambos aceptados como riesgo de diseño (fallar explícito > adivinar), no bloquean build/restart.
-    - **Tarjeta PNG (2026-07-27), mismo patrón que la de KPIs diarios.** `kpi-card-lending-image.ts` (render, tokens duplicados de `kpi-card-image.ts`) + `kpi-card-lending-daily.ts` (fetch de la fila más reciente/por fecha + envío) — 3 columnas en orden de funnel (Vistos → Derivados Agencia → Desembolsos), incremento vs. **día anterior** como resta simple (no %, a diferencia de la tarjeta de TRX/DAU que muestra %WoW). Se agregó `Incremento Vistos (D-1)` a la DB (mismo patrón D-1 que Desembolso/Derivados) y se backfilleó para los 4 registros existentes. Se dispara sola desde `processLendingMessage()` apenas ingesta con éxito (dedup propio `state.lendingCardSent`, independiente de `state.cardSent` de la tarjeta de KPIs diarios — mismo patrón, arrays separados por dominio). On-demand: tool `mcp__cos-tools__generarKpiCardLending({ fechas? })` (`system-prompt.ts` sección "Tarjeta de KPIs de Yape Lending").
-    - **Ancho de columna más angosto que la tarjeta de KPIs diarios** (`valueMaxPx`/`valueMinPx` bajados de 190/110 a 160/70) — 3 columnas en vez de 2, y "Vistos" puede llegar a 6 cifras con separador de miles ("12,129"), mucho más ancho que "85"/"435" — sin bajar el piso de fuente, ese valor desbordaría la columna.
-    - **Renombre (2026-07-27, pedido de Cal):** "Vistos"/"No Vistos" → **"Ofertas Vistas"/"Ofertas No Vistas"** en la DB Notion (rename de propiedad vía `ntn api PATCH /v1/databases/{id}` con `{"properties":{"Vistos":{"name":"Ofertas Vistas"}}}` — preserva el `id` de la propiedad y los datos existentes, no es un borrado+alta), en la card, y en el reporte de Telegram; `Incremento Vistos (D-1)` → `Incremento Ofertas Vistas (D-1)`. El heading de la card pasó de "Funnel Lending · Riesgos" a **"Funnel Piloto Lending Híbrido"**. Los identificadores internos en TS (`vistos`, `noVistos`, `incrementoVistos` en `LendingFunnelFields`/`LendingHistoryRow`) NO se tocaron — solo cambiaron los strings de propiedad Notion y los textos visibles (card/Telegram); es deliberado, evita un refactor grande sin beneficio (el nombre interno no es user-facing).
-    - **Card rediseñada a 4 columnas (2026-08-05), delta D-1 estricto en vez de "último dato
-      disponible":** pedido de Cal — `Derivados Agencia → Agencia → En Proceso (Agencia) →
-      Desembolso` (sacó `Ofertas Vistas`). 2 propiedades Notion nuevas (`Incremento Agencia (D-1)`,
-      `Incremento En Proceso (Agencia) (D-1)`), mismo patrón D-1 estricto que las 3 existentes.
-      `kpi-card-lending-daily.ts` dejó de recalcular su propio delta "contra el último dato
-      disponible" (diseño original, documentado arriba) — ahora solo EXPONE los `Incremento X (D-1)`
-      ya calculados en Notion; sin D-1 real el delta sale en blanco (antes toleraba huecos de
-      reporte comparando contra el registro previo más reciente).
-    - **Bug real encontrado el mismo día — derivados D-1 quedaban stale tras un reenvío del
-      reporte con números corregidos:** `fillLendingDerivedFields()` saltaba cualquier
-      `Incremento X (D-1)` que ya tuviera valor, pero el CRUDO del que depende sí cambia en un
-      reenvío (`upsertLendingRow` lo pisa sin condición). Visto en vivo: 2 mails de Lending para el
-      4/ago, el 2do corrigió `Desembolso` 133→147 pero el incremento quedó pegado en 0 en vez de 14.
-      **Fix:** con `onlyFechas` (ingesta puntual o reproceso explícito vía
-      `reprocesarKpisDerivadosYape`) ahora FUERZA el recálculo aunque ya exista un valor; sin
-      `onlyFechas` (modo "reprocesar todo el histórico") sigue sin tocar lo ya calculado, para no
-      barrer toda la DB en cada tick del cron. **Mismo patrón `getExisting != null → skip` existe
-      en `fillDerivedFields()` de `kpi-ingest-notion.ts` (KPIs diarios) — no auditado todavía,
-      podría tener el mismo bug latente si algún día se resuelve reenviar el CSV/PDF corregido.**
+### Cron de Tareas por mail — `scheduleTaskEmailCheck()` (2026-07-28) — ⛔ DESACTIVADO 2026-09-05
 
-  - **Reconciliación como fallback de un campo ilegible (2026-07-28) — no solo validación, también reparación acotada.** El 2026-07-27 falló el reporte (`kpi_ingest_lending_parse_failed`, "noContactado: no pude leer el valor tras la label"): Power BI renderizó "NO CONTACTADO" abreviado como `"1K"` en vez del número completo ("1.179") — probablemente por ancho de tarjeta ese día, no una regresión del parser (los otros 14 campos parsearon normal). Como el resto del funnel ya reconciliaba, el valor era deducible sin ambigüedad: `Contactado(1.179)+NoContactado=MeInteresa(2.358)` → 1.179. **Fix:** `deriveMissingField()` en `kpi-ingest-lending-pdf.ts` — si falta EXACTAMENTE UN campo de los 15 y aparece en alguna de las 6 ecuaciones de `FUNNEL_EQUATIONS` (refactorizadas de 6 llamadas `checkSum()` inline a una tabla compartida entre `reconcileLendingFunnel()` y esta función) con todos los demás términos ya conocidos, lo completa por aritmética simple; nunca si faltan 2+, nunca si el resultado da negativo. `parseAndValidateLendingReport()` lo intenta ANTES de rechazar el reporte, y siempre re-verifica con `reconcileLendingFunnel()` que el valor derivado cierre — nunca confía ciegamente en la resta. Se loguea explícito como `kpi_ingest_lending_field_derived` (campo, valor, ecuación) para que quede claro que ese número vino de reconciliación, no de una lectura literal del PDF. Backfill puntual del 2026-07-27 hecho a mano (mismo camino que `upsertLendingRow`/`clearLendingFailNote`/`fillLendingDerivedFields`) — confirmado en Notion (`No Contactado: 1179`, sin nota de fallo). Reviewed por `daemon-health-reviewer`: sin bloqueantes.
+**Desactivado a pedido de Cal** (línea comentada en `loop()`, `index.ts`) — código y diseño intactos por si se reactiva. **Historia completa del diseño (tarjeta+cola, y los 2 bloqueantes + 3 carreras que encontró `daemon-health-reviewer`): `CHANGELOG.md`, entradas `2026-07-28 (3)`.**
 
-### Cron de Tareas por mail — `scheduleTaskEmailCheck()` (2026-07-28)
+Mails que Cal reenvía a mano con **"(Tarea)"** en el asunto → tarea en la DB Notion **"Tareas"** (`1f2c487609dd802985dcd7ad59110ddd`). Mismas credenciales Gmail que KPI/DN, mismo cron `*/15 6-23 * * *`.
 
-Mails que Cal reenvía a mano con **"(Tarea)"** en el asunto (de `clepesqueur@bcp.com.bo` a `carlos@lepesqueur.net`) → tarea nueva en la DB Notion **"Tareas"** (`1f2c487609dd802985dcd7ad59110ddd`). Mismas credenciales Gmail cross-project que KPI/DN, mismo cron `*/15 6-23 * * *` La Paz. Spec original: página Notion "Cron para Tareas en Notion" (pedida por Cal, instrucciones del "agente de Notion" que hacía esto antes a mano — mismo patrón que el triple pipeline de KPIs, que también replica un agente nativo de Notion no expuesto por la API).
-
-- **Archivos:** `task-extract.ts` (síntesis del cuerpo del mail vía LLM — único paso de este pipeline que NO es 100% mecánico, a diferencia de KPI/DN/Lending), `task-notion.ts` (escritura a Notion), `task-check.ts` (cola + propuesta + creación, state en `~/.cos-agent/task-check-state.json`), `task-card.ts` (render puro de las tarjetas), `task-callbacks.ts` (botones `tsk:*` + texto libre), `task-store.ts` (propuestas en CF KV), `task-people.ts` (snapshot de People), `task-dates.ts` (atajos y parser de fechas), `task-types.ts`.
-- **`task-extract.ts` — Sonnet (`claude-sonnet-5`), `maxTurns:1`, sin tools, mismo patrón que `journal-enrich.ts`.** Pasó de Haiku a Sonnet el 2026-07-28 a pedido de Cal: son hilos de trabajo reenviados, con contexto implícito y varios interlocutores, y la síntesis se paga UNA vez por mail. Convierte el cuerpo en `{resumen, accionRequerida, contextoRelevante, deadline, fecha, sinAccionClara}`. Reglas explícitas de "no inventar" (ni fechas, ni contexto, ni responsables) — resuelve fechas relativas ("para el viernes") contra la fecha de recepción real. Si la llamada falla o el JSON no parsea, el caller NO pierde el mail: propone igual, marcado `sinAccionClara:true`, con el cuerpo crudo como resumen.
-
-#### Tarjeta de confirmación + cola (2026-07-28, rediseño pedido por Cal)
-
-El cron ya **no crea la tarea directo**: propone una tarjeta en Telegram y la página de Notion nace recién al tocar `✅ Crear tarea` (patrón `propose → botones` de Pecunia). Cal ajusta ahí mismo **asignado, Fecha y Deadline**.
-
-- **Una tarjeta activa por vez.** Los mails detectados van a una cola FIFO (`state.queue`) y se proponen de a uno; `state.active` marca cuál está en pantalla. Cada tarjeta muestra `📥 Quedan N en la cola`. Al resolver (`✅`/`❌`) la siguiente llega como **mensaje nuevo** — un edit no genera push, y el punto es que Cal se entere.
-- **La cola guarda solo `{messageId, threadId, subject, followupIds}`.** El cuerpo, los adjuntos y la llamada a Sonnet se resuelven cuando el ítem llega al frente (`promoteNext`): un tick con 5 mails no dispara 5 llamadas al modelo de golpe, y ningún cuerpo de correo queda escrito en disco.
-- **`processed` se marca al ENCOLAR** (para no re-encolar cada 15 min) pero **el mail NO se archiva hasta crear la tarea** — la inbox es el respaldo si Cal nunca toca la tarjeta. Ese es el costo aceptado de "crear al confirmar": una propuesta ignorada 7 días (TTL del KV) es una tarea que no nace. `ensureActiveProposal()` detecta la propuesta vencida, libera el turno y sigue con la cola: **nunca queda trabada**.
-- **`⏭️ Después`** manda la propuesta al final de la cola y descarta su payload en KV — cuando vuelva a tocarle turno se re-sintetiza, así refleja el mail tal como está en ese momento. El botón solo aparece si hay algo detrás.
-- **Snapshot estático de People (`task-people.ts`), decisión explícita de Cal:** top 20 por uso real en "Asignado a" (sobre 763 tareas: CAL 525, Lorena 33, Matias 30, Dieter 27…). El picker renderiza **sin tocar Notion** — la DB People tiene 639 filas. Se pagina de a 6 (`⏭️ Más` cicla a la primera página). El escape `✍️ Otro` resuelve primero contra el snapshot y **solo si el nombre no está entre los 20** consulta Notion (`findPersonInNotion`, filtro sobre la propiedad title **`Name`** — no "Nombre", verificado contra el schema real). Con 0 o 2+ coincidencias **repregunta**: nunca asigna a quien no era. Regenerar con `npx tsx scripts/refresh-task-people.ts [--write]`.
-- **Atajos de fecha = viernes** (`task-dates.ts`, puro y testeado): `📅 Hoy` · `📅 Vie {esta semana}` · `📅 Vie {próxima}` · `🚫 Sin fecha` · `✍️ Escribir`. Mismo set para Fecha y Deadline, con callbacks distintos (`tsk:fecs:` / `tsk:deds:`). En sábado o domingo "esta semana" salta al viernes siguiente — **un atajo nunca propone una fecha ya pasada**.
-- **⚠️ El texto libre (`✍️`) solo consume el mensaje si REALMENTE parsea** como fecha (`parseWrittenDate`: ISO, `dd/mm`, "mañana", día de la semana, "sin fecha") o como nombre (`looksLikeName`: ≤4 palabras, solo letras, ≥3 chars). Si no, el mensaje **sigue su curso normal hacia el agente**. Sin esa condición, el estado "esperando fecha" se tragaría un pedido real de Cal — exactamente el gotcha que ya pagó el modo journal, que intercepta TODO mientras está abierto. La tarjeta que pregunta conserva `⬅️ Atrás` para no quedar trabada sin botones. **`looksLikeName` además rechaza una lista de cortesías de una palabra** (gracias, ok, listo, dale, hola…): pasan el filtro "una palabra, solo letras" y se consumían gastando una query a Notion. `cancelar`/`olvidalo`/`nada` cierran la espera y devuelven la tarjeta (bloque B2b del skill: una palabra-comando nunca es un valor).
-- **El `pendingInput` se lee en el mismo `Promise.all` que el journal** (`index.ts`), no en serie: son ~100-300 ms Mac→Cloudflare que se pagan en CADA mensaje de texto, y ese bloque existe justamente para no erosionar el "placeholder en <1 s".
-- **Callbacks `tsk:*` son HEAVY** (crear escribe la página, sube adjuntos y archiva el mail) con el lock anti-doble-tap de `cf-kv.ts`, fire-and-forget, y **arriba del catch-all de "Heavy callbacks legacy"** de `index.ts` — abajo serían código muerto sin rastro en logs (mismo motivo que `bklg:*` y `lrn:*`).
-- **Los adjuntos se suben al CONFIRMAR, no al proponer:** los `file_upload` de Notion caducan en ~1 h y Cal puede tocar la tarjeta al día siguiente. Se bajan de Gmail y se suben dentro de `createTaskFromProposal`.
-- **`mutateState()` es el único camino de escritura del estado** (`task-check.ts`): lee-muta-escribe **sin awaits en el medio**. El cron y los callbacks corren en el mismo proceso pero intercalados por el event loop; una función que leyera, esperara a Notion y recién después escribiera pisaría lo que el otro camino guardó mientras tanto. Escribe con temporal + `renameSync`: `readTaskCheckState` traga cualquier error devolviendo estado vacío, así que un archivo cortado a la mitad se llevaría puestos `queue` y `threadPages`, no solo la lista de `processed` como en los pipelines previos.
-
-**Cinco cosas que encontró `daemon-health-reviewer` antes de producción** (las dos primeras eran bloqueantes) y que conviene no re-romper:
-
-1. **El orden `sendMessage` → `active` no es cosmético.** Al revés (marcar activo y después mandar), un fallo de envío — un blip de red, o el SNI filtering documentado más arriba — dejaba `active` apuntando a una propuesta cuya tarjeta nunca llegó al chat: el cron la veía viva 7 días (TTL del KV), no proponía nada más, y **todos los mails siguientes se acumulaban en la cola sin ningún aviso**. Ahora si el envío falla se borra la propuesta y el ítem queda en la cola para el próximo tick.
-2. **Crear la tarea tiene que ser idempotente por hilo.** `createTaskFromProposal` chequea `threadPages[threadId]` y devuelve la página existente con `yaExistia`. Sin eso, el `🔄 Reintentar` tras un fallo parcial —o un segundo tap una vez vencido el lock de 60 s mientras se suben adjuntos— creaba una **segunda página**. Complemento: `createTaskPage` no propaga el fallo del `appendChildrenInBatches` de los bloques que pasan de 100, porque ahí la página YA existe y propagar el error invita justamente a ese reintento.
-3. **El `⏳ Creando la tarea…` es la protección real contra el doble tap, no un adorno.** Subir adjuntos + escribir en Notion supera fácil los 60 s del lock (`MEETING_FLOW_LOCK_TTL_SEC`); mientras tanto el botón `✅ Crear tarea` seguía visible y sin ninguna señal. Quitar el teclado antes de arrancar es lo que cierra la ventana; el lock solo cubre el doble-tap rápido.
-4. **Toda promoción de la cola pasa por `serializePromote`** (cadena de promesas a nivel módulo). El flag `running` de `checkTaskEmails` solo lo protege de sí mismo: `advanceTaskQueue`/`postponeActiveTask` entran desde los callbacks, en paralelo con un tick del cron, y `promoteNext` lee `queue[0]`, espera segundos (Gmail + Sonnet) y recién ahí escribe `active` — ventana de sobra para mandar **dos tarjetas confirmables del mismo correo**. La mutación de `active` va DENTRO de la cadena, no antes. ⚠️ Nada dentro de la cadena puede volver a llamar una función que serializa: encolarse detrás de uno mismo es un deadlock (por eso existe `promoteNextUnsafe`). Y la cadena lleva **timeout de 120 s** (`PROMOTE_TIMEOUT_MS`): al ser un cuello de botella global, un solo await colgado —`extractTaskFields` no tiene timeout propio, y `sendMessage` de `shared-v2` es un `fetch` pelado, a diferencia de Gmail/Notion— dejaría esperando para siempre a todos los avances posteriores, incluidos los de los botones.
-   **`advanceTaskQueue` recibe el `proposalId`** y libera el turno solo si sigue siendo el activo. Los handlers `ok`/`no` borran la propuesta de KV y recién después de un round-trip a Telegram llaman a avanzar; si un tick del cron cae en esa ventana, la declara expirada y promueve la siguiente — y un `active = null` incondicional pisaba esa tarjeta recién mandada y promovía otra más.
-5. **El cuerpo del mail entra recortado a Sonnet** (`MAX_BODY_CHARS` = 40 K en `task-extract.ts`) y `accionRequerida`/`contextoRelevante` se cortan a 1800. Lo primero porque un hilo largo reenviado es exactamente la forma que produjo los cuatro "Autocompact is thrashing" documentados arriba; lo segundo porque Notion rechaza un `rich_text` de más de 2000 y el `validation_error` le llegaba a Cal como "no pude crear la tarea", sin nada que pudiera hacer.
-
-6. **La propuesta ya sintetizada se cachea en el ítem de la cola** (`TaskQueueItem.proposalId`). Si falla el envío de la tarjeta, el trabajo caro (Gmail + Sonnet) ya se pagó: sin la caché, con Telegram caído el cron lo rehacía **cada 15 minutos sobre el mismo correo** — 4 turnos de Sonnet por hora contra la cuota de Claude Max de Cal, con el único rastro de un `task_propose_send_failed` en el log. `⏭️ Después` sí limpia el campo: ahí se quiere re-sintetizar.
-
-Otros dos, menores pero con síntoma visible: `renderCreated` muestra el conteo **real** de adjuntos subidos (`uploadAttachments` traga el fallo por adjunto y Notion corta el upload single-part en ~20 MB — decir "2 adjuntos" con la página vacía los daba por guardados), y `createTaskFromProposal` **relee la propuesta de KV** antes de apendar los seguimientos, porque un correo del mismo hilo puede haber llegado después de que el handler leyó su copia.
-- **Emojis de dominio** (agregados al lexicon del skill `telegram-bot-ux`): `📎` adjunto · `📥` cola pendiente · `⏰` **Deadline** por contraste con `📅` Fecha (los dos conviven en la misma tarjeta). Ninguno decorativo.
-- **Anti-duplicados: por `threadId` de Gmail únicamente, no semántico.** Tres caminos: hilo con tarea YA creada → bloque `↪️ Seguimiento` en la página (`appendTaskFollowup()`); hilo con propuesta activa o en cola → se anexa a `followupIds` (se apenda al crear, con el cuerpo crudo recortado, sin gastar otra llamada al modelo) y **no nace una segunda tarjeta**; hilo nuevo → a la cola. **Decisión de Cal (2026-07-28): los adjuntos de un mail de seguimiento NO se suben** (solo el texto) — gap real encontrado por `daemon-health-reviewer`, dejado así a propósito para v1.
-- **"Bloque de Mail" del spec original no tiene equivalente en la API pública de Notion** (el bloque nativo de Gmail es una integración privada de la UI de Notion, ni siquiera `ntn` —que solo pega contra la misma API pública— lo puede crear). Resuelto con: bloque `bookmark` al permalink de Gmail (`gmailPermalink()`, `#all/{threadId}` — sobrevive al archivado, a diferencia de `#inbox/{id}`) + cada adjunto real subido como bloque `file` vía el flujo de 2 pasos de la File Upload API pública de Notion (`uploadAttachmentToNotion()`: crear `file_upload` → `POST .../send` con `FormData`/`Blob`, mismo patrón que `telegram-files.ts`). Bytes del adjunto SOLO en memoria (`Buffer`, nunca tocan disco) — sin el riesgo de path traversal que tienen los flujos que sí escriben a `tmpdir()` (ej. `boa-wallet-*`).
-- **`Asignado a` sale de la tarjeta; `Solicitado por` queda SIEMPRE en Cal** — es él quien reenvía el mail. En la DB real esa propiedad casi no se usa (18 de 763 tareas, todas Cal), así que no se le puso UI.
-- **Notificación en Notion a Cal cuando falta Fecha o Deadline (spec: "si queda Deadline O Fecha vacía"):** único mecanismo real de push de Notion vía API pública es un **comentario con @mención** (`notifyMissingDate()`, `POST /v1/comments`, mención de tipo `user` con el id real de Cal `11fa1824-6b4f-49b1-9427-8c2c494b69c1` — NO el pageId de People, son namespaces distintos). **Requiere que la integración "Claude CoS" tenga la capacidad de insertar comentarios habilitada en el Developer Portal de Notion — no verificado en producción todavía.** Si falla (403 por falta de capacidad), queda logueado (`task_notify_missing_date_failed`) sin romper el resto del flujo — Cal igual se entera por el reporte de Telegram, que también lista las preguntas.
-- **`archiveAndMarkRead()`:** requiere scope `gmail.modify`. ✅ Resuelto 2026-08-08 (mismo cambio de token que el pipeline PDF de KPIs, ver arriba) — el token compartido `GMAIL_OAUTH_REFRESH_TOKEN_LEPESQUEUR` ya tiene el scope, verificado en vivo 2026-08-09.
-- **Reviewed por `daemon-health-reviewer`** (tres pasadas: el pipeline original, el rediseño con tarjeta + cola, y la verificación de los fixes). Los 2 bloqueantes y los 8 warnings del rediseño están arriba, resueltos y con test de regresión; la tercera pasada cerró sin bloqueantes y aportó los 3 warnings que introdujo el propio fix de concurrencia (timeout de la cadena, `advanceTaskQueue` con `proposalId`, caché de la propuesta) — también resueltos. Gaps aceptados a conciencia: (a) si el proceso muere entre el envío de la tarjeta y el `mutateState`, ese mail se re-propone (tarjeta duplicada, no tarea duplicada — la creación sí es idempotente); (b) `MAX_QUEUE` = 50 con la búsqueda de Gmail acotada a 3 días: si la cola sigue llena al cuarto día el correo sale de la ventana, por eso el aviso al llenarse.
-- **Lo que va a CF KV** (`jano:task:proposal:*`, TTL 7 días) es asunto + síntesis de correo interno de BCP. Misma postura que journal/backlog, pero con un TTL bastante más largo — decisión consciente, no un descuido.
+- **Archivos:** `task-extract.ts` (síntesis vía Sonnet, único paso no-mecánico de este pipeline), `task-notion.ts`, `task-check.ts` (cola+estado, `~/.cos-agent/task-check-state.json`), `task-card.ts`, `task-callbacks.ts` (`tsk:*`), `task-store.ts` (KV), `task-people.ts`, `task-dates.ts`.
+- **Si se reactiva, verificar que sigan intactos** (son los puntos que rompieron producción antes del fix): orden `sendMessage → active` (invertirlo deja la cola trabada sin aviso si falla el envío), idempotencia por `threadPages[threadId]` en `createTaskFromProposal` (evita tareas duplicadas), y el `⏳ Creando la tarea…` que saca el teclado ANTES de escribir en Notion (el lock de 60s solo cubre el doble-tap rápido, no una operación de más de 60s con el botón visible).
+- **`notifyMissingDate()` (comentario @mención a Cal en Notion si falta Fecha/Deadline) nunca se verificó en producción** — depende de que la integración "Claude CoS" tenga la capacidad de comentarios habilitada en el Developer Portal de Notion.
+- `archiveAndMarkRead()` requiere `gmail.modify` — ✅ mismo token que el pipeline de KPIs, resuelto 2026-08-08.
 
 - `scheduleBooksDailyReport()` — **ACTIVO 2026-08-25** (pedido de Cal, ver sección "Libros" abajo). Cron `0 7 * * *`, mecánico (sin agente SDK) — status de la meta de libros 2026 agrupado por Estado + avance de páginas leídas AYER por libro (suma `Avance (pag)` de la Tracking DB vía rollup "Book Name"). Reporta **todos los días**, no solo cuando hubo avance — decisión explícita de Cal, para reforzar el hábito de lectura en vez de reportar solo la excepción (a diferencia del principio "reportar la excepción" del pipeline de KPIs de arriba — acá el objetivo es el recordatorio diario en sí, no una alerta).
 - `scheduleFeedbinDailyReport()` — **ACTIVO 2026-08-25** (pedido de Cal — motor de aprendizaje de temas). Cron `0 8 * * *` — no leídos de Feedbin agrupados por carpeta + recomendación de qué abrir, usando el perfil de temas semanal (`topics-profile-refresh.ts`, ver bullet siguiente); solo **SUGIERE**, nunca marca nada como leído por su cuenta. Sin `FEEDBIN_USERNAME`/`FEEDBIN_PASSWORD` el cron no se registra al arrancar.
@@ -938,21 +708,17 @@ las proactivas hoy desactivadas en Jano, copiar ese mismo patrón desde el día 
 (único proactivo activo en ese momento) y un futuro `fuel_alert` reactivado — nunca se confirmó en la
 práctica ni se implementó nada, y quedó sin objeto al apagarse `scheduleResumirPlaylist` el 2026-07-14.
 
-**Estado real (actualizado 2026-08-25):** **9 proactivos internos activos** — `scheduleHealthSyncCheck()`
-(alerta de corte de sync de Apple Health), `scheduleKpiIngestCheck()` (ingesta del mail diario de BCP a
-"KPIs diarios" + tarjeta de KPIs disparada desde ahí mismo, ver arriba), `scheduleJournalSweep()`
-(barrido dominical del Journal de terapia, ver abajo), `scheduleDailyNoteCheck()` (ingesta de
-"Daily Notes Yape" por mail, cada 15 min 6-23h — implementado en otra sesión el 2026-07-27,
-**pendiente de documentar en detalle por quien lo hizo**), `scheduleTaskEmailCheck()` (mails
-"(Tarea)" → tarjeta de propuesta en el chat, y tarea en la DB Notion "Tareas" al confirmarla; cola
-de a uno, cada 15 min 6-23h — ver sección propia arriba), `scheduleLearningReflect()` (reflexión
-nocturna del self-learning, 22:00 La Paz — ver sección "Self-learning" abajo), y los tres agregados
-el 2026-08-25: `scheduleBooksDailyReport()`, `scheduleFeedbinDailyReport()` y
-`scheduleTopicsProfileRefresh()` (ver bullets arriba) — además del webhook watchdog (infra, no le
-manda nada a Cal). `scheduleKpiCardDaily()` dejó de ser un cron propio el 2026-07-24 — ver arriba,
-quedó absorbido dentro del pipeline PDF de `scheduleKpiIngestCheck()`. Los otros 3 crons de dominio
-(resumidor, flight check-in, Foco check-in) siguen desactivados. Jano ya no es
-100% reactivo — son las nueve excepciones puntuales a esa decisión del 2026-07-14.
+**Estado real (actualizado 2026-09-05, verificado contra `loop()` en `index.ts`): 11 proactivos internos activos** (+ webhook watchdog, infra, no le manda nada a Cal):
+`scheduleHealthSyncCheck` (corte de sync Apple Health) · `scheduleBooksDailyReport` ·
+`scheduleFeedbinDailyReport` · `scheduleTopicsProfileRefresh` · `scheduleLluviaCheck` (lluvia
+Bolivia, ver `project_lluvia_bolivia_d1`) · `scheduleHealthGoalsMidday`/`scheduleHealthGoalsDaily`
+(metas de salud vs. Target, ver "Salud" en `BACKLOG.md`) · `scheduleJournalSweep` (barrido
+dominical Journal) · `scheduleLearningReflectLocal` (self-learning, 22:00) ·
+`scheduleKpiIngestCheck`/`scheduleDailyNoteCheck` (solo si hay credenciales Gmail — ver arriba).
+**`scheduleTaskEmailCheck` (mails "(Tarea)") está DESACTIVADO desde 2026-09-05** — no cuenta en
+los 11. `scheduleKpiCardDaily` no es cron propio desde 2026-07-24 (absorbido en el pipeline PDF de
+`scheduleKpiIngestCheck`). Resumidor/flight-checkin/Foco-checkin siguen desactivados. Jano ya no es
+100% reactivo — son las excepciones puntuales a esa decisión del 2026-07-14.
 **Sin proactividad por evento externo** — el monitor de combustible sigue apagado (`crons = []` en
 `combustible-proxy/wrangler.toml`, verificado 2026-07-03), ver abajo. Verificar qué crons internos
 arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.

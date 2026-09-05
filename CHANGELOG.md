@@ -47,6 +47,121 @@ un mensaje primero (y descubrir que no pasa nada). `scheduleWebhookWatchdog()`/`
 - Typecheck limpio, 916 tests OK, build + reinicio del daemon confirmados por Cal, arranque limpio
   verificado en logs.
 
+## 2026-08-06 — Migración a `@cal/telegram` + Rich Messages activado
+
+Jano fue el 3er (y último) bot migrado a la librería compartida `@cal/telegram` (Vesta/Pecunia ya
+migrados el 2026-08-05). Detalle completo: `Personal/Agents/HANDOFF-telegram-rich-messages-shared-lib.md`.
+
+### Feature — Migración de librería (mecánica) + Rich Messages con fallback de 3 niveles
+- `shared-v2/src/telegram.ts` → re-export nombrado de `@cal/telegram` (NO `export *`, choca con el
+  `TelegramUpdate` propio de `types.ts`). Cero call sites cambiaron de firma — 799/800 tests sin
+  tocar.
+- `index.ts` (único call site del reply libre del modelo, a diferencia de Vesta que tiene 3) pasa a
+  `editRichMessage`: rich → HTML clásico (chunking 4096) → texto plano (`stripHtmlTags`, nueva en
+  Jano). El chunking solo corre DENTRO del fallback — Rich Messages soporta 32.768 chars.
+- `format.ts` → `convertMarkdownTables` emite `<table>` real en vez de `<pre>` alineado a mano (el
+  bold que corre después ahora sí convierte contenido dentro de una celda).
+- **Los 6 crons proactivos activos migraron aparte** (no pasan por `runAgent()`, construyen su HTML
+  en código): `proactive/rich-send.ts` centraliza `sendCronMessage()` (rich → HTML, sin nivel de
+  texto plano — un fallo doble ahí es problema de red, no de HTML mal formado). Los 3 crons
+  desactivados (flight-checkin/foco-check/fuel-alert) no se tocaron.
+- `kpi-ingest-check.ts` → `formatPdfSuccessReport` reescrito a `<table>` real (caso que motivó el
+  pedido de Cal: vio el reporte de KPIs en HTML clásico).
+- 2 restarts en producción con confirmación de Cal, prueba real por Telegram confirmada las dos veces.
+
+## 2026-07-27 — Runtime del SDK: notionApi doble-encodeaba, upgrade 0.2.122→0.3.220, resume por chat
+
+Cal: *"toma los valores de los sábados, ¿a este ritmo cuándo llegamos a 5MM?"* → "⚠️ No pude
+procesar tu mensaje". El log mostraba `Reached maximum number of turns (12)`: 6 llamadas a
+`notionCli` fallando con `400 invalid_json`, una query sin filtro devolviendo 352 KB, y el resto de
+los 12 turnos quemados en `ToolSearch` con nombre corto (falla; hace falta el nombre COMPLETO
+`mcp__cos-tools__X`). Auditar esto disparó una revisión completa del runtime del SDK.
+
+### Fix — `notionApi` doble-encodeaba el body (causa real del `400 invalid_json`)
+`JSON.stringify(body)` asumía que `body` siempre llega como objeto, pero el modelo lo manda seguido
+como **string con JSON adentro** — `JSON.stringify('{"a":1}')` produce un string JSON donde Notion
+espera un objeto. El error de Notion ("Error parsing JSON body") se leía como "el conector está
+caído", y el modelo reintentó 14 veces variando el contenido en vez de la serialización — costó dos
+turnos reales de Cal (uno murió por maxTurns, el otro respondió sin datos tras 233s y $1.55).
+**Fix:** `serializeBody()` en `tools/notion-cli.ts` — objeto → stringify; string que ya es JSON
+válido → tal cual; string que no es JSON → stringify. Verificado end-to-end contra Notion real.
+
+### Feature — SDK 0.2.122 → 0.3.220 (98 versiones atrasado, pre-Opus 5)
+`@anthropic-ai/sdk`/`@modelcontextprotocol/sdk` pasaron a `peerDependencies` explícitas. Desbloqueó
+**5× de contexto**: con 0.2.x el log reportaba `contextWindow: 200000` — no era un límite real del
+modelo, eran las tablas de modelos desactualizadas del SDK viejo (anterior a Opus 5/Sonnet 5); con
+0.3.220 el mismo `claude-sonnet-5` reporta `1000000` sin ningún flag beta.
+
+### Feature — `maxTurns` 12→25, `effort` configurable, techo de sesión, `resume` por chat
+- `maxTurns` a 25 — el techo de 12 cortaba pedidos analíticos legítimos, no solo loops.
+- `effort` (`effort.ts`), default `high`, sube a `xhigh` con prefijo explícito (`/deep`, `/fondo`,
+  `++`) — nunca heurística automática, para no gastar cuota de Claude Max sin que Cal sepa por qué.
+- Techo de 20 turnos por sesión (`JANO_MAX_SESSION_TURNS`) — `resume` reintroduce a propósito el
+  crecimiento monotónico de contexto que había eliminado el "startup() fresco por mensaje", el modo
+  de falla que tumbó a Jano 4 veces ("Autocompact is thrashing").
+- **`resume` por chat cierra el gap de contexto de raíz:** el SDK ya persistía cada sesión completa
+  en `.jsonl` y Jano las tiraba, reconstruyendo desde 40 mensajes de texto en KV — la misma causa
+  del bug del PNR de BoA. Ahora el `sessionId` se guarda por chat (`sessions.json`, IO sync a
+  propósito) y KV pasa de fuente primaria a fallback. Verificado empíricamente: `.jsonl` borrado/
+  vacío/corrupto tira siempre el mismo error, así que el `catch` de fallback es real, no supuesto.
+
+### Feature — `consultarJson({path, jqExpr})`: `jq` sobre un persisted-output sin traerlo al contexto
+`readPersistedOutput` traía el archivo entero — sobre un dump de Notion de 350 KB, el mismo
+problema que el persisted-output quería evitar. Gotchas encontrados: `realpathSync` tiene que ir
+ANTES de validar el path (el regex de la allowlist acepta `..`); `spawnSync` congelaría el daemon
+entero (poll loop + watchdog + crons) hasta 10s por consulta — usa `execFile` async; **`jq` expone
+el entorno del proceso vía `env`/`$ENV`** — sin `env:{PATH:...}` explícito en el spawn, una
+expresión inducida por prompt injection volcaría todos los secretos de Cal a Telegram.
+
+## 2026-07-22 a 2026-08-09 (pipeline de KPIs Yape: doble → triple, replica el agente de Notion AI)
+
+### Feature — Ingesta de KPIs Yape desde mail (CSV + PDF), `scheduleKpiIngestCheck()`
+Cron `*/15 6-23 * * *`, mecánico (sin agente SDK), reemplaza a mano lo que hacía un AI Agent nativo
+de Notion (no expuesto por la API pública) que procesaba el PDF. Detecta el mail diario de BCP,
+espera 15 min, hace upsert en "KPIs diarios" y completa derivados D/D-7.
+
+- **Credenciales Gmail:** el plan original (`gcloud auth application-default login`) lo bloqueó
+  Google ("This app is blocked", scope sensible en app no verificada). Fix: reusar el OAuth ya
+  validado del Ulanzi (`GMAIL_OAUTH_*` desde `apps.env`, ver [[reference_youtube_oauth_playlist]]).
+- **Doble pipeline (2026-07-23):** el "Seguimiento Diario" (PDF) y el "Self-Service" (CSV) son dos
+  formatos del MISMO reporte, no fuentes independientes — llegan casi al mismo segundo. Reparto de
+  campos sin pisarse: PDF es autoritativo para `Afiliaciones diarias`/`TRX`/`Activos DAU`/
+  `Afiliados 7d`/`TRX Promedio 7d` + las 6 `vs. Ayer/Sem (%)`; el CSV trae todo lo demás (Activos
+  30d, Saldo, Remesas, Ingresos...). Parser del PDF (`kpi-ingest-pdf.ts`) busca líneas EXACTAS, con
+  tolerancia a un typo real de Yape ("vs. Sem. **anteior**", sin r) matcheando por prefijo.
+- **`archiveAndMarkRead()` necesitaba `gmail.modify`** — resuelto 2026-08-08 regenerando el refresh
+  token con ese scope (incluye `readonly`, no rompió el Ulanzi).
+- **Bug de truncado HTML (2026-07-23):** un reporte de ~6600 chars se truncaba a lo bruto a mitad
+  de una etiqueta `<b>`, y Telegram rechazaba el mensaje entero. Fix: `paginateReport()` corta en
+  el último salto de línea antes del límite, nunca a mitad de tag.
+- **Ruido del reporte, 3 pasadas de limpieza el mismo período** (la última — reporte del CSV
+  completo — está en `## 2026-07-29` de este changelog). Dos bugs de ruido en Derivados: fechas de
+  enero permanentemente no-calculables repetidas en cada corrida (fix: filtro de 30 días), y el
+  hueco de "Afiliaciones diarias" de CADA domingo por la regla SEGIP re-apareciendo semana a semana
+  dentro de ese filtro (fix: `isPermanentSundayGap()`).
+- La tarjeta PNG de KPIs (TRX + DAU) dejó de tener cron propio (`0 10 * * *`, eliminado 2026-07-24)
+  y pasó a dispararse desde este pipeline apenas el PDF procesa con éxito.
+
+### Feature — Triple pipeline: Yape Lending (créditos), DB Notion separada (2026-07-27)
+3er dominio (Riesgos, no afiliación/TRX/DAU) → DB "KPIs Yape Lending" separada. Funnel de 15 nodos
+acumulados (Leads→...→Desembolso) parseado de un PDF de Power BI.
+
+- **Validación 100% aritmética** (`reconcileLendingFunnel()`, 6 ecuaciones cubriendo los 15 campos)
+  — los porcentajes del PDF no se parsean, la posición es inconsistente entre bloques.
+- **"EN PROCESO" aparece 2 veces** en el PDF (dos ramas del funnel) — se resuelve por ancla de
+  contexto (última label simple vista antes), no por orden ordinal.
+- **Reconciliación como reparación, no solo validación (2026-07-28):** si falta EXACTAMENTE un
+  campo de los 15 y las ecuaciones lo determinan sin ambigüedad, `deriveMissingField()` lo completa
+  por aritmética en vez de rechazar el reporte. Caso real: Power BI abrevió "1.179" como "1K".
+- **Bug real (2026-08-05):** un reenvío del reporte con números corregidos no actualizaba los
+  derivados D-1 (`fillLendingDerivedFields()` saltaba cualquiera que ya tuviera valor, pero el
+  crudo del que depende SÍ se pisa en un reenvío). Fix: con `onlyFechas` fuerza el recálculo.
+  **Mismo patrón de riesgo sin auditar en `fillDerivedFields()` de "KPIs diarios".**
+- Tarjeta PNG propia (`kpi-card-lending-*.ts`), rediseñada a 4 columnas el 2026-08-05 (Derivados
+  Agencia → Agencia → En Proceso → Desembolso, delta D-1 estricto).
+- Gap conocido sin resolver: si nunca se determina la fecha del reporte (viene del CUERPO del
+  mail, no del filename), el mail queda huérfano en `state.pending` sin aviso de abandono.
+
 ## 2026-07-29
 
 ### UX — El reporte diario de KPIs (CSV) pasó de ~30 líneas a 2
