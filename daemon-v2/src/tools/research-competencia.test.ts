@@ -190,16 +190,61 @@ describe("runResearchCompetencia", () => {
     expect(facts.adsText).toBe("[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x");
   });
 
-  it("una falla del bloque de ads no corta la corrida de la entidad", async () => {
-    vi.mocked(fetchAdsText).mockRejectedValueOnce(new Error("boom"));
+  it("incluye yapeAdsKpis en el resultado — referencia propia, corre en paralelo con el lote de entidades", async () => {
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
-    expect(result.entidades[0].error).toBeUndefined();
+    expect(result.yapeAdsKpis).toEqual({
+      creativosActivos: 0, campanasNuevas: 0, duracionPromedioDias: null,
+      mixFormato: { imagen: 0, display: 0, desconocido: 0 },
+    });
+  });
+
+  it("yapeAdsKpis queda undefined (fail-soft) si el fetch de Yape falla, sin afectar a las entidades", async () => {
+    vi.mocked(fetchAdsText).mockImplementation(async (entity) => {
+      if (entity.id === "yape-bolivia") throw new Error("boom");
+      return { texto: "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x", creativos: [] };
+    });
+    try {
+      const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+      expect(result.yapeAdsKpis).toBeUndefined();
+      expect(result.entidades[0].error).toBeUndefined();
+    } finally {
+      vi.mocked(fetchAdsText).mockImplementation(async () => ({
+        texto: "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x",
+        creativos: [],
+      }));
+    }
+  });
+
+  it("una falla del bloque de ads no corta la corrida de la entidad", async () => {
+    // Por entity.id, no `mockRejectedValueOnce` — ver el comentario del test de "colgado" más
+    // abajo sobre por qué el fetch de Yape Bolivia (que corre primero) se comería un rechazo
+    // por-orden-de-llamada en vez de la entidad bajo prueba.
+    vi.mocked(fetchAdsText).mockImplementation(async (entity) => {
+      if (entity.id === "takenos") throw new Error("boom");
+      return { texto: null, creativos: [] };
+    });
+    try {
+      const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+      expect(result.entidades[0].error).toBeUndefined();
+    } finally {
+      vi.mocked(fetchAdsText).mockImplementation(async () => ({
+        texto: "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x",
+        creativos: [],
+      }));
+    }
   });
 
   it("un bloque de ads colgado no traba la entidad — corta al deadline y sigue con adsText null", async () => {
     vi.useFakeTimers();
     try {
-      vi.mocked(fetchAdsText).mockImplementationOnce(() => new Promise(() => {})); // nunca resuelve
+      // `mockImplementationOnce` no alcanza: `runResearchCompetencia` también dispara un fetch de
+      // ads para Yape Bolivia (referencia propia) EN PARALELO con el de la entidad — si el "nunca
+      // resuelve" fuera por-orden-de-llamada, podía tocarle a Yape en vez de a takenos, dejando la
+      // entidad con ads reales y el test roto. Colgar específicamente por `entity.id` es robusto a
+      // cuál de los dos fetches gane la carrera por ejecutarse primero.
+      vi.mocked(fetchAdsText).mockImplementation((entity) =>
+        entity.id === "takenos" ? new Promise(() => {}) : Promise.resolve({ texto: null, creativos: [] }),
+      );
       const resultPromise = runResearchCompetencia({ entidadIds: ["takenos"] });
       await vi.advanceTimersByTimeAsync(ADS_TIMEOUT_MS + 1);
       const result = await resultPromise;
@@ -209,6 +254,15 @@ describe("runResearchCompetencia", () => {
       expect(facts.adsText).toBeNull();
     } finally {
       vi.useRealTimers();
+      // `mockImplementation` (a diferencia de `mockImplementationOnce`) PERSISTE entre tests —
+      // `clearAllMocks` en el `beforeEach` de este archivo limpia calls/instances, no la
+      // implementation. Sin restaurar acá, el "cuelgue condicional por entity.id" de arriba se
+      // filtraba al siguiente test y lo colgaba a ÉL también (encontrado en vivo: rompía 9 tests
+      // más, todos con "ya hay un research en curso" porque el guard nunca se liberaba).
+      vi.mocked(fetchAdsText).mockImplementation(async () => ({
+        texto: "[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x",
+        creativos: [],
+      }));
     }
   });
 
@@ -280,6 +334,33 @@ describe("runResearchCompetencia", () => {
   it("libera el guard al terminar, permitiendo una corrida posterior", async () => {
     await runResearchCompetencia({ entidadIds: ["takenos"] });
     await expect(runResearchCompetencia({ entidadIds: ["meru"] })).resolves.toBeTruthy();
+  });
+
+  it("Tarea 3: procesa entidades en simultáneo (concurrencia), no una por una", async () => {
+    vi.useFakeTimers();
+    try {
+      const inicios: Record<string, number> = {};
+      mockRunAgent.mockImplementation(async (_prompt: string, entityId = "?") => {
+        inicios[entityId] = Date.now();
+        await new Promise((r) => setTimeout(r, 1000));
+        return '{"hallazgos":[],"notas":""}';
+      });
+
+      const resultPromise = runResearchCompetencia({ entidadIds: ["takenos", "meru", "bancosol-altoke"] });
+      await vi.advanceTimersByTimeAsync(1000 + 1);
+      const result = await resultPromise;
+
+      expect(result.entidades).toHaveLength(3);
+      // Si el `for` fuera secuencial, el 3er `runEntityAgent` arrancaría ~2000ms después del
+      // primero (2 esperas de 1000ms de por medio, una por cada entidad ya procesada). Corriendo
+      // las 3 en la misma tanda (`CONCURRENCY=3`), los 3 arrancan casi juntos.
+      const tiempos = Object.values(inicios);
+      expect(tiempos).toHaveLength(3);
+      expect(Math.max(...tiempos) - Math.min(...tiempos)).toBeLessThan(500);
+    } finally {
+      vi.useRealTimers();
+      mockRunAgent.mockImplementation(async () => '{"hallazgos":[],"notas":""}');
+    }
   });
 });
 

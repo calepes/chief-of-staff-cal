@@ -147,9 +147,21 @@ export async function analyzePhoto(opts: AnalyzePhotoOpts): Promise<PhotoAnalysi
   }
 
   const data = await res.json() as {
-    choices: Array<{ message: { content: unknown } }>;
+    choices?: Array<{ message: { content: unknown } }>;
+    error?: { message?: string };
     usage?: { prompt_tokens: number; completion_tokens: number };
   };
+
+  // `res.ok` (200) no garantiza `choices` presente — OpenRouter a veces devuelve 200 con un
+  // error de proveedor embebido (`data.error`) o `choices` vacío/ausente (visto en vivo el
+  // 2026-09-05 con imágenes de Facebook vía Apify: `TypeError: Cannot read properties of
+  // undefined (reading '0')` sobre `data.choices[0]`). El caller (`describeImage`) ya atrapa
+  // cualquier excepción y sigue con la imagen siguiente — este chequeo solo cambia un
+  // TypeError opaco por un mensaje que dice QUÉ pasó, para poder distinguir en el log "esta
+  // imagen puntual falló" de "OpenRouter cambió de forma".
+  if (!data.choices?.[0]) {
+    throw new Error(`OpenRouter sin choices en la respuesta${data.error?.message ? `: ${data.error.message}` : ""}`);
+  }
 
   // Defensivo: la mayoría de proveedores devuelven `content` como string plano, pero un
   // modelo con salida multimodal puede devolver un array de partes ({type:"text",text})

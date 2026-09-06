@@ -321,20 +321,31 @@ describe("fetchSocialText", () => {
     expect(text).toContain("IG de bancosol_bolivia");
   });
 
-  it("corta al exceder el presupuesto de tiempo por entidad y devuelve lo ya juntado, con log", async () => {
+  it("el presupuesto se divide POR PLATAFORMA — exceder la porción de instagram no le come el tiempo a tiktok/facebook/x", async () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-    // Reloj manual: primer llamado (startedAt) = 0; segundo (chequeo antes del 1er handle) = 0
-    // (no excede, presupuesto=1); tercer llamado (chequeo antes del 2do handle, mismo instagram)
-    // ya excede (100000 > 1) y corta ANTES de llegar a tiktok/facebook/x.
+    // Reloj manual: bancosol-altoke tiene 4 plataformas con handles (instagram×2, tiktok×1,
+    // facebook×2, x×1) → presupuestoMs=1 se reparte en ~0,25 por plataforma. Secuencia: el
+    // cronómetro de instagram arranca en 0, su 1er handle chequea en 0 (no excede, se scrapea), su
+    // 2do handle chequea en 100_000 (excede clarísimo) — a partir de ahí, CUALQUIER llamada
+    // posterior a `nowMs` (el resto de instagram, y el arranque + chequeos de tiktok/facebook/x)
+    // clampea al último valor del array (100_000 también) — como cada plataforma reinicia SU
+    // PROPIO cronómetro (`inicioPlataforma = nowFn()`), un "ahora" de 100_000 ya no excede el
+    // presupuesto de las plataformas siguientes porque su propio inicio también quedó en 100_000
+    // (delta = 0). Si el presupuesto siguiera siendo un pozo común por entidad, esto NO pasaría.
     const tiempos = [0, 0, 100_000];
     let i = 0;
     const nowMs = () => tiempos[Math.min(i++, tiempos.length - 1)];
     const text = await fetchSocialText(getEntity("bancosol-altoke"), 7, { ...deps, nowMs, presupuestoMs: 1 });
     expect(text).toContain("IG de altoke.bo");
-    expect(text).not.toContain("IG de bancosol_bolivia");
-    expect(text).not.toContain("TikTok");
-    expect(text).not.toContain("X de bancosol");
-    const logged = spy.mock.calls.some(([line]) => String(line).includes("research_competencia_social_budget_exceeded"));
+    expect(text).not.toContain("IG de bancosol_bolivia"); // se cortó DENTRO de instagram
+    expect(text).toContain("TikTok de altoke.bo"); // pero tiktok igual corrió completo
+    expect(text).toContain("FB de altoke.bo");
+    expect(text).toContain("FB de BancoSolidarioBolivia");
+    expect(text).toContain("X de bancosol");
+    const logged = spy.mock.calls.some(([line]) => {
+      const s = String(line);
+      return s.includes("research_competencia_social_platform_budget_exceeded") && s.includes("\"platform\":\"instagram\"");
+    });
     spy.mockRestore();
     expect(logged).toBe(true);
   });

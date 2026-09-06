@@ -1,4 +1,4 @@
-import { getEntity, ENTITIES } from "./research-competencia-entities.js";
+import { getEntity, ENTITIES, YAPE_ADS_REFERENCE, type EntityConfig } from "./research-competencia-entities.js";
 import { fetchIosAppInfo, fetchAndroidAppInfo, fetchSiteText, chunkText } from "./research-competencia-sources.js";
 import { buildEntityPrompt, runEntityAgent, parseAgentJson, type MechanicalFacts } from "./research-competencia-agent.js";
 import { fetchSocialText } from "./research-competencia-social.js";
@@ -24,9 +24,11 @@ export interface RunOpts {
 // OpenRouter) y `transcribeAudio` (whisper.ts, spawn de whisper-cli) NO tienen timeout propio —
 // a diferencia de cada paso mecánico de la Fase 1 (page.goto 30s, ffmpeg 120s, descargas
 // 30-120s), que sí. Un cuelgue de red en cualquiera de los dos dejaría la promesa sin resolver
-// NI rechazar para siempre: el try/catch por entidad nunca dispara, la entidad traba el `for`
-// secuencial de las 6, y con ella el informe de Notion y el mensaje de Telegram de la semana
-// entera. 10 minutos porque una entidad con varios handles y videos puede tardar legítimamente
+// NI rechazar para siempre: el try/catch por entidad nunca dispara, la entidad traba el
+// `Promise.all` de su tanda (`runWithConcurrency`, `CONCURRENCY` entidades a la vez desde la
+// Tarea 3 — antes era un `for` secuencial de las 6), lo que a su vez traba la tanda siguiente
+// (las tandas SÍ son secuenciales entre sí) y con ella el informe de Notion y el mensaje de
+// Telegram de la semana entera. 10 minutos porque una entidad con varios handles y videos puede tardar legítimamente
 // varios minutos (enrichPosts documenta hasta "decenas de minutos" en el peor caso combinando
 // descarga+ffmpeg+visión por post en research-competencia-social.ts) — tiene que cubrir ese caso
 // real sin ser efectivamente infinito. Al vencer, la entidad sigue con socialText:null (logueado);
@@ -35,21 +37,23 @@ export interface RunOpts {
 //
 // IMPORTANTE 3 (revisión de salud, 2026-09-03): tiene que ser MAYOR que `PER_ENTITY_BUDGET_MS`
 // (research-competencia-social.ts) con margen real — ver el comentario ahí para la relación
-// completa entre los dos. Subido de 8 a 10 min al mismo tiempo que `PER_ENTITY_BUDGET_MS` bajó de
-// 10 a 7: antes el interno (10 min) NUNCA llegaba a dispararse porque este externo (8 min) siempre
-// abandonaba la entidad primero — ahora el interno tiene 3 minutos reales para cortar prolijo
-// antes de este hachazo. Exportado para que el test de este archivo (`research-competencia.test.ts`)
-// no hardcodee el valor por separado y quede sincronizado si vuelve a ajustarse.
-export const SOCIAL_TIMEOUT_MS = 10 * 60 * 1000;
+// completa entre los dos y por qué se subió de 10 a 20 min el 2026-09-05 (Facebook/TikTok vía
+// Apify ahora traen contenido real que `enrichPosts` sí procesa — antes de eso los dos devolvían
+// 0 posts siempre, así que el pipeline pesado nunca corría). Exportado para que el test de este
+// archivo (`research-competencia.test.ts`) no hardcodee el valor por separado y quede sincronizado
+// si vuelve a ajustarse.
+export const SOCIAL_TIMEOUT_MS = 20 * 60 * 1000;
 
 // Deadline duro del agente LLM (`runEntityAgent`, research-competencia-agent.ts) — mismo motivo y
 // mismo patrón (`Promise.race` contra un timer) que `SOCIAL_TIMEOUT_MS` de arriba. `runEntityAgent`
 // solo tiene `maxTurns:20` como límite, y eso es un presupuesto de TURNOS que el SDK chequea ENTRE
 // pasos — no protege contra un evento final que nunca llega (un WebSearch colgado, una partición
 // de red, un deadlock del SDK): en ese caso el `for await (const event of handle.query(...))` de
-// `runEntityAgent` espera indefinidamente y su `finally { handle.close() }` nunca corre. Como las
-// 6 entidades corren secuencialmente, una sola atascada cuelga el proceso ENTERO para siempre, sin
-// recuperación ni aviso — el mismo riesgo que el scraping social, sin la misma protección.
+// `runEntityAgent` espera indefinidamente y su `finally { handle.close() }` nunca corre. Las
+// entidades corren en tandas de hasta `CONCURRENCY` en simultáneo (Tarea 3) — una sola atascada
+// cuelga su tanda entera (el `Promise.all` no resuelve hasta que las 3 terminen) y, con ella, la
+// tanda siguiente y el proceso completo para siempre, sin recuperación ni aviso — el mismo riesgo
+// que el scraping social, sin la misma protección.
 //
 // 5 minutos: a diferencia del scraping social (descargas + ffmpeg + visión, minutos por post),
 // `runEntityAgent` solo usa WebSearch — sin descargas pesadas ni transcripción. Una corrida real
@@ -96,6 +100,170 @@ function raceWithLoggedTimeout<T>(promise: Promise<T | null>, ms: number, msg: s
   ]);
 }
 
+// Cuántas entidades se procesan en simultáneo (Tarea 3, decidido con Cal): ni las 6 juntas — Cal
+// explícitamente no quiso eso por el riesgo de rate-limit de Google Ads (ver el throttle GLOBAL en
+// research-competencia-ads.ts, que es lo que hace seguro correr más de una entidad a la vez) — ni
+// secuencial, que hoy hace tardar la corrida mucho más de lo necesario sin necesidad real.
+const CONCURRENCY = 3;
+
+/**
+ * Corre `fn` sobre `items` con hasta `limit` en simultáneo, preservando el orden del resultado —
+ * partido en tandas de `limit` con `Promise.all` en vez de un pool con conteo de slots libres: con
+ * 6 entidades y `limit=3` da exactamente 2 tandas parejas, y las 3 fuentes por entidad (mecánico,
+ * social, ads) ya corren bajo su propio `Promise.all` dentro de `processEntity`, así que los
+ * tiempos entre entidades de una misma tanda ya tienden a parecerse — un pool real ganaría poco acá
+ * a cambio de bastante más código.
+ */
+async function runWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += limit) {
+    out.push(...(await Promise.all(items.slice(i, i + limit).map(fn))));
+  }
+  return out;
+}
+
+/**
+ * Corre las 4 fuentes de una entidad (mecánico + agente LLM + social + ads) y devuelve el
+ * resultado — extraído del `for` secuencial que antes empujaba a un array compartido (Tarea 3a,
+ * paralelización a `CONCURRENCY` entidades a la vez): con varias entidades corriendo en simultáneo,
+ * mutar un array compartido desde cada una es una carrera innecesaria — devolver el resultado y
+ * dejar que el caller lo junte con `Promise.all` (vía `runWithConcurrency`) es más seguro y más
+ * testeable en aislamiento.
+ */
+async function processEntity(
+  entity: EntityConfig,
+  timeframeDias: number,
+  fecha: string,
+  browserSession: ResearchBrowserSession | null,
+): Promise<EntityRunResult> {
+  try {
+    const baseline = await readEntityState(entity.id);
+    const socialTextPromise = browserSession
+      ? fetchSocialText(entity, timeframeDias, { context: browserSession.context }).catch((err) => {
+          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_error", entityId: entity.id, err: String(err) }));
+          return null;
+        })
+      : Promise.resolve(null);
+    const socialTextWithDeadline = raceWithLoggedTimeout(
+      socialTextPromise, SOCIAL_TIMEOUT_MS, "research_competencia_social_timeout", entity.id,
+    );
+    // Google (RPC directo) + Meta Ad Library (research-competencia-meta-ads.ts, headless
+    // fresco) son complementarios, no alternativos — se juntan en un solo bloque de texto bajo
+    // el mismo deadline (`ADS_TIMEOUT_MS`) en vez de sumar un segundo timeout: ninguno de los
+    // dos hace descargas pesadas ni usa la sesión de Chrome compartida del social. Se llevan
+    // también los arrays de creativos YA filtrados (mismo fetch, sin red extra) para que
+    // `computeAdsKpis` pueda armar la tabla comparativa de KPIs de ads sin repetir pedidos.
+    const adsBlockPromise = Promise.all([
+      fetchAdsText(entity, timeframeDias).catch((err) => {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_ads_error", entityId: entity.id, err: String(err) }));
+        return { texto: null, creativos: [] as AdCreative[] };
+      }),
+      fetchMetaAdsText(entity, timeframeDias).catch((err) => {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_meta_ads_error", entityId: entity.id, err: String(err) }));
+        return { texto: null, creativos: [] as MetaAdCreative[] };
+      }),
+    ]).then(([google, meta]) => ({
+      texto: [google.texto, meta.texto].filter((t): t is string => !!t).join("\n\n") || null,
+      googleCreativos: google.creativos,
+      metaCreativos: meta.creativos,
+    }));
+    const adsBlockWithDeadline = raceWithLoggedTimeout(
+      adsBlockPromise, ADS_TIMEOUT_MS, "research_competencia_ads_timeout", entity.id,
+    );
+    // Seguidores semanales (Tarea B) — handle PRINCIPAL de cada plataforma
+    // (`entity.social.instagram[0]`/`facebook[0]`), no todos los handles: el snapshot guarda
+    // UN número por plataforma, no una serie por cuenta. Instagram necesita la sesión de Chrome
+    // compartida (misma detección de bot que el resto del scraping social, ver
+    // research-competencia-browser.ts) — sin browser, queda `null`. Facebook usa un headless
+    // fresco sin login (mismo patrón que fetchMetaAdsQueryReal) — no depende de `browserSession`.
+    const instagramHandle = entity.social?.instagram[0];
+    const facebookHandle = entity.social?.facebook[0];
+    const instagramFollowersPromise = browserSession && instagramHandle
+      ? fetchInstagramFollowers(instagramHandle, browserSession.context).catch((err) => {
+          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "instagram", entityId: entity.id, err: String(err) }));
+          return null;
+        })
+      : Promise.resolve(null);
+    const facebookFollowersPromise = facebookHandle
+      ? fetchFacebookFollowers(facebookHandle).catch((err) => {
+          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "facebook", entityId: entity.id, err: String(err) }));
+          return null;
+        })
+      : Promise.resolve(null);
+    const [ios, android, siteText, socialText, adsBlock, instagramFollowers, facebookFollowers] = await Promise.all([
+      entity.ios ? fetchIosAppInfo(entity.ios) : Promise.resolve(null),
+      entity.android ? fetchAndroidAppInfo(entity.android.packageName) : Promise.resolve(null),
+      entity.siteUrl ? fetchSiteText(entity.siteUrl) : Promise.resolve(null),
+      socialTextWithDeadline,
+      adsBlockWithDeadline,
+      instagramFollowersPromise,
+      facebookFollowersPromise,
+    ]);
+    const adsKpis = computeAdsKpis(adsBlock?.googleCreativos ?? [], adsBlock?.metaCreativos ?? [], timeframeDias);
+    const facts: MechanicalFacts = {
+      ios: ios ? { version: ios.version, rating: ios.rating, releaseNotes: ios.releaseNotes } : null,
+      android: android ? { version: android.version, rating: android.rating, releaseNotes: android.releaseNotes } : null,
+      siteText,
+      socialText,
+      adsText: adsBlock?.texto ?? null,
+    };
+    const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
+    // BLOQUEANTE 2 (revisión de salud, 2026-09-03): deadline externo contra `AGENT_TIMEOUT_MS`
+    // (ver su comentario) — sin esto, un `runEntityAgent` colgado (evento final que nunca
+    // llega) trababa el proceso entero para siempre. El rechazo de este `Promise.race` cae en
+    // el `catch` de la entidad más abajo, mismo tratamiento que cualquier otro error.
+    const raw = await Promise.race([
+      runEntityAgent(prompt, entity.id),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`El agente no respondió en ${AGENT_TIMEOUT_MS / 1000}s (timeout — posible cuelgue de WebSearch o del SDK)`));
+        }, AGENT_TIMEOUT_MS);
+      }),
+    ]);
+    // raw vacío = el agente cortó por maxTurns sin emitir result/success (nunca tiró
+    // excepción) — tratarlo como "sin hallazgos" lo confundiría con una semana sin
+    // novedades. Error explícito, para que se vea en "⚠️ Falló" en vez de perderse.
+    if (!raw.trim()) throw new Error("El agente no devolvió resultado (posible corte por maxTurns)");
+    const parsed = parseAgentJson(raw);
+
+    const nuevoPuntoSeguidores: FollowerPoint = { fecha, instagram: instagramFollowers, facebook: facebookFollowers };
+    const seguidoresHistorial = [...(baseline?.seguidoresHistorial ?? []), nuevoPuntoSeguidores].slice(-MAX_SEGUIDORES_HISTORIAL);
+
+    const snapshot = {
+      entityId: entity.id,
+      updatedAt: new Date().toISOString(),
+      ios: ios
+        ? { trackId: entity.ios?.trackId, version: ios.version, rating: ios.rating ?? undefined, ratingCount: ios.ratingCount ?? undefined }
+        : undefined,
+      android: android
+        ? { version: android.version ?? undefined, rating: android.rating ?? undefined, ratingCount: android.ratingCount ?? undefined }
+        : undefined,
+      siteSnippet: siteText?.slice(0, 3000),
+      notas: parsed.notas,
+      battlecard: parsed.battlecard,
+      seguidoresHistorial,
+    };
+
+    return {
+      entityId: entity.id,
+      entityNombre: entity.nombre,
+      primeraCorrida: baseline === null,
+      hallazgos: parsed.hallazgos,
+      snapshot,
+      adsKpis,
+    };
+  } catch (err) {
+    return {
+      entityId: entity.id,
+      entityNombre: entity.nombre,
+      primeraCorrida: false,
+      hallazgos: [],
+      snapshot: { entityId: entity.id, updatedAt: new Date().toISOString() },
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 // Guard en proceso contra corridas superpuestas dentro del MISMO proceso de Node — dos llamadas
 // a runResearchCompetencia() en el mismo proceso escribirían sobre las mismas páginas de estado
 // de Notion. Este módulo corre hoy SOLO dentro del script standalone `research:now`
@@ -134,7 +302,6 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
       console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_browser_open_failed", err: String(err) }));
     }
 
-    const resultados: EntityRunResult[] = [];
     // Cada entidad dispara un agente SDK one-off (maxTurns:20, WebSearch) — en una prueba real
     // gastó ~6 WebSearch + 2 WebFetch; con 6 entidades son ~48+ tool calls por corrida SOLO del
     // agente. Desde que se cableó el scraping social (research-competencia-social.ts), ese ya no
@@ -142,150 +309,60 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     // MAX_POSTS_PER_ACCOUNT posts × hasta MAX_VIDEOS_PER_ACCOUNT videos con descarga+ffmpeg+visión
     // cada uno, órdenes de magnitud por encima del costo del agente — ver el comentario de
     // `enrichPosts` para el detalle del peor caso.
-    for (const entityId of targetIds) {
-      let entity;
-      try {
-        entity = getEntity(entityId);
-      } catch (err) {
-        resultados.push({
-          entityId,
-          entityNombre: entityId,
-          primeraCorrida: false,
-          hallazgos: [],
-          snapshot: { entityId, updatedAt: new Date().toISOString() },
-          error: err instanceof Error ? err.message : String(err),
-        });
-        continue;
-      }
-      try {
-        const baseline = await readEntityState(entity.id);
-        const socialTextPromise = browserSession
-          ? fetchSocialText(entity, timeframeDias, { context: browserSession.context }).catch((err) => {
-              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_error", entityId: entity.id, err: String(err) }));
-              return null;
-            })
-          : Promise.resolve(null);
-        const socialTextWithDeadline = raceWithLoggedTimeout(
-          socialTextPromise, SOCIAL_TIMEOUT_MS, "research_competencia_social_timeout", entity.id,
-        );
-        // Google (RPC directo) + Meta Ad Library (research-competencia-meta-ads.ts, headless
-        // fresco) son complementarios, no alternativos — se juntan en un solo bloque de texto bajo
-        // el mismo deadline (`ADS_TIMEOUT_MS`) en vez de sumar un segundo timeout: ninguno de los
-        // dos hace descargas pesadas ni usa la sesión de Chrome compartida del social. Se llevan
-        // también los arrays de creativos YA filtrados (mismo fetch, sin red extra) para que
-        // `computeAdsKpis` pueda armar la tabla comparativa de KPIs de ads sin repetir pedidos.
-        const adsBlockPromise = Promise.all([
-          fetchAdsText(entity, timeframeDias).catch((err) => {
-            console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_ads_error", entityId: entity.id, err: String(err) }));
-            return { texto: null, creativos: [] as AdCreative[] };
-          }),
-          fetchMetaAdsText(entity, timeframeDias).catch((err) => {
-            console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_meta_ads_error", entityId: entity.id, err: String(err) }));
-            return { texto: null, creativos: [] as MetaAdCreative[] };
-          }),
-        ]).then(([google, meta]) => ({
-          texto: [google.texto, meta.texto].filter((t): t is string => !!t).join("\n\n") || null,
-          googleCreativos: google.creativos,
-          metaCreativos: meta.creativos,
-        }));
-        const adsBlockWithDeadline = raceWithLoggedTimeout(
-          adsBlockPromise, ADS_TIMEOUT_MS, "research_competencia_ads_timeout", entity.id,
-        );
-        // Seguidores semanales (Tarea B) — handle PRINCIPAL de cada plataforma
-        // (`entity.social.instagram[0]`/`facebook[0]`), no todos los handles: el snapshot guarda
-        // UN número por plataforma, no una serie por cuenta. Instagram necesita la sesión de Chrome
-        // compartida (misma detección de bot que el resto del scraping social, ver
-        // research-competencia-browser.ts) — sin browser, queda `null`. Facebook usa un headless
-        // fresco sin login (mismo patrón que fetchMetaAdsQueryReal) — no depende de `browserSession`.
-        const instagramHandle = entity.social?.instagram[0];
-        const facebookHandle = entity.social?.facebook[0];
-        const instagramFollowersPromise = browserSession && instagramHandle
-          ? fetchInstagramFollowers(instagramHandle, browserSession.context).catch((err) => {
-              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "instagram", entityId: entity.id, err: String(err) }));
-              return null;
-            })
-          : Promise.resolve(null);
-        const facebookFollowersPromise = facebookHandle
-          ? fetchFacebookFollowers(facebookHandle).catch((err) => {
-              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_followers_error", platform: "facebook", entityId: entity.id, err: String(err) }));
-              return null;
-            })
-          : Promise.resolve(null);
-        const [ios, android, siteText, socialText, adsBlock, instagramFollowers, facebookFollowers] = await Promise.all([
-          entity.ios ? fetchIosAppInfo(entity.ios) : Promise.resolve(null),
-          entity.android ? fetchAndroidAppInfo(entity.android.packageName) : Promise.resolve(null),
-          entity.siteUrl ? fetchSiteText(entity.siteUrl) : Promise.resolve(null),
-          socialTextWithDeadline,
-          adsBlockWithDeadline,
-          instagramFollowersPromise,
-          facebookFollowersPromise,
+    //
+    // Paralelizado a `CONCURRENCY` entidades a la vez (Tarea 3, decidido con Cal) — antes era un
+    // `for` secuencial de las 6. El resultado de un `getEntity` desconocida sigue el mismo criterio
+    // de antes (entidad marcada con error, sin abortar la corrida): sigue viviendo acá porque
+    // `processEntity` ya recibe la entidad RESUELTA, no el id crudo.
+    // KPIs de ads de Yape Bolivia (referencia propia, ver YAPE_ADS_REFERENCE) — corre en PARALELO
+    // con el lote de las 6 entidades, no antes ni después: es un fetch independiente (2 pedidos,
+    // uno a Google Ads vía la cola global de throttle, uno a Meta Ad Library) que no comparte
+    // estado con `processEntity` salvo la cola global de Google Ads, que ya serializa correctamente
+    // sin importar cuántos fetches concurrentes la usen (ver research-competencia-ads.ts). Fail-soft
+    // total: si falla, el informe sale igual sin la fila de referencia.
+    //
+    // MISMO deadline (`ADS_TIMEOUT_MS`) que el bloque de ads por entidad — sin esto, un mock/fetch
+    // colgado acá nunca resuelve el `Promise.all` de más abajo, `researchInFlight` nunca se libera
+    // en el `finally`, y la corrida entera (¡y cualquier test que reuse el mismo proceso!) queda
+    // trabada creyendo que hay un research en curso para siempre. Encontrado en la primera pasada de
+    // esta tarea: un test que cuelga `fetchAdsText` a propósito (para probar el timeout POR ENTIDAD)
+    // también colgaba esta promesa nueva, sin protección propia.
+    const yapeAdsKpisPromise = raceWithLoggedTimeout(
+      (async () => {
+        const [google, meta] = await Promise.all([
+          fetchAdsText(YAPE_ADS_REFERENCE, timeframeDias),
+          fetchMetaAdsText(YAPE_ADS_REFERENCE, timeframeDias),
         ]);
-        const adsKpis = computeAdsKpis(adsBlock?.googleCreativos ?? [], adsBlock?.metaCreativos ?? [], timeframeDias);
-        const facts: MechanicalFacts = {
-          ios: ios ? { version: ios.version, rating: ios.rating, releaseNotes: ios.releaseNotes } : null,
-          android: android ? { version: android.version, rating: android.rating, releaseNotes: android.releaseNotes } : null,
-          siteText,
-          socialText,
-          adsText: adsBlock?.texto ?? null,
-        };
-        const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
-        // BLOQUEANTE 2 (revisión de salud, 2026-09-03): deadline externo contra `AGENT_TIMEOUT_MS`
-        // (ver su comentario) — sin esto, un `runEntityAgent` colgado (evento final que nunca
-        // llega) trababa el proceso entero para siempre. El rechazo de este `Promise.race` cae en
-        // el `catch` de la entidad más abajo, mismo tratamiento que cualquier otro error.
-        const raw = await Promise.race([
-          runEntityAgent(prompt),
-          new Promise<never>((_, reject) => {
-            setTimeout(() => {
-              reject(new Error(`El agente no respondió en ${AGENT_TIMEOUT_MS / 1000}s (timeout — posible cuelgue de WebSearch o del SDK)`));
-            }, AGENT_TIMEOUT_MS);
-          }),
-        ]);
-        // raw vacío = el agente cortó por maxTurns sin emitir result/success (nunca tiró
-        // excepción) — tratarlo como "sin hallazgos" lo confundiría con una semana sin
-        // novedades. Error explícito, para que se vea en "⚠️ Falló" en vez de perderse.
-        if (!raw.trim()) throw new Error("El agente no devolvió resultado (posible corte por maxTurns)");
-        const parsed = parseAgentJson(raw);
+        return computeAdsKpis(google.creativos, meta.creativos, timeframeDias);
+      })().catch((err) => {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_yape_ads_error", err: String(err) }));
+        return null;
+      }),
+      ADS_TIMEOUT_MS,
+      "research_competencia_yape_ads_timeout",
+      "yape-bolivia",
+    ).then((k) => k ?? undefined);
 
-        const nuevoPuntoSeguidores: FollowerPoint = { fecha, instagram: instagramFollowers, facebook: facebookFollowers };
-        const seguidoresHistorial = [...(baseline?.seguidoresHistorial ?? []), nuevoPuntoSeguidores].slice(-MAX_SEGUIDORES_HISTORIAL);
+    const [resultados, yapeAdsKpis] = await Promise.all([
+      runWithConcurrency(targetIds, CONCURRENCY, async (entityId) => {
+        try {
+          const entity = getEntity(entityId);
+          return await processEntity(entity, timeframeDias, fecha, browserSession);
+        } catch (err) {
+          return {
+            entityId,
+            entityNombre: entityId,
+            primeraCorrida: false,
+            hallazgos: [],
+            snapshot: { entityId, updatedAt: new Date().toISOString() },
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }),
+      yapeAdsKpisPromise,
+    ]);
 
-        const snapshot = {
-          entityId: entity.id,
-          updatedAt: new Date().toISOString(),
-          ios: ios
-            ? { trackId: entity.ios?.trackId, version: ios.version, rating: ios.rating ?? undefined, ratingCount: ios.ratingCount ?? undefined }
-            : undefined,
-          android: android
-            ? { version: android.version ?? undefined, rating: android.rating ?? undefined, ratingCount: android.ratingCount ?? undefined }
-            : undefined,
-          siteSnippet: siteText?.slice(0, 3000),
-          notas: parsed.notas,
-          battlecard: parsed.battlecard,
-          seguidoresHistorial,
-        };
-
-        resultados.push({
-          entityId: entity.id,
-          entityNombre: entity.nombre,
-          primeraCorrida: baseline === null,
-          hallazgos: parsed.hallazgos,
-          snapshot,
-          adsKpis,
-        });
-      } catch (err) {
-        resultados.push({
-          entityId: entity.id,
-          entityNombre: entity.nombre,
-          primeraCorrida: false,
-          hallazgos: [],
-          snapshot: { entityId: entity.id, updatedAt: new Date().toISOString() },
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-
-    const { pageId: informePageId, url: informeUrl } = await createInformePage(fecha, timeframeDias, resultados);
+    const { pageId: informePageId, url: informeUrl } = await createInformePage(fecha, timeframeDias, resultados, yapeAdsKpis);
 
     // BLOQUEANTE 1 (revisión de salud, 2026-09-03): try/catch POR ENTIDAD, mismo patrón que el
     // loop principal de arriba — era el único paso del pipeline sin aislamiento. Sin esto, un solo
@@ -309,7 +386,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     }
 
     const totalHallazgos = resultados.reduce((sum, r) => sum + r.hallazgos.length, 0);
-    return { fecha, timeframeDias, entidades: resultados, totalHallazgos, informeUrl, socialBrowserAvailable: browserSession !== null };
+    return { fecha, timeframeDias, entidades: resultados, totalHallazgos, informeUrl, socialBrowserAvailable: browserSession !== null, yapeAdsKpis };
   } finally {
     await browserSession?.close().catch(() => {});
     researchInFlight = false;

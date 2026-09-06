@@ -120,6 +120,23 @@ describe("buildAdsKpisBlocks", () => {
     const filaSinDatos = tabla.table.children[2]; // [0]=header, [1]=Con datos, [2]=Sin datos
     expect(filaSinDatos.table_row.cells.map((c: any) => c[0].text.content)).toEqual(["Sin datos", "—", "—", "—", "—"]);
   });
+
+  it("yapeAdsKpis va como PRIMERA fila de datos, marcada '(referencia)', antes que las entidades", () => {
+    const kpisYape: AdsKpis = { creativosActivos: 69, campanasNuevas: 32, duracionPromedioDias: 271.1, mixFormato: { imagen: 17, display: 23, desconocido: 0 } };
+    const kpisEntidad: AdsKpis = { creativosActivos: 1, campanasNuevas: 0, duracionPromedioDias: null, mixFormato: { imagen: 1, display: 0, desconocido: 0 } };
+    const blocks = buildAdsKpisBlocks([entityResult({ entityNombre: "Un competidor", adsKpis: kpisEntidad })], kpisYape) as any[];
+    const tabla = blocks.find((b) => b.type === "table");
+    const filaYape = tabla.table.children[1]; // [0]=header, [1]=Yape, [2]=el competidor
+    expect(filaYape.table_row.cells.map((c: any) => c[0].text.content)).toEqual(["Yape Bolivia (referencia)", "69", "32", "271.1", "17 / 23 / 0"]);
+    const filaCompetidor = tabla.table.children[2];
+    expect(filaCompetidor.table_row.cells[0][0].text.content).toBe("Un competidor");
+  });
+
+  it("igual arma la tabla si NINGUNA entidad trae adsKpis pero SÍ hay yapeAdsKpis", () => {
+    const kpisYape: AdsKpis = { creativosActivos: 5, campanasNuevas: 1, duracionPromedioDias: 10, mixFormato: { imagen: 0, display: 5, desconocido: 0 } };
+    const blocks = buildAdsKpisBlocks([entityResult({})], kpisYape) as any[];
+    expect(blocks.find((b) => b.type === "table")).toBeDefined();
+  });
 });
 
 describe("buildBattlecardBlocks", () => {

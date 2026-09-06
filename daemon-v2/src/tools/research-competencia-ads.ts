@@ -47,8 +47,42 @@ const SEARCH_CREATIVES_URL = "https://adstransparency.google.com/anji/_/rpc/Sear
  * 4 consultas sin pausa. Con 6 entidades y ~1 anunciante cada una, 2,5 s de espaciado agrega ~15 s
  * a una corrida semanal que ya dura decenas de minutos: intercambio irrelevante a cambio de no
  * perder el bloque entero por rate limit.
+ *
+ * Exportado (antes privado) para que el test de este archivo pueda verificar el espaciado real sin
+ * hardcodear el valor por separado.
  */
-const THROTTLE_MS = 2_500;
+export const THROTTLE_MS = 2_500;
+
+/**
+ * Cola global A NIVEL MÓDULO (Tarea 3b, `runResearchCompetencia` paraleliza hasta 3 entidades en
+ * simultáneo — ver research-competencia.ts) — serializa TODOS los pedidos reales a
+ * `fetchAdvertiserReal`, sin importar de qué entidad (o llamada a `fetchAdsText`) vengan.
+ *
+ * Sin esto, el `THROTTLE_MS` de arriba solo espaciaba pedidos DENTRO de una misma llamada (entre
+ * los distintos `advertiserId` de UNA entidad) — con 3 entidades corriendo a la vez, sus PRIMEROS
+ * pedidos (que antes no esperaban nada, por diseño: no hay que throttlear antes del primero de una
+ * llamada) podían salir casi simultáneos entre sí, exactamente el patrón de ráfaga que ya causó el
+ * bloqueo real de 20+ horas documentado arriba. La cola global los serializa a TODOS por igual —
+ * ya no importa si el pedido es "el primero" de su propia llamada, importa que sea el próximo en la
+ * cola compartida.
+ *
+ * Patrón: promesa encadenada a nivel módulo. Cada pedido nuevo se cuelga del final de la cola
+ * (`colaGlobalAds`), corre en cuanto le toca el turno, y el turno SIGUIENTE no puede arrancar hasta
+ * `THROTTLE_MS` después de que este termine (`esperar` inyectable, mismo mecanismo que ya usaba
+ * `fetchAdsText` — así el test puede verificar el espaciado sin dormir de verdad). No bloquea el
+ * resto del pipeline de cada entidad: `conColaGlobal` devuelve el resultado del pedido en sí
+ * (`miTurno`), no la espera posterior — quien sigue en la cola es el único que la paga.
+ */
+let colaGlobalAds: Promise<void> = Promise.resolve();
+
+function conColaGlobal<T>(ms: number, esperar: (ms: number) => Promise<void>, pedido: () => Promise<T>): Promise<T> {
+  const miTurno = colaGlobalAds.then(pedido, pedido);
+  colaGlobalAds = miTurno.then(
+    () => esperar(ms),
+    () => esperar(ms), // un pedido fallido igual respeta el espaciado antes del próximo
+  );
+  return miTurno;
+}
 
 /** Tope de creativos pedidos por anunciante — el mismo `40` que usa la UI del Transparency Center. */
 const MAX_CREATIVES_PER_ADVERTISER = 40;
@@ -285,10 +319,11 @@ export async function fetchAdsText(
   const ahora = deps.ahora ?? new Date();
 
   const todos: AdCreative[] = [];
-  for (const [i, advertiserId] of advertisers.entries()) {
-    // Espacia ANTES de cada pedido salvo el primero — ver THROTTLE_MS.
-    if (i > 0) await esperar(THROTTLE_MS);
-    const raw = await fetchAdvertiser(advertiserId);
+  for (const advertiserId of advertisers) {
+    // Espaciado vía la cola GLOBAL (`conColaGlobal`), no un `if (i>0)` local — con entidades
+    // corriendo en paralelo (Tarea 3b), el throttle tiene que aplicar entre TODAS las llamadas a
+    // `fetchAdsText`, no solo entre los anunciantes de esta.
+    const raw = await conColaGlobal(THROTTLE_MS, esperar, () => fetchAdvertiser(advertiserId));
     if (raw === null) continue;
     const creativos = parseGoogleCreatives(raw);
     if (creativos.length === 0) {

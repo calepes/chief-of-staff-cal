@@ -7,6 +7,7 @@ import {
   formatAdsText,
   fetchAdsText,
   computeAdsKpis,
+  THROTTLE_MS,
   type AdCreative,
 } from "./research-competencia-ads.js";
 import { getEntity } from "./research-competencia-entities.js";
@@ -204,7 +205,12 @@ describe("fetchAdsText", () => {
     const fetchAdvertiser = vi.fn().mockResolvedValue({ 1: [] });
     const esperar = vi.fn().mockResolvedValue(undefined);
     await fetchAdsText(multi, 7, { fetchAdvertiser, esperar, ahora });
-    expect(esperar).toHaveBeenCalledTimes(1);
+    // 2 llamadas, no 1: una por el espaciado ENTRE "A" y "B" (throttle de siempre), y una más por
+    // la cola GLOBAL (Tarea 3b) — que respeta el espaciado antes de dejar pasar al PRÓXIMO pedido
+    // en la cola compartida (de esta llamada o de cualquier otra entidad corriendo en paralelo),
+    // aunque acá no haya nadie más esperando. Esa segunda espera es intencional y NO bloquea a
+    // "B" — ya se resolvió para cuando esta llamada retorna, es puro costo de cola.
+    expect(esperar).toHaveBeenCalledTimes(2);
   });
 
   it("null y array vacío si ningún anunciante devuelve datos (fetcher devuelve null)", async () => {
@@ -221,6 +227,35 @@ describe("fetchAdsText", () => {
       .mockResolvedValueOnce({ 1: [{ 1: "B", 2: "CR1", 12: "Banco B" }] });
     const { texto } = await fetchAdsText(multi, 7, { fetchAdvertiser, esperar: vi.fn().mockResolvedValue(undefined), ahora });
     expect(texto).toContain("Banco B");
+  });
+
+  it("Tarea 3b: 2 llamadas concurrentes desde entidades DISTINTAS espacian sus pedidos reales por THROTTLE_MS globalmente, no solo cada una los suyos", async () => {
+    vi.useFakeTimers();
+    try {
+      const entidadA = { ...entity, id: "entidad-a", ads: { google: ["A"] } };
+      const entidadB = { ...entity, id: "entidad-b", ads: { google: ["B"] } };
+      const tiempos: number[] = [];
+      // Sin `esperar` inyectado: usa el `setTimeout` real de la implementación, controlado acá con
+      // fake timers — así el espaciado se mide con el reloj, no con un mock que finge esperar.
+      const fetchAdvertiser = vi.fn(async () => {
+        tiempos.push(Date.now());
+        return { 1: [] };
+      });
+
+      const runA = fetchAdsText(entidadA, 7, { fetchAdvertiser, ahora });
+      const runB = fetchAdsText(entidadB, 7, { fetchAdvertiser, ahora });
+      await vi.advanceTimersByTimeAsync(THROTTLE_MS + 100);
+      await Promise.all([runA, runB]);
+
+      // Cada entidad tiene UN solo anunciante — si el throttle fuera solo "por llamada" (el
+      // comportamiento viejo), ninguna de las dos esperaría nada y los 2 pedidos saldrían casi
+      // juntos. Con la cola GLOBAL, el segundo pedido real (venga de la entidad que venga) tiene
+      // que esperar su turno detrás del primero.
+      expect(tiempos).toHaveLength(2);
+      expect(tiempos[1] - tiempos[0]).toBeGreaterThanOrEqual(THROTTLE_MS);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -1,7 +1,7 @@
 import { callNtn } from "../shared/ntn.js";
 import { CAMBIOS_DB, INFORME_DB, STATUS_PAGE_IDS } from "./research-competencia-ids.js";
 import { getEntity } from "./research-competencia-entities.js";
-import type { BattlecardPunto, EntitySnapshot, Hallazgo, EntityRunResult } from "./research-competencia-types.js";
+import type { AdsKpis, BattlecardPunto, EntitySnapshot, Hallazgo, EntityRunResult } from "./research-competencia-types.js";
 
 // Igual patrón que hallazgoBullet: si el punto trae fuente, aparece como hipervínculo real —
 // permite verificar de dónde salió cada fortaleza/debilidad en vez de confiar a ciegas.
@@ -187,23 +187,32 @@ function tableRow(cells: string[]): unknown {
   return { object: "block", type: "table_row", table_row: { cells: cells.map(tableCell) } };
 }
 
+function adsKpisRow(nombre: string, k: AdsKpis | undefined): unknown {
+  return tableRow([
+    nombre,
+    k ? String(k.creativosActivos) : "—",
+    k ? String(k.campanasNuevas) : "—",
+    k?.duracionPromedioDias != null ? String(k.duracionPromedioDias) : "—",
+    k ? `${k.mixFormato.imagen} / ${k.mixFormato.display} / ${k.mixFormato.desconocido}` : "—",
+  ]);
+}
+
 // Tabla comparativa de KPIs de ads — solo tiene sentido si AL MENOS una entidad trae `adsKpis`
 // (una entidad que falló antes de llegar a ese bloque, ver `r.error` en research-competencia.ts,
-// no lo trae). Va ANTES de las secciones por entidad porque es justamente para COMPARAR entre las
-// 6, no un dato de una sola — a diferencia del resto del informe, organizado por entidad.
-export function buildAdsKpisBlocks(entidades: EntityRunResult[]): unknown[] {
-  if (!entidades.some((e) => e.adsKpis)) return [];
+// no lo trae) O si hay `yapeAdsKpis` (puede haber corridas con 0 entidades pero igual con la
+// referencia de Yape, aunque no es el caso normal). Va ANTES de las secciones por entidad porque es
+// justamente para COMPARAR, no un dato de una sola — a diferencia del resto del informe, organizado
+// por entidad.
+//
+// `yapeAdsKpis` (Yape Bolivia, NO un competidor — ver YAPE_ADS_REFERENCE en
+// research-competencia-entities.ts) va como PRIMERA fila, marcada "(referencia)", para que quede
+// claro que es el propio Yape y no una entidad más a la que comparar entre sí — pedido de Cal
+// 2026-09-06 para ver de un vistazo cuánto pauta Yape vs. cada competidor.
+export function buildAdsKpisBlocks(entidades: EntityRunResult[], yapeAdsKpis?: AdsKpis): unknown[] {
+  if (!entidades.some((e) => e.adsKpis) && !yapeAdsKpis) return [];
   const header = ["Entidad", "Creativos activos", "Campañas nuevas", "Duración prom. (días)", "Formato (img/disp/?)"];
-  const filas = entidades.map((e) => {
-    const k = e.adsKpis;
-    return tableRow([
-      e.entityNombre,
-      k ? String(k.creativosActivos) : "—",
-      k ? String(k.campanasNuevas) : "—",
-      k?.duracionPromedioDias != null ? String(k.duracionPromedioDias) : "—",
-      k ? `${k.mixFormato.imagen} / ${k.mixFormato.display} / ${k.mixFormato.desconocido}` : "—",
-    ]);
-  });
+  const filas = entidades.map((e) => adsKpisRow(e.entityNombre, e.adsKpis));
+  const filaYape = yapeAdsKpis ? [adsKpisRow("Yape Bolivia (referencia)", yapeAdsKpis)] : [];
   return [
     headingBlock("Actividad publicitaria — comparativa"),
     // Disclaimer explícito pedido por Cal: son proxies de VOLUMEN, nunca gasto real — ni Google Ads
@@ -221,7 +230,7 @@ export function buildAdsKpisBlocks(entidades: EntityRunResult[]): unknown[] {
         table_width: header.length,
         has_column_header: true,
         has_row_header: false,
-        children: [tableRow(header), ...filas],
+        children: [tableRow(header), ...filaYape, ...filas],
       },
     },
   ];
@@ -247,8 +256,8 @@ function buildFollowersLine(snapshot: EntitySnapshot): unknown | null {
   return paragraphBlock(`Seguidores — ${partes.join(" · ")}`, true);
 }
 
-export function buildInformeBlocks(entidades: EntityRunResult[]): unknown[] {
-  const blocks: unknown[] = [...buildAdsKpisBlocks(entidades)];
+export function buildInformeBlocks(entidades: EntityRunResult[], yapeAdsKpis?: AdsKpis): unknown[] {
+  const blocks: unknown[] = [...buildAdsKpisBlocks(entidades, yapeAdsKpis)];
   for (const e of entidades) {
     blocks.push(headingBlock(e.entityNombre));
     const followersLine = buildFollowersLine(e.snapshot);
@@ -275,6 +284,7 @@ export async function createInformePage(
   fecha: string,
   timeframeDias: number,
   entidades: EntityRunResult[],
+  yapeAdsKpis?: AdsKpis,
 ): Promise<{ pageId: string; url: string }> {
   const totalHallazgos = entidades.reduce((sum, e) => sum + e.hallazgos.length, 0);
   const nombres = entidades.map((e) => e.entityNombre).join(", ");
@@ -295,6 +305,6 @@ export async function createInformePage(
     throw new Error(`No se pudo crear la página de informe: ${createRes.error}`);
   }
   const page = createRes.data as { id: string; url: string };
-  await replacePageBody(page.id, buildInformeBlocks(entidades));
+  await replacePageBody(page.id, buildInformeBlocks(entidades, yapeAdsKpis));
   return { pageId: page.id, url: page.url };
 }

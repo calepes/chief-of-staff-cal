@@ -1,4 +1,4 @@
-export type Dimension = "Producto" | "Estrategia" | "GTM" | "Hiring";
+export type Dimension = "Producto" | "Estrategia" | "GTM" | "Hiring" | "Pricing";
 
 export interface Hallazgo {
   dimension: Dimension;
@@ -100,4 +100,11 @@ export interface RunResult {
    * agregado de "semana tranquila real" sin una heurística mucho más elaborada.
    */
   socialBrowserAvailable: boolean;
+  /**
+   * KPIs de ads de Yape Bolivia (referencia propia, NO un competidor — ver `YAPE_ADS_REFERENCE` en
+   * research-competencia-entities.ts), misma ventana que las 6 entidades, para comparar volumen de
+   * pauta propio contra el de la competencia. Ausente si el fetch falló esta corrida (fail-soft,
+   * mismo criterio que `adsKpis` por entidad) — nunca bloquea el resto del informe.
+   */
+  yapeAdsKpis?: AdsKpis;
 }

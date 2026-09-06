@@ -160,3 +160,26 @@ export function getEntity(id: string): EntityConfig {
   if (!found) throw new Error(`Entidad desconocida: ${id}`);
   return found;
 }
+
+/**
+ * Yape Bolivia — NO es un competidor, es la referencia PROPIA para comparar volumen de publicidad
+ * (pedido de Cal 2026-09-06: "cuánto pauta Yape vs. los competidores", mismos KPIs, misma ventana).
+ * A propósito NO vive en `ENTITIES`: no tiene handles sociales, no corre el agente LLM ni el resto
+ * del pipeline de research — el orquestador (research-competencia.ts) SOLO le pide
+ * `fetchAdsText`/`fetchMetaAdsText`/`computeAdsKpis`, igual que a cualquier entidad, pero por fuera
+ * del loop principal de las 6.
+ *
+ * IDs verificados en vivo el 2026-09-06 (mismo proceso de reconciliación que los 6 competidores,
+ * ver los comentarios de `ads` en cada entidad de arriba):
+ * - Google Ads: advertiser `AR15902350746855669761` reconcilia a "BANCO DE CREDITO DE BOLIVIA S.A."
+ *   con dominio de destino `yape.com.bo` — confirmado que es la entidad BOLIVIANA, no la peruana
+ *   (Yape Perú es un producto mucho más grande y tiene su propio anunciante/dominio distintos).
+ * - Meta Ad Library: página "Yape Bolivia" (nombre exacto, no solo "Yape") — confirmado con
+ *   creativos activos reales con destino a Play Store, no contaminación de otras cuentas.
+ */
+export const YAPE_ADS_REFERENCE: EntityConfig = {
+  id: "yape-bolivia",
+  nombre: "Yape Bolivia",
+  linkedinQuery: "Yape Bolivia",
+  ads: { google: ["AR15902350746855669761"], meta: ["Yape Bolivia"] },
+};

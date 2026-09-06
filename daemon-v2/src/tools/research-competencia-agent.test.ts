@@ -84,6 +84,34 @@ describe("buildEntityPrompt", () => {
     const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null, adsText: null }, 7);
     expect(prompt).toContain("No lo interpretes como una señal en ningún sentido");
   });
+
+  it("incluye Pricing como dimensión, con ejemplos concretos de tarifas/comisiones/tipo de cambio", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null, adsText: null }, 7);
+    expect(prompt).toContain("dimensión Pricing");
+    expect(prompt).toContain("tipo de cambio preferencial");
+  });
+
+  it("la clasificación de hallazgos de RRSS incluye el criterio de Pricing", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null, adsText: null }, 7);
+    expect(prompt).toContain("Pricing si es una tarifa/comisión/tipo de cambio nuevo o distinto");
+  });
+
+  it("incluye el contexto estático de Yape (posicionamiento, features, tarifas) antes del baseline", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null, adsText: null }, 7);
+    expect(prompt).toContain("la aplicación de pagos N°1 de Bolivia");
+    expect(prompt).toContain("yape.com.bo");
+    expect(prompt.indexOf("Contexto de Yape")).toBeLessThan(prompt.indexOf("Estado anterior conocido (baseline)"));
+  });
+
+  it("instruye comparar contra Yape solo cuando la comparación sea real, sin forzarla en cada hallazgo", () => {
+    const entity = getEntity("meru");
+    const prompt = buildEntityPrompt(entity, null, { ios: null, android: null, siteText: null, socialText: null, adsText: null }, 7);
+    expect(prompt).toContain("a diferencia de");
+    expect(prompt).toContain("no la fuerces");
+  });
 });
 
 describe("parseAgentJson", () => {
@@ -102,6 +130,11 @@ describe("parseAgentJson", () => {
   it("descarta hallazgos con dimensión inválida", () => {
     const result = parseAgentJson('{"hallazgos":[{"dimension":"Inventada","descripcion":"x","fuente":""}],"notas":""}');
     expect(result.hallazgos).toEqual([]);
+  });
+
+  it("acepta la dimensión Pricing", () => {
+    const result = parseAgentJson('{"hallazgos":[{"dimension":"Pricing","descripcion":"Baja comisión de remesas","fuente":"https://x.com"}],"notas":""}');
+    expect(result.hallazgos).toEqual([{ dimension: "Pricing", descripcion: "Baja comisión de remesas", fuente: "https://x.com" }]);
   });
 
   it("devuelve vacío si no hay JSON parseable", () => {

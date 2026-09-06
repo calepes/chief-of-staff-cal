@@ -254,31 +254,32 @@ const DEFAULT_SCRAPERS: Record<SocialPlatform, ScraperFn> = {
   x: scrapeX,
 };
 
-// Presupuesto de tiempo por ENTIDAD (no por handle) — sin esto, la multiplicación ya documentada
-// abajo (topes por cuenta × N handles) puede correr sin techo si varias cuentas seguidas encadenan
-// llamadas legítimas pero lentas (ej. varios videos pesados de fila). Es un corte ENTRE handles, no
-// una cancelación real de un await ya en curso (eso exigiría enhebrar AbortController hasta los
-// scrapers de Playwright y hasta research-competencia-media.ts — fuera de alcance acá): si UNA sola
-// llamada se cuelga sin tirar nunca, este chequeo no la interrumpe; sí evita arrancar handles
-// NUEVOS una vez pasado el presupuesto, acotando el peor caso de una entidad con muchos handles a
-// un techo conocido.
+// Presupuesto de tiempo por ENTIDAD, DIVIDIDO EN PARTES IGUALES entre las plataformas que declaran
+// al menos un handle — no es un pozo común que la primera plataforma lenta puede vaciar entera.
+// Diseño anterior (hasta el 2026-09-06): un solo cronómetro por entidad, compartido por las 4
+// plataformas en el orden fijo instagram→tiktok→facebook→x — en una corrida real, Instagram+TikTok
+// de una sola entidad (2 cuentas de Instagram con muchas imágenes + 1 cuenta de TikTok con videos
+// reales vía Apify) alcanzaron a consumir el presupuesto ENTERO antes de llegar a Facebook, dejando
+// esa plataforma —justo la que más costó arreglar (research-competencia-apify.ts)— sin ningún dato
+// en 2 de 6 entidades reales. Repartir el presupuesto por plataforma (cada una con su propio
+// cronómetro, reiniciado al empezar) garantiza que NINGUNA plataforma con handles configurados
+// quede en cero solo por el orden en que le tocó correr — el costo es que una plataforma que
+// terminaría rápido no le "presta" su tiempo sobrante a la siguiente, así que el techo real de la
+// entidad sigue siendo ~`PER_ENTITY_BUDGET_MS` (nunca más), pero el piso por plataforma es
+// `PER_ENTITY_BUDGET_MS / cantidadDePlataformasConHandles` en vez de "lo que sobre".
 //
-// IMPORTANTE 3 (revisión de salud, 2026-09-03): este valor tiene que ser MENOR que
-// `SOCIAL_TIMEOUT_MS` (research-competencia.ts) con margen real — los dos NO son independientes.
-// `SOCIAL_TIMEOUT_MS` es un `Promise.race` EXTERNO que abandona la entidad entera si
-// `fetchSocialText` no resuelve a tiempo; este presupuesto es el corte INTERNO que le da a
-// `fetchSocialText` la chance de terminar prolijo (romper el loop, formatear el texto, devolver)
-// antes de que el externo lo mate. Con el valor viejo (10 min interno vs. 8 min externo) el
-// externo SIEMPRE disparaba primero — el interno nunca llegaba a tener efecto, y como Node no
-// cancela promesas de verdad, cada vez que el externo abandonaba una entidad dejaba corriendo en
-// background el Chromium + ffmpeg de ese handle, compitiendo por CPU/red con la entidad siguiente
-// (en el peor caso, hasta 6 cadenas simultáneas si las 6 entidades vencían el deadline). 7 minutos
-// acá, contra 10 en `SOCIAL_TIMEOUT_MS`, deja 3 minutos de margen real: tiempo de sobra para que
-// el `break platformLoop` interno + `formatSocialText` (trabajo síncrono, milisegundos) terminen
-// antes del hachazo externo — no elimina el leak de fondo si un solo handle se cuelga
-// indefinidamente en un `await` (eso sigue siendo un límite conocido, ver el comentario de
-// `SOCIAL_TIMEOUT_MS`), pero cubre el caso común: varios handles lentos pero no colgados.
-const PER_ENTITY_BUDGET_MS = 7 * 60 * 1000;
+// Es un corte ENTRE handles, no una cancelación real de un await en curso (eso exigiría enhebrar
+// AbortController hasta los scrapers de Playwright y hasta research-competencia-media.ts — fuera de
+// alcance acá): si UN handle se cuelga sin tirar nunca, este chequeo no lo interrumpe; sí evita
+// arrancar handles NUEVOS de esa misma plataforma una vez pasada su porción.
+//
+// IMPORTANTE 3 (revisión de salud, 2026-09-03, sigue aplicando): este valor tiene que ser MENOR que
+// `SOCIAL_TIMEOUT_MS` (research-competencia.ts) con margen real — los dos NO son independientes,
+// ver el comentario de `SOCIAL_TIMEOUT_MS` para la relación completa. 15 min (subido de 7 el
+// 2026-09-05 cuando Facebook/TikTok empezaron a traer contenido real vía Apify, ver el historial en
+// git) contra 20 en `SOCIAL_TIMEOUT_MS` deja margen para que el loop interno termine prolijo antes
+// del hachazo externo.
+const PER_ENTITY_BUDGET_MS = 15 * 60 * 1000;
 
 /**
  * Reparte los posts recolectados en round-robin por plataforma (instagram/tiktok/facebook/x),
@@ -320,8 +321,9 @@ export function interleaveByPlatform<T extends { platform: SocialPlatform }>(pos
  * sería indistinguible de una cuenta bloqueada — en un cron desatendido eso obliga a leer código
  * para diagnosticar. Todos identifican plataforma+handle.
  *
- * Presupuesto de tiempo por entidad (`PER_ENTITY_BUDGET_MS`, ver comentario ahí) — al excederse,
- * corta y devuelve lo ya juntado en vez de seguir indefinidamente.
+ * Presupuesto de tiempo (`PER_ENTITY_BUDGET_MS`, ver comentario ahí) dividido EN PARTES IGUALES
+ * entre las plataformas con handles configurados — al excederse la porción de UNA plataforma, pasa
+ * a la siguiente con su propio cronómetro fresco, en vez de abortar el resto de la entidad.
  *
  * Los topes de enrichPosts (MAX_POSTS_PER_ACCOUNT/MAX_VIDEOS_PER_ACCOUNT) son POR CUENTA, y acá
  * enrichFn se llama una vez por HANDLE (no una vez por entidad con todos los posts juntos) — es la
@@ -343,17 +345,23 @@ export async function fetchSocialText(
   const enrichFn = deps.enrichFn ?? ((posts: SocialPost[]) => enrichPosts(posts));
   const nowFn = deps.nowMs ?? Date.now;
   const presupuestoMs = deps.presupuestoMs ?? PER_ENTITY_BUDGET_MS;
-  const startedAt = nowFn();
+
+  const plataformasConHandles = (Object.keys(social) as SocialPlatform[]).filter((p) => social[p].length > 0);
+  // División pareja del presupuesto — ver el comentario grande de `PER_ENTITY_BUDGET_MS` sobre por
+  // qué NO es un pozo común: cada plataforma recibe su propia porción fija, ninguna puede vaciar el
+  // presupuesto de las que vienen después. `|| presupuestoMs` cubre el caso imposible en la práctica
+  // (0 plataformas con handles ya devolvió `null` más arriba) sin dividir por cero.
+  const presupuestoPorPlataformaMs = plataformasConHandles.length > 0 ? presupuestoMs / plataformasConHandles.length : presupuestoMs;
 
   const todos: EnrichedPost[] = [];
-  platformLoop: for (const platform of Object.keys(social) as SocialPlatform[]) {
+  for (const platform of plataformasConHandles) {
     const handles = social[platform];
-    if (handles.length === 0) continue;
+    const inicioPlataforma = nowFn();
 
     for (const handle of handles) {
-      if (nowFn() - startedAt > presupuestoMs) {
-        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_budget_exceeded", entityId: entity.id, platform, handle, elapsedMs: nowFn() - startedAt }));
-        break platformLoop;
+      if (nowFn() - inicioPlataforma > presupuestoPorPlataformaMs) {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_platform_budget_exceeded", entityId: entity.id, platform, handle, elapsedMs: nowFn() - inicioPlataforma }));
+        break; // pasa a la PLATAFORMA siguiente (cronómetro propio) — no aborta el resto de la entidad
       }
 
       let posts: SocialPost[];
