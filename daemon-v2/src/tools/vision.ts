@@ -19,7 +19,12 @@ export interface PhotoAnalysis {
   rawTokens: { input: number; output: number };
 }
 
-const MODEL = "qwen/qwen3-vl-235b-a22b-thinking";
+// Variante "instruct" (sin razonamiento forzado) del mismo modelo — 2026-09-07: benchmarks
+// verificados en vivo muestran que empata o supera a la variante "thinking" en todo lo
+// perceptivo (OCRBench 920 vs 875, DocVQA 97.1 vs 96.5), que es la tarea real acá (describir/
+// OCR fotos, no razonar problemas de matemática). Es ~2x más barata y no gasta tokens de
+// reasoning en cada foto — la variante "thinking" además está marcada deprecada por Alibaba.
+const MODEL = "qwen/qwen3-vl-235b-a22b-instruct";
 
 const TASK_PROMPTS: Record<NonNullable<AnalyzePhotoOpts["task"]>, string> = {
   ocr: "Extrae todo el texto visible en la foto. Si hay datos estructurados (lista, tabla, formulario), preserva la estructura. Responde solo con el texto extraído, sin comentarios.",

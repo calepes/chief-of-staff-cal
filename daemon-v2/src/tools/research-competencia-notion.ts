@@ -190,8 +190,8 @@ function tableRow(cells: string[]): unknown {
 function adsKpisRow(nombre: string, k: AdsKpis | undefined): unknown {
   return tableRow([
     nombre,
-    k ? String(k.creativosActivos) : "—",
-    k ? String(k.campanasNuevas) : "—",
+    k ? `${k.google.nuevos} / ${k.google.existentes}` : "—",
+    k ? `${k.meta.nuevos} / ${k.meta.existentes}` : "—",
     k?.duracionPromedioDias != null ? String(k.duracionPromedioDias) : "—",
     k ? `${k.mixFormato.imagen} / ${k.mixFormato.display} / ${k.mixFormato.desconocido}` : "—",
   ]);
@@ -210,7 +210,7 @@ function adsKpisRow(nombre: string, k: AdsKpis | undefined): unknown {
 // 2026-09-06 para ver de un vistazo cuánto pauta Yape vs. cada competidor.
 export function buildAdsKpisBlocks(entidades: EntityRunResult[], yapeAdsKpis?: AdsKpis): unknown[] {
   if (!entidades.some((e) => e.adsKpis) && !yapeAdsKpis) return [];
-  const header = ["Entidad", "Creativos activos", "Campañas nuevas", "Duración prom. (días)", "Formato (img/disp/?)"];
+  const header = ["Entidad", "Google (nuevas/existentes)", "Meta (nuevas/existentes)", "Duración prom. (días)", "Formato (img/disp/?)"];
   const filas = entidades.map((e) => adsKpisRow(e.entityNombre, e.adsKpis));
   const filaYape = yapeAdsKpis ? [adsKpisRow("Yape Bolivia (referencia)", yapeAdsKpis)] : [];
   return [

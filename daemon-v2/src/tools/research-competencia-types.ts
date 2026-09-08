@@ -64,6 +64,9 @@ export interface AdsKpis {
   creativosActivos: number;
   /** Cuántos de esos creativos ARRANCARON dentro de la ventana (señal de campaña nueva). */
   campanasNuevas: number;
+  /** Split por red — nuevos/existentes pedido por Cal para el informe (antes solo el total combinado de arriba). */
+  google: { nuevos: number; existentes: number };
+  meta: { nuevos: number; existentes: number };
   duracionPromedioDias: number | null;
   mixFormato: { imagen: number; display: number; desconocido: number };
 }

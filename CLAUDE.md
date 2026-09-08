@@ -504,114 +504,168 @@ Mismo flujo replicado en sesión interactiva vía el skill `guardar-referencia-d
 - **`resume` por chat** (`session-store.ts`, `sessionId` en `~/.cos-agent/sessions.json`, TTL 12h igual que KV): KV pasó de fuente primaria a fallback — con resume exitoso, `runAgent` NO reinyecta el historial de texto de KV (duplicaría el pasado real + uno resumido por Haiku que puede contradecirlo). Fallback automático si el `.jsonl` está borrado/vacío/corrupto. `/deep` por voz recalcula el effort post-transcripción. `/reset` limpia KV **y** sessionId (limpiar solo uno no tiene efecto real).
 - **`consultarJson({path, jqExpr})`** (`tools/consultar-json.ts`) — corre `jq` sobre un persisted-output sin traerlo al contexto (preferir sobre `readPersistedOutput` para datos estructurados grandes). `execFile` async, nunca `spawnSync` (congelaría el daemon entero). `realpathSync` ANTES de validar el path (mismo regex con debilidad a `..` que `read-persisted.ts`, sin resolver ahí). **⚠️ `jq` expone el entorno del proceso vía `env`/`$ENV`** — el spawn va con `env: { PATH: "/usr/bin:/bin" }` explícito; sin eso, una expresión (por error o prompt injection) volcaría todos los secretos de Cal a Telegram. `maxBuffer` 64 MB (default de `spawnSync` es 1 MB → `ENOBUFS`). No es `Bash` general — binario fijo, sin shell, con allowlist de paths.
 
-## Research de competencia (Yape Bolivia) — Fase 1 2026-08-31, Fase 2 2026-09-02/03, Chrome real 2026-09-04/05
+## Research de competencia (Yape Bolivia) — Fase 1 2026-08-31, Fase 2 2026-09-02/03, Chrome real 2026-09-04/05, Apify + features 2026-09-05/06
+
+> **Flujo de negocio + diseño funcional y tecnológico completo (mapa de archivos, modelo de datos,
+> resiliencia/límites conocidos):** `docs/references/research-competencia.md`. Esta sección es el
+> changelog narrado día a día — para entender el sistema entero, empezar por ese doc.
 
 **Standalone, NO vive en el daemon.** `daemon-v2/scripts/research-competencia-now.ts`, disparado por
 un cron externo de launchd (`launchd/com.cal.jano-research-competencia.plist`, lunes 06:00 La Paz —
 instalado a mano por Cal, no se autoinstala). Sin tool de Telegram ni cron interno — decisión
 explícita desde el spec Fase 1 (`docs/superpowers/specs/2026-08-31-research-competencia-design.md`).
 6 entidades fijas (`research-competencia-entities.ts`): bancosol-altoke, ganadero-yolopago,
-economico-zas, takenos, meru, peso-app.
+economico-zas, takenos, meru, peso-app. **Corren en paralelo** (`runWithConcurrency`,
+`CONCURRENCY = 3`, agregado 2026-09-06) — antes era secuencial, y 6 entidades × varios minutos cada
+una alargaban demasiado la corrida completa.
 
 Por entidad, 4 fuentes en paralelo (`research-competencia.ts`, cada una con su propio deadline vía
 `raceWithLoggedTimeout` — un `Promise.race` contra un timer, con `.finally()` para no dejar el timer
 huérfano logueando un "timeout" fantasma después de que la promesa real ya ganó):
 1. **Fase 1 — mecánico + agente LLM**: App Store/Google Play + sitio propio + LinkedIn/prensa vía
    WebSearch, un agente SDK one-off por entidad (`research-competencia-agent.ts`, maxTurns 20,
-   timeout 5 min).
+   timeout 5 min). Dimensiones: Producto/Estrategia/GTM/Hiring/**Pricing** (agregada 2026-09-06).
 2. **Fase 2 — social orgánico**: Instagram/TikTok/Facebook/X (`research-competencia-social.ts` +
-   `-scrapers.ts`, timeout externo 10 min, presupuesto interno 7 min).
-3. **Ads**: Google Ads Transparency Center (`research-competencia-ads.ts`, timeout 2 min).
+   `-scrapers.ts` + `-apify.ts`, timeout externo 20 min — subido de 10, ver "Apify" abajo —,
+   presupuesto interno dividido POR PLATAFORMA, no un pool compartido — ver abajo).
+3. **Ads**: Google Ads Transparency Center + Meta Ad Library (`research-competencia-ads.ts` /
+   `-meta-ads.ts`, timeout 2 min) — más un fetch en paralelo de los KPIs de ads del propio Yape
+   como referencia (`YAPE_ADS_REFERENCE`, ver abajo).
 4. Notion: baseline + battlecard previo (`research-competencia-notion.ts`).
 
-Resultado por entidad: hallazgos por dimensión (Producto/Estrategia/GTM/Hiring) + battlecard vivo
-(resumen/fortalezas/debilidades/amenaza), escrito a Notion y resumido a Telegram vía @ClaudeCalbot
-(`formatSummaryHtml`) — NOTIF_BOT_TOKEN, no el bot de Jano.
+Resultado por entidad: hallazgos por dimensión + battlecard vivo (resumen/fortalezas/debilidades/
+amenaza), escrito a Notion y resumido a Telegram vía @ClaudeCalbot (`formatSummaryHtml`) —
+NOTIF_BOT_TOKEN, no el bot de Jano.
 
-### Social orgánico — Chrome real, no cookies de Safari (rediseño 2026-09-04)
+### Social orgánico — de cookies de Safari, a Chrome real, a Apify (2026-09-04 a 06)
 - **Diseño original (Fase 2):** Chromium headless de Playwright + cookies inyectadas leídas de
-  `Cookies.binarycookies` de Safari (requería Full Disk Access vía `node-fda`).
-- **Descartado el mismo día de la primera corrida real:** con cookie de sesión de Instagram VÁLIDA
-  (verificado: 10 cookies reales, incluidas `sessionid`/`ds_user_id`), el scraper igual devolvía 0
-  posts — Instagram le sirve una página degradada a Chromium headless, sesión válida o no. No era
-  un problema de login.
-- **Fix: Chrome real vía CDP** (`research-competencia-browser.ts`) — mismo patrón ya validado en
-  este repo para `boa-checkin` (el WAF de BoA bloqueaba Chromium propio, Chrome real vía
-  `connectOverCDP` no). Perfil dedicado persistente
+  `Cookies.binarycookies` de Safari (requería Full Disk Access vía `node-fda`). Descartado el mismo
+  día de la primera corrida real: con cookie de sesión de Instagram VÁLIDA, el scraper igual
+  devolvía 0 posts — Instagram le sirve una página degradada a Chromium headless, sesión válida o
+  no.
+- **Fix 2026-09-04 — Chrome real vía CDP** (`research-competencia-browser.ts`, mismo patrón ya
+  validado en este repo para `boa-checkin`). Perfil dedicado persistente
   `~/.cos-agent/research-competencia-chrome-profile` — Cal se loguea UNA VEZ
-  (`npm run research:chrome-login`, ventana visible) y la sesión sobrevive entre corridas, sin FDA
-  ni Cookie Broker. Una sola sesión de Chrome COMPARTIDA por las 6 entidades (abierta/cerrada por
-  `runResearchCompetencia`, no por cada scraper) — **headless en el cron real** (decisión de Cal:
-  nada de ventana visible en una corrida desatendida de las 6am).
-- `RunResult.socialBrowserAvailable` reemplaza los contadores `socialCookiesIntentos`/
-  `socialCookiesEncontradas` del diseño viejo — `false` si `openResearchBrowserSession()` falló
-  (Chrome no instalado, puerto CDP sin responder), advertido en el resumen de Telegram. NO cubre
-  "el browser abrió bien pero cada plataforma dio 0 posts por bloqueo" — eso sigue siendo
-  indistinguible de "semana tranquila" en el agregado, visible solo en el log
-  (`research_competencia_scrape_empty`).
+  (`npm run research:chrome-login`, ventana visible) y la sesión sobrevive entre corridas (headless
+  en el cron real). **Resultado real, mixto:** Instagram quedó resuelto reescribiendo el parser a
+  extracción DOM del grid ya renderizado (`parseInstagramGridItems`/`collectInstagramGridItems` —
+  Instagram migró a su framework "Comet" y el JSON embebido `shortcode`+`owner.username` que se
+  buscaba antes ya no existe; 11 posts reales de altoke.bo en la primera corrida de prueba). Pero
+  Facebook devolvía texto deliberadamente ofuscado (anti-scraping real, no un bug de selector) y
+  TikTok disparaba un captcha de slider ("Drag the slider to fit the puzzle") antes de mostrar el
+  grid — mismo tipo de bloqueo ya descartado automatizar para Multicine (`mcp-servers` CLAUDE.md,
+  ficha `cine`).
+  - Las dos formas de post de Instagram traen datos complementarios, ninguna trae todo: **Reel**
+    (`href` con `/reel/`) trae caption real completo en el `alt` pero sin fecha parseable; **Foto**
+    (`href` con `/p/`) trae fecha pero el `alt` es descripción de visión auto-generada por Instagram
+    ("Photo by altoke on {fecha}..."), no un caption real — se descarta a propósito (`caption:""`).
+    `esVideo` se fuerza `false` para los dos (el grid nunca expone una URL de video real, solo la
+    miniatura). El grid NO se reordena por fecha — reordenar empujaría todos los reels (mayoría del
+    contenido real) al final, porque no tienen fecha.
+- **Fix 2026-09-05 — migración a Apify para Facebook y TikTok** (`research-competencia-apify.ts`):
+  marketplace de scrapers de terceros, en vez de pelear el DOM/anti-bot directamente. Actores:
+  `apify/facebook-posts-scraper` (Facebook) y `apidojo/tiktok-scraper` (TikTok), vía
+  `APIFY_TOKEN`. Instagram y X siguen en Chrome real + extracción DOM, sin cambios — Apify solo
+  reemplazó las dos fuentes que estaban bloqueadas.
+  - **⚠️ Gotcha real, TikTok devolvía 0 posts para cuentas grandes/verificadas — encontrado y
+    resuelto en vivo.** El input `location` del actor de Apify (región del proxy que hace el
+    scraping) default a `"US"` — con eso, cuentas grandes de Bolivia (altoke.bo, y `yapebolivia`
+    usada a propósito para descartar la hipótesis de "es un problema de tamaño de cuenta")
+    devolvían 0 resultados silenciosamente, sin error. Fix: `location: "BO"` explícito en el input
+    del actor (`TIKTOK_LOCATION` en `research-competencia-apify.ts`) — verificado contra ambas
+    cuentas.
+- **Presupuesto de tiempo — de pool compartido a división POR PLATAFORMA (2026-09-06, "robusta" por
+  decisión de Cal frente a la opción más simple de solo reordenar/subir el timeout):** con Apify
+  devolviendo contenido real y más voluminoso, el presupuesto de 7 min compartido entre las 4
+  plataformas dejaba que una plataforma lenta (ej. Instagram+TikTok) le comiera todo el tiempo a
+  las que venían después en el loop (ej. Facebook), aunque hubiera tiempo de sobra en términos
+  absolutos. Fix: `PER_ENTITY_BUDGET_MS` (subido 7→15 min, con `SOCIAL_TIMEOUT_MS` 10→20 min en
+  `research-competencia.ts`) se divide en partes iguales entre las plataformas CON handles
+  configurados, y cada plataforma corre contra SU PROPIO timer (`inicioPlataforma`) — exceder la
+  porción de una plataforma solo la corta a ELLA (log
+  `research_competencia_social_platform_budget_exceeded`, antes `..._budget_exceeded` a secas), las
+  demás siguen con su presupuesto intacto.
 
-**Resultado verificado en vivo 2026-09-05, con Cal ya logueado en el perfil dedicado
-(`npm run research:chrome-login`): confirmó la apuesta — el diagnóstico previo de "detección de
-bot" era incompleto.**
+### Nuevas dimensiones — Pricing y comparación explícita con Yape (2026-09-06)
+- **Dimensión `Pricing` agregada** (`Dimension` en `research-competencia-types.ts`) — ejemplos en el
+  prompt del agente: tarifas de transferencia, comisiones, tipo de cambio, límites.
+- **`YAPE_CONTEXT`** (`research-competencia-agent.ts`) — bloque fijo con la posición real de Yape
+  (gratis, features, positioning, sacado de yape.com.bo) inyectado en el prompt del agente, con una
+  instrucción explícita: cuando un hallazgo compita DIRECTO contra algo de Yape, decirlo — pero sin
+  forzarlo en cada hallazgo, solo cuando la comparación es real y aporta.
+- **Regresión encontrada y arreglada el mismo día — el agente dejó de usar WebSearch.** Al sumar más
+  contenido social pre-cargado en el prompt (Apify trayendo más volumen), el modelo empezó a
+  saltearse la búsqueda web para Hiring/Producto — confirmado comparando dos corridas consecutivas
+  en Notion (Cal: *"me parece que en el anterior había más información de producto de hiring que no
+  salió en este último informe"*). Causa: atención/priorización del modelo con mucho contenido
+  interpuesto, no un bug de código. Fix: reforzar la instrucción de NO saltearse WebSearch cerca del
+  FINAL del prompt (justo antes del formato de salida) en vez de solo al principio — instrucciones
+  tempranas se diluyen cuando hay mucho contenido en el medio (recency bias). Verificado
+  empíricamente instrumentando `runEntityAgent()` para loguear `webSearchCalls`/`totalToolCalls` por
+  entidad (`research_competencia_agent_tool_usage`) — conteos sanos post-fix (8, 8, 3, 5, 5, 6 en
+  una corrida real).
 
-- **Instagram: RESUELTO.** Con Chrome real + sesión logueada, la página que llega es la REAL — sin
-  muro, sin degradación (confirmado con screenshot: perfil completo, avatar de Cal, botón
-  "Following"). El único problema real era que `parseInstagramPosts`/`extractInstagramNodes`
-  (JSON embebido `shortcode`+`owner.username`) buscaban una estructura que Instagram YA NO SIRVE —
-  migraron a su framework "Comet", forma de datos completamente distinta. **Reescrito 2026-09-05**
-  a extracción por DOM del grid ya renderizado (`parseInstagramGridItems`/
-  `collectInstagramGridItems`, mismo espíritu que `parseDomPosts` de Facebook/X) — funciona: 11
-  posts reales de altoke.bo en la primera corrida de prueba. Las dos formas de post traen datos
-  casi complementarios, ninguna trae todo:
-  - **Reel** (`href` con `/reel/`): el `alt` de la miniatura ES el caption real completo (emojis,
-    hashtags, vigencia de promo) — pero SIN fecha parseable.
-  - **Foto** (`href` con `/p/`): el `alt` es descripción de VISIÓN auto-generada por Instagram
-    ("Photo by altoke on {fecha}. May be..."), no un caption real — se descarta a propósito
-    (`caption:""`) para no confundir al agente con texto que la marca no escribió. Sí trae fecha.
-  - `esVideo` se fuerza `false` para los dos tipos — el grid nunca expone una URL de video real,
-    solo la miniatura, y tratarlo como video le pasaría esa miniatura a `analyzeVideoFn` como si
-    fuera un archivo descargable (fallaría siempre). Se pierde el análisis de audio/frames del
-    reel; se gana el caption completo, que antes ni eso.
-  - El grid NO se reordena por fecha (a diferencia del resto de los parsers del archivo): como
-    Instagram ya lo entrega más-reciente-primero y los reels no tienen fecha, aplicar el sort
-    genérico empujaría TODOS los reels (mayoría del contenido real, 7 de 10 en la muestra) al
-    final — se preserva el orden nativo del grid en su lugar.
-- **TikTok: BLOQUEADO por captcha real, no por login ni por parser.** Con Chrome real + sesión
-  logueada, cargar el perfil dispara un slider captcha ("Drag the slider to fit the puzzle") antes
-  de mostrar el grid de videos — mismo tipo de bloqueo que ya se evaluó y se descartó automatizar
-  para Multicine (`mcp-servers` CLAUDE.md, ficha `cine`: "resolver/evadir un captcha no es algo
-  que corresponda automatizar"). `scrapeTikTok`/`extractTikTokNodes` (JSON embebido) NO se
-  tocaron — de todos modos el `itemList` de videos ya no viene en el HTML inicial (TikTok lo trae
-  con un fetch aparte del cliente), así que aunque no hubiera captcha, ese extractor seguiría
-  necesitando la misma reescritura DOM-based que Instagram. Sin plan de retomar esto salvo que
-  aparezca una vía sin captcha.
-- Facebook/X sin cambios — ya usaban extracción DOM (`parseDomPosts`), sin verificar en vivo
-  todavía si su parser sigue vigente contra la estructura real de esas dos plataformas.
-
-### Ads — Google Ads Transparency Center (agregado 2026-09-03/04)
+### Ads — Google Ads Transparency Center + Meta Ad Library + referencia propia de Yape (2026-09-03 a 06)
 - Complementario al orgánico, no lo reemplaza: dice en qué gasta publicidad la entidad y a quién le
   habla, no qué publica orgánicamente.
-- **Evaluado en vivo contra las alternativas — ninguna otra sirve para Bolivia:** la Ad Library API
-  oficial de Meta exige identity confirmation y fuera de UK/UE solo da anuncios políticos; TikTok
-  Creative Center/Commercial Content Library no cubren Bolivia (LatAm = solo AR/BR/CO/MX; Content
-  Library = solo EEE/UK/Suiza/Turquía); X Ads Repository solo cubre los 27 de la UE. Google Ads
-  Transparency sí expone `region=BO` con búsqueda por anunciante, sin login.
-- Endpoint NO oficial (RPC interno `SearchService/SearchCreatives`). IDs de anunciante (`AR...`)
-  descubiertos a mano y hardcodeados en `EntityConfig.ads.google`
-  (research-competencia-entities.ts) — 5 de 6 entidades resueltas (Peso App sin anunciante
-  boliviano confiable identificado todavía). El anunciante real casi nunca coincide con el nombre
-  de marca (Takenos → "GLOBAL FLOW S.A.", Meru → "R3mit Solutions Inc." — la razón social detrás
-  del producto).
-- **⚠️ Rate limit real de Google, más duro de lo esperado — verificado en vivo 2026-09-03/04:** tras
-  ~40-50 requests en un día (descubrimiento manual de IDs + pruebas + 2 corridas reales), Google
-  devolvió 429 en TODO el dominio `adstransparency.google.com` (no solo el RPC — la página HTML
-  plana también) y seguía bloqueado 20+ horas después. Es un baneo de IP, no un throttle de ráfaga
-  — `THROTTLE_MS` (2,5s entre pedidos, en `research-competencia-ads.ts`) ayuda contra el caso fácil
-  pero no es garantía contra un umbral acumulado de horas/días. El uso real del cron (~7
-  pedidos/semana) es mucho menor al volumen que lo disparó — probablemente seguro en la práctica,
-  sin forma de confirmarlo sin corridas reales sostenidas en el tiempo. Sin mitigación adicional
-  implementada a propósito: no hay fix técnico real contra un bloqueo de IP opaco de un endpoint no
-  documentado.
+- **Google (agregado 2026-09-03/04):** endpoint NO oficial (RPC interno
+  `SearchService/SearchCreatives`), `region=BO`, sin login. IDs de anunciante (`AR...`) descubiertos
+  a mano y hardcodeados en `EntityConfig.ads.google` — 5 de 6 entidades resueltas (Peso App sin
+  anunciante boliviano confiable todavía). El anunciante real casi nunca coincide con el nombre de
+  marca (Takenos → "GLOBAL FLOW S.A.", Meru → "R3mit Solutions Inc.").
+  - **⚠️ Rate limit real, más duro de lo esperado:** tras ~40-50 requests en un día, Google devolvió
+    429 en TODO el dominio (no solo el RPC) y siguió bloqueado 20+ horas — baneo de IP, no throttle
+    de ráfaga. `THROTTLE_MS` (2,5s entre pedidos) ayuda contra el caso fácil, no contra un umbral
+    acumulado de horas/días. Uso real del cron (~7 pedidos/semana) muy por debajo del volumen que lo
+    disparó — probablemente seguro en la práctica, sin garantía.
+  - **Cola de throttle GLOBAL (2026-09-06)**, no solo por entidad (`conColaGlobal`, promise chain a
+    nivel de módulo, serializa TODOS los pedidos del proceso) — con la paralelización de entidades
+    (arriba), pedidos concurrentes de entidades distintas hubieran multiplicado el riesgo de 429 si
+    el throttle solo serializaba dentro de una misma entidad.
+- **Meta Ad Library agregada 2026-09-04+** (`research-competencia-meta-ads.ts`) — pública, sin
+  login, headless-fetchable. Búsqueda por keyword trae ruido; se filtra con un allowlist
+  (`entity.ads.meta`, nombre exacto de la página).
+  - **Explorado y descartado: desglose Facebook vs. Instagram dentro de Meta.** Cal pidió separar
+    los anuncios por plataforma dentro de Meta — los íconos de "Plataformas" en el Ad Library NO
+    tienen `aria-label`, solo coordenadas `mask-position` de un sprite CSS sin mapeo público
+    confiable. Sin señal utilizable, descartado (no implementado).
+- **Split Google/Meta nuevos/existentes — llevado a producción (2026-09-08).** El pedido de Cal de
+  separar la tabla de ads por red y por nuevo/existente se había aplicado el 2026-09-06 solo de forma
+  MANUAL (script ad-hoc descartable sobre el informe ya generado, sin tocar `buildAdsKpisBlocks`) —
+  por eso la corrida automática siguiente no lo mostró. Diagnosticado y corregido: `AdsKpis` ganó
+  `google:{nuevos,existentes}`/`meta:{nuevos,existentes}` (`computeAdsKpis`,
+  research-competencia-ads.ts), y la tabla del informe (`buildAdsKpisBlocks`,
+  research-competencia-notion.ts) ahora muestra esas columnas en vez de los totales combinados.
+  `campanasNuevas`/`creativosActivos` combinados se mantuvieron intactos (los sigue usando
+  `formatSummaryHtml` para el resumen de Telegram). **Lección:** una iteración pedida "viendo la
+  tabla" en el momento, sin persistirla en el código, se pierde en la corrida siguiente sin aviso —
+  si un ajuste debe quedar, tiene que tocar el pipeline real, no solo el output de esa corrida.
+- **`YAPE_ADS_REFERENCE` (2026-09-06)** — KPIs de ads del propio Yape (Google advertiser ID
+  `AR15902350746855669761`, reconciliado a "BANCO DE CREDITO DE BOLIVIA S.A." / yape.com.bo; página
+  Meta "Yape Bolivia" exacta) como referencia PERMANENTE en el pipeline, NO un competidor —
+  deliberadamente fuera de `ENTITIES`. Verificado explícito que es Bolivia y no Perú antes de
+  integrarlo. Fetch en paralelo al batch de entidades, protegido con el mismo
+  `raceWithLoggedTimeout` que el resto (encontrado en tests: sin el timeout, un mock
+  intencionalmente colgado de OTRA entidad quedaba "robado" por este fetch al ser el primero en
+  evaluarse en JS, rompiendo 11 tests). Aparece como primera fila "Yape Bolivia (referencia)" en la
+  tabla comparativa de ads del informe (`buildAdsKpisBlocks`).
+  - **Split Google/Meta activos/nuevos** aplicado puntualmente al informe consolidado manual (pedido
+    de Cal viendo la tabla) — NO tocó el código de producción, `buildAdsKpisBlocks` sigue con las
+    columnas Creativos activos/Campañas nuevas/Duración/Formato de siempre; el split se calculó
+    ad-hoc con un script descartable reusando `fetchAdsText`/`fetchMetaAdsText`/`esNuevo`.
+
+### Procesos en background que se mataban sin razón aparente (2026-09-05)
+- **Síntoma:** 3 corridas largas lanzadas vía `run_in_background` del Bash tool de Claude Code
+  terminaron en `[killed]` sin error de código propio, incluso con `caffeinate -i` corriendo.
+  Descartado sleep real del sistema (`pmset -g log` mostró un `caffeinate` con `ClientDied`
+  inesperado — un sleep real pausaría el proceso, no lo mataría). Candidatos sin descartar del
+  todo: App Nap de macOS sobre una terminal en background, o el manejo de ciclo de vida de procesos
+  en background del harness de Claude Code.
+- **Fix:** `scripts/research-competencia-run-detached.sh` — `nohup ... & disown` (confirmado
+  `PPID=1`, desconectado del todo del proceso padre), envuelto en `caffeinate -i`, con su PROPIA
+  notificación a Telegram por `curl` (bot `NOTIF_BOT_TOKEN`) al terminar — desacopla la entrega del
+  aviso de que la sesión interactiva de Claude Code siga viva. Log a
+  `/tmp/research-competencia-run.log`.
 
 ## Notion
 - Integración "Claude CoS" (DB Tareas + People). Prefijo MCP: `mcp__claude_ai_Notion__*`.
@@ -631,6 +685,7 @@ frecuencia, reconsiderar.
 ## Referencias (cargar bajo demanda)
 - Menú interactivo + callbacks + flujos de tareas: `docs/references/menu-telegram.md`
 - Viajes, calendarios, briefings, health, audio, /today: `docs/references/viajes-calendarios.md`
+- Research de competencia (Yape Bolivia) — flujo de negocio + diseño funcional/técnico completo: `docs/references/research-competencia.md`
 - Arquitectura completa: `docs/ARCHITECTURE.md` · Backlog: `BACKLOG.md`
 - Telegram cross-project: `~/Claude Projects/telegram-reference.md`
 - Contexto Yape: `~/Claude Projects/Yape/CLAUDE.md`

@@ -370,6 +370,8 @@ export function computeAdsKpis(
   return {
     creativosActivos: google.length + meta.length,
     campanasNuevas: nuevosGoogle + nuevosMeta,
+    google: { nuevos: nuevosGoogle, existentes: google.length - nuevosGoogle },
+    meta: { nuevos: nuevosMeta, existentes: meta.length - nuevosMeta },
     duracionPromedioDias,
     mixFormato,
   };

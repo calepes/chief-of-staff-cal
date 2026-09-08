@@ -272,6 +272,7 @@ describe("computeAdsKpis", () => {
   it("cero en todo con arrays vacíos", () => {
     expect(computeAdsKpis([], [], 7, ahora)).toEqual({
       creativosActivos: 0, campanasNuevas: 0, duracionPromedioDias: null,
+      google: { nuevos: 0, existentes: 0 }, meta: { nuevos: 0, existentes: 0 },
       mixFormato: { imagen: 0, display: 0, desconocido: 0 },
     });
   });
@@ -288,6 +289,8 @@ describe("computeAdsKpis", () => {
     const metaViejo = metaAd({ libraryId: "2", desde: "2026-01-01" });
     const kpis = computeAdsKpis([googleNuevo, googleViejo], [metaNuevo, metaViejo], 7, ahora);
     expect(kpis.campanasNuevas).toBe(2);
+    expect(kpis.google).toEqual({ nuevos: 1, existentes: 1 });
+    expect(kpis.meta).toEqual({ nuevos: 1, existentes: 1 });
   });
 
   it("duración promedio solo con creativos de Google que tienen ambas fechas", () => {

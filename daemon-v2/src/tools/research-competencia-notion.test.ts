@@ -71,7 +71,11 @@ describe("buildInformeBlocks", () => {
   });
 
   it("antepone la tabla comparativa de ads si al menos una entidad trae adsKpis", () => {
-    const kpis: AdsKpis = { creativosActivos: 3, campanasNuevas: 1, duracionPromedioDias: 5, mixFormato: { imagen: 2, display: 1, desconocido: 0 } };
+    const kpis: AdsKpis = {
+      creativosActivos: 3, campanasNuevas: 1,
+      google: { nuevos: 1, existentes: 1 }, meta: { nuevos: 0, existentes: 1 },
+      duracionPromedioDias: 5, mixFormato: { imagen: 2, display: 1, desconocido: 0 },
+    };
     const blocks = buildInformeBlocks([entityResult({ adsKpis: kpis })]) as any[];
     expect(blocks[0].type).toBe("heading_3");
     expect(richText(blocks[0])).toBe("Actividad publicitaria — comparativa");
@@ -114,7 +118,11 @@ describe("buildAdsKpisBlocks", () => {
   });
 
   it("usa '—' para una entidad sin adsKpis cuando OTRA sí lo trae", () => {
-    const kpis: AdsKpis = { creativosActivos: 1, campanasNuevas: 0, duracionPromedioDias: null, mixFormato: { imagen: 1, display: 0, desconocido: 0 } };
+    const kpis: AdsKpis = {
+      creativosActivos: 1, campanasNuevas: 0,
+      google: { nuevos: 0, existentes: 1 }, meta: { nuevos: 0, existentes: 0 },
+      duracionPromedioDias: null, mixFormato: { imagen: 1, display: 0, desconocido: 0 },
+    };
     const blocks = buildAdsKpisBlocks([entityResult({ entityNombre: "Con datos", adsKpis: kpis }), entityResult({ entityNombre: "Sin datos" })]) as any[];
     const tabla = blocks.find((b) => b.type === "table");
     const filaSinDatos = tabla.table.children[2]; // [0]=header, [1]=Con datos, [2]=Sin datos
@@ -122,18 +130,30 @@ describe("buildAdsKpisBlocks", () => {
   });
 
   it("yapeAdsKpis va como PRIMERA fila de datos, marcada '(referencia)', antes que las entidades", () => {
-    const kpisYape: AdsKpis = { creativosActivos: 69, campanasNuevas: 32, duracionPromedioDias: 271.1, mixFormato: { imagen: 17, display: 23, desconocido: 0 } };
-    const kpisEntidad: AdsKpis = { creativosActivos: 1, campanasNuevas: 0, duracionPromedioDias: null, mixFormato: { imagen: 1, display: 0, desconocido: 0 } };
+    const kpisYape: AdsKpis = {
+      creativosActivos: 69, campanasNuevas: 32,
+      google: { nuevos: 20, existentes: 41 }, meta: { nuevos: 12, existentes: 8 },
+      duracionPromedioDias: 271.1, mixFormato: { imagen: 17, display: 23, desconocido: 0 },
+    };
+    const kpisEntidad: AdsKpis = {
+      creativosActivos: 1, campanasNuevas: 0,
+      google: { nuevos: 0, existentes: 1 }, meta: { nuevos: 0, existentes: 0 },
+      duracionPromedioDias: null, mixFormato: { imagen: 1, display: 0, desconocido: 0 },
+    };
     const blocks = buildAdsKpisBlocks([entityResult({ entityNombre: "Un competidor", adsKpis: kpisEntidad })], kpisYape) as any[];
     const tabla = blocks.find((b) => b.type === "table");
     const filaYape = tabla.table.children[1]; // [0]=header, [1]=Yape, [2]=el competidor
-    expect(filaYape.table_row.cells.map((c: any) => c[0].text.content)).toEqual(["Yape Bolivia (referencia)", "69", "32", "271.1", "17 / 23 / 0"]);
+    expect(filaYape.table_row.cells.map((c: any) => c[0].text.content)).toEqual(["Yape Bolivia (referencia)", "20 / 41", "12 / 8", "271.1", "17 / 23 / 0"]);
     const filaCompetidor = tabla.table.children[2];
     expect(filaCompetidor.table_row.cells[0][0].text.content).toBe("Un competidor");
   });
 
   it("igual arma la tabla si NINGUNA entidad trae adsKpis pero SÍ hay yapeAdsKpis", () => {
-    const kpisYape: AdsKpis = { creativosActivos: 5, campanasNuevas: 1, duracionPromedioDias: 10, mixFormato: { imagen: 0, display: 5, desconocido: 0 } };
+    const kpisYape: AdsKpis = {
+      creativosActivos: 5, campanasNuevas: 1,
+      google: { nuevos: 1, existentes: 3 }, meta: { nuevos: 0, existentes: 1 },
+      duracionPromedioDias: 10, mixFormato: { imagen: 0, display: 5, desconocido: 0 },
+    };
     const blocks = buildAdsKpisBlocks([entityResult({})], kpisYape) as any[];
     expect(blocks.find((b) => b.type === "table")).toBeDefined();
   });

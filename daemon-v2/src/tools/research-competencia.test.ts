@@ -27,6 +27,7 @@ vi.mock("./research-competencia-ads.js", () => ({
   })),
   computeAdsKpis: vi.fn(() => ({
     creativosActivos: 0, campanasNuevas: 0, duracionPromedioDias: null,
+    google: { nuevos: 0, existentes: 0 }, meta: { nuevos: 0, existentes: 0 },
     mixFormato: { imagen: 0, display: 0, desconocido: 0 },
   })),
 }));
@@ -194,6 +195,7 @@ describe("runResearchCompetencia", () => {
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
     expect(result.yapeAdsKpis).toEqual({
       creativosActivos: 0, campanasNuevas: 0, duracionPromedioDias: null,
+      google: { nuevos: 0, existentes: 0 }, meta: { nuevos: 0, existentes: 0 },
       mixFormato: { imagen: 0, display: 0, desconocido: 0 },
     });
   });

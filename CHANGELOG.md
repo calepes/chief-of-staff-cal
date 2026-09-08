@@ -1,5 +1,103 @@
 # CHANGELOG — Jano
 
+## 2026-09-05/06 — Research de competencia: Apify (Facebook/TikTok), Pricing/vs-Yape, paralelización, ads de Yape como referencia
+
+Sesión larga sobre `research-competencia*` (standalone, ver `CLAUDE.md` sección homónima para el
+detalle técnico completo — acá solo el resumen de decisiones y gotchas). Arrancó diagnosticando por
+qué Facebook/TikTok seguían en 0 posts con Chrome real + sesión logueada, y terminó agregando tres
+features nuevas a pedido de Cal tras leer un artículo de Readwise sobre competitive research.
+
+### Fix — Facebook/TikTok migrados a Apify, TikTok bloqueado por `location` default a EEUU
+Facebook mostraba texto deliberadamente ofuscado (anti-scraping real, no un bug de selector);
+TikTok disparaba un captcha de slider antes de mostrar el grid — mismo bloqueo ya descartado
+automatizar para Multicine. Migrados a Apify (`research-competencia-apify.ts`):
+`apify/facebook-posts-scraper` y `apidojo/tiktok-scraper`.
+
+- **Gotcha real: TikTok devolvía 0 posts para cuentas grandes/verificadas** (altoke.bo) incluso vía
+  Apify. Causa: el input `location` del actor (región del proxy) default a `"US"` — con eso,
+  contenido boliviano de una cuenta grande no vuelve. Se descartó primero la hipótesis de "cuenta
+  demasiado grande" probando contra `yapebolivia` (misma falla) antes de encontrar el campo
+  correcto. Fix: `location: "BO"` explícito — verificado contra ambas cuentas.
+- Instagram y X no se tocaron (siguen en Chrome real + extracción DOM, ya resueltos en la sesión
+  anterior).
+
+### Fix — Presupuesto de tiempo social: de pool compartido a división por plataforma
+Con Apify trayendo contenido real y más voluminoso, el presupuesto de 7 min compartido entre las 4
+plataformas dejaba que una lenta (Instagram+TikTok) le comiera el tiempo a las que venían después
+en el loop (Facebook), aunque hubiera tiempo de sobra en total. Cal, ante la opción más simple de
+"reordenar y subir el timeout" vs. una división por plataforma, eligió la robusta: `PER_ENTITY_BUDGET_MS`
+(7→15 min) se reparte en partes iguales entre las plataformas con handles, cada una con SU PROPIO
+timer — exceder la porción de una no le come tiempo a las demás.
+
+### Feature — Dimensión Pricing + comparación explícita contra Yape en el prompt
+`YAPE_CONTEXT` (posición real de Yape — gratis, features — sacado de yape.com.bo) inyectado en el
+prompt del agente, con instrucción de señalar cuando un hallazgo compita directo contra Yape, sin
+forzarlo en cada uno.
+
+- **Regresión encontrada el mismo día: el agente dejó de usar WebSearch para Hiring/Producto.** Cal,
+  comparando dos informes consecutivos en Notion: *"me parece que en el anterior había más
+  información de producto de hiring que no salió en este último informe"*. Causa: con más contenido
+  social pre-cargado (Apify), el modelo priorizaba ese contenido y se saltaba la búsqueda web —
+  atención del modelo, no un bug de código. Fix: reforzar la instrucción de NO saltearse WebSearch
+  cerca del FINAL del prompt en vez de solo al principio (recency bias — instrucciones tempranas se
+  diluyen con mucho contenido interpuesto). Verificado empíricamente instrumentando
+  `runEntityAgent()` para loguear conteos de `webSearchCalls` por entidad — sanos post-fix.
+
+### Feature — Paralelización de entidades + cola de throttle global para Google Ads
+Las 6 entidades corrían secuenciales; con más fuentes (Apify, Meta Ads) una corrida completa se
+alargaba demasiado para el cron de las 6am. Cal eligió "3 en simultáneo" entre las opciones de
+concurrencia presentadas. `runWithConcurrency()` (chunking + `Promise.all`, `CONCURRENCY=3`);
+`processEntity()` extraída como función standalone que devuelve `EntityRunResult` en vez de empujar
+a un array compartido.
+
+- El throttle de Google Ads Transparency (rate limit real, ban de IP de 20+ horas si se abusa) pasó
+  de serializar solo DENTRO de una entidad a una cola GLOBAL a nivel de módulo (`conColaGlobal`) —
+  sin esto, la paralelización hubiera multiplicado el riesgo de 429 al lanzar pedidos concurrentes
+  de entidades distintas.
+
+### Feature — KPIs de ads del propio Yape como referencia permanente
+A pedido de Cal ("¿puedes hacer una corrida para encontrar los mismos KPIs de Yape Bolivia para
+compararlo... misma ventana, solo ads?"), primero como corrida puntual y luego integrado al
+pipeline ("intégralo e incluye esto en las corridas como parte del flujo"). `YAPE_ADS_REFERENCE`
+(`research-competencia-entities.ts`) — Google advertiser ID `AR15902350746855669761` (reconciliado
+a "BANCO DE CREDITO DE BOLIVIA S.A." / yape.com.bo, **verificado explícito que es Bolivia y no
+Perú** antes de integrarlo) + página Meta "Yape Bolivia" exacta. Deliberadamente fuera del array
+`ENTITIES` — es una referencia, no un competidor.
+
+- **Bug encontrado y arreglado antes de mergear: 11 tests cayeron en cascada.** El fetch de Yape se
+  agregó sin `raceWithLoggedTimeout` — un mock intencionalmente colgado de OTRA entidad (para
+  probar el manejo de timeouts) quedaba "robado" por este fetch nuevo al ser el primero en
+  evaluarse en JS, dejando el guard `researchInFlight` sin liberar nunca. Fix: envolver el fetch de
+  Yape con el mismo `raceWithLoggedTimeout` que ya protege al resto. Efecto colateral en los tests:
+  `mockImplementationOnce`/`mockRejectedValueOnce` asumían un solo caller de `fetchAdsText` —
+  discriminados por `entity.id` en su lugar, con `finally` restaurando el mock default (
+  `mockImplementation` persiste entre tests a diferencia de `mockImplementationOnce`, y
+  `vi.clearAllMocks()` en `beforeEach` no lo resetea).
+- Aparece como primera fila "Yape Bolivia (referencia)" en la tabla comparativa de ads
+  (`buildAdsKpisBlocks`).
+
+### Investigado y descartado — desglose Facebook vs. Instagram dentro de Meta Ad Library
+Cal quería separar los anuncios de Meta por plataforma. Los íconos de "Plataformas" del Ad Library
+no tienen `aria-label`, solo coordenadas `mask-position` de un sprite CSS sin mapeo público
+confiable — sin señal utilizable, no se implementó.
+
+### Fix (infra) — Procesos en background que se mataban sin razón aparente
+3 corridas largas lanzadas vía `run_in_background` del Bash tool de Claude Code terminaron en
+`[killed]` sin error propio, incluso con `caffeinate -i` corriendo. Descartado sleep real del
+sistema (`pmset -g log` mostró `ClientDied` en `caffeinate` — un sleep real pausa, no mata).
+Candidatos sin descartar del todo: App Nap de macOS sobre una terminal en background, o el ciclo de
+vida de procesos en background del propio harness de Claude Code.
+
+- **Fix:** `scripts/research-competencia-run-detached.sh` — `nohup ... & disown` (confirmado
+  `PPID=1`), envuelto en `caffeinate -i`, con notificación a Telegram propia vía `curl` al
+  terminar — desacopla el aviso de que la sesión interactiva siga viva.
+
+### Docs — Un informe consolidado manual (Notion, no producción) para comparar 4 corridas de prueba
+A pedido de Cal, se juntaron 3-4 corridas de prueba del 2026-09-05/06 en una sola página de Notion
+(`Competencia — Consolidado`), reorganizada por dimensión por entidad, con un split Google/Meta
+activos/nuevos en la tabla de ads calculado ad-hoc. Excepción puntual, no cambió nada del código de
+producción ni del formato real de los informes semanales.
+
 ## 2026-08-26
 
 ### Fix (infra) — Journal entries perdidos durante un corte de webhook de ~8.5h
