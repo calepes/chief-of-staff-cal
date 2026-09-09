@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { findExistingUrls, insertPosts, type HistoryPost } from "./research-competencia-history.js";
+import { getAggregateStats, formatHistoryText } from "./research-competencia-history.js";
 
 describe("findExistingUrls", () => {
   it("devuelve un Map url->fila para las URLs que ya existen en D1", async () => {
@@ -66,5 +67,37 @@ describe("insertPosts", () => {
     const queryD1Fn = vi.fn();
     await insertPosts([], "run-1", { queryD1Fn });
     expect(queryD1Fn).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAggregateStats", () => {
+  it("calcula conteo total y promedio semanal a partir de las filas de D1", async () => {
+    const queryD1Fn = vi.fn().mockResolvedValue([{ total: 12, primera_fecha: "2026-06-01", ultima_fecha: "2026-09-01" }]);
+    const stats = await getAggregateStats("takenos", 90, { queryD1Fn });
+    expect(stats).toEqual({ total: 12, primeraFecha: "2026-06-01", ultimaFecha: "2026-09-01", promedioSemanal: expect.any(Number) });
+  });
+
+  it("devuelve null si D1 no responde — fail-soft", async () => {
+    const queryD1Fn = vi.fn().mockResolvedValue(null);
+    const stats = await getAggregateStats("takenos", 90, { queryD1Fn });
+    expect(stats).toBeNull();
+  });
+
+  it("devuelve null si no hay filas (entidad sin historial todavía)", async () => {
+    const queryD1Fn = vi.fn().mockResolvedValue([{ total: 0, primera_fecha: null, ultima_fecha: null }]);
+    const stats = await getAggregateStats("takenos", 90, { queryD1Fn });
+    expect(stats).toBeNull();
+  });
+});
+
+describe("formatHistoryText", () => {
+  it("arma una línea legible por entidad con las stats", () => {
+    const texto = formatHistoryText({ total: 12, primeraFecha: "2026-06-01", ultimaFecha: "2026-09-01", promedioSemanal: 0.9 });
+    expect(texto).toContain("12 posts");
+    expect(texto).toContain("0.9");
+  });
+
+  it("devuelve null si stats es null", () => {
+    expect(formatHistoryText(null)).toBeNull();
   });
 });

@@ -106,3 +106,38 @@ export async function insertPosts(posts: HistoryPost[], runId: string, deps: His
     }
   }
 }
+
+export interface AggregateStats {
+  total: number;
+  primeraFecha: string;
+  ultimaFecha: string;
+  promedioSemanal: number;
+}
+
+/**
+ * Agregación de tendencia sobre el histórico — conteo y promedio semanal en la ventana pedida.
+ * Es lo que recibe el agente LLM (resumen agregado, decisión de Cal 2026-09-08), no posts crudos
+ * históricos completos. `null` si D1 no responde o si la entidad no tiene historial en la ventana
+ * (evita mandarle al agente un bloque vacío/engañoso).
+ */
+export async function getAggregateStats(entityId: string, days: number, deps: HistoryDeps = {}): Promise<AggregateStats | null> {
+  const queryD1Fn = deps.queryD1Fn ?? queryD1;
+  const desde = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const rows = await queryD1Fn(
+    "SELECT COUNT(*) as total, MIN(fecha) as primera_fecha, MAX(fecha) as ultima_fecha FROM posts WHERE entity_id = ? AND fecha >= ?",
+    [entityId, desde],
+  );
+  const row = rows?.[0];
+  const total = typeof row?.total === "number" ? row.total : 0;
+  if (!row || total === 0 || !row.primera_fecha || !row.ultima_fecha) return null;
+  const primeraFecha = String(row.primera_fecha);
+  const ultimaFecha = String(row.ultima_fecha);
+  const diasSpan = Math.max(1, (new Date(ultimaFecha).getTime() - new Date(primeraFecha).getTime()) / (24 * 60 * 60 * 1000));
+  return { total, primeraFecha, ultimaFecha, promedioSemanal: Math.round((total / (diasSpan / 7)) * 10) / 10 };
+}
+
+/** Convierte las stats agregadas en el bloque de texto que va al prompt del agente. */
+export function formatHistoryText(stats: AggregateStats | null): string | null {
+  if (!stats) return null;
+  return `${stats.total} posts detectados entre ${stats.primeraFecha} y ${stats.ultimaFecha} (histórico acumulado) — promedio ${stats.promedioSemanal} posts/semana.`;
+}
