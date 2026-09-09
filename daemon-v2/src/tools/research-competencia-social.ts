@@ -3,6 +3,7 @@ import { describeImage, analyzeVideo, type VideoAnalysis } from "./research-comp
 import type { EntityConfig } from "./research-competencia-entities.js";
 import { scrapeInstagram, scrapeX } from "./research-competencia-scrapers.js";
 import { scrapeFacebookApify, scrapeTikTokApify } from "./research-competencia-apify.js";
+import type { HistoryRow, HistoryPost, HistoryDeps } from "./research-competencia-history.js";
 
 export type SocialPlatform = "instagram" | "tiktok" | "facebook" | "x";
 
@@ -242,6 +243,14 @@ export interface FetchSocialDeps {
   nowMs?: () => number;
   /** Override del presupuesto de tiempo por entidad, en ms. Default `PER_ENTITY_BUDGET_MS`. */
   presupuestoMs?: number;
+  /** Consulta el histórico D1 por URLs ya vistas — opcional: si no se pasa, el comportamiento es
+   * idéntico al de antes de esta feature (se enriquece todo, sin dedupe). */
+  findExistingUrlsFn?: (urls: string[], deps?: HistoryDeps) => Promise<Map<string, HistoryRow>>;
+  /** Inserta los posts nuevos ya enriquecidos al histórico D1. Mismo criterio opcional que arriba. */
+  insertPostsFn?: (posts: HistoryPost[], runId: string, deps?: HistoryDeps) => Promise<void>;
+  /** Id de la corrida — requerido solo si se pasa `insertPostsFn` (para trazabilidad en D1). */
+  runId?: string;
+  entityId?: string;
 }
 
 // facebook/tiktok vía Apify (research-competencia-apify.ts) desde 2026-09-05 — reemplazan a
@@ -381,7 +390,44 @@ export async function fetchSocialText(
       }
 
       try {
-        todos.push(...(await enrichFn(enVentana)));
+        let enriquecidos: EnrichedPost[];
+        if (deps.findExistingUrlsFn) {
+          const existentes = await deps.findExistingUrlsFn(enVentana.map((p) => p.url));
+          const nuevos = enVentana.filter((p) => !existentes.has(p.url));
+          const reusados: EnrichedPost[] = enVentana
+            .filter((p) => existentes.has(p.url))
+            .map((p) => {
+              const row = existentes.get(p.url) as HistoryRow;
+              // VideoAnalysis.transcripcion es `string` requerido (no `string | null`) — si la fila
+              // de D1 no tiene transcripción pero sí frames (o viceversa), "" cubre el campo
+              // faltante en vez de violar el tipo con `undefined`.
+              const video: VideoAnalysis | undefined =
+                row.videoTranscripcion !== null || row.videoFrames.length > 0
+                  ? { transcripcion: row.videoTranscripcion ?? "", frames: row.videoFrames }
+                  : undefined;
+              return { ...p, imagenes: row.imagenes, video };
+            });
+          const nuevosEnriquecidos = nuevos.length > 0 ? await enrichFn(nuevos) : [];
+          enriquecidos = [...reusados, ...nuevosEnriquecidos];
+          if (deps.insertPostsFn && nuevosEnriquecidos.length > 0 && deps.runId) {
+            const historyPosts: HistoryPost[] = nuevosEnriquecidos.map((p) => ({
+              entityId: deps.entityId ?? entity.id,
+              platform: p.platform,
+              handle: p.handle,
+              url: p.url,
+              fecha: p.fecha,
+              caption: p.caption,
+              esVideo: p.esVideo,
+              mediaUrls: p.mediaUrls,
+              imagenes: p.imagenes,
+              video: p.video,
+            }));
+            await deps.insertPostsFn(historyPosts, deps.runId, undefined);
+          }
+        } else {
+          enriquecidos = await enrichFn(enVentana);
+        }
+        todos.push(...enriquecidos);
       } catch (err) {
         console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_enrich_error", platform, handle, err: String(err) }));
       }

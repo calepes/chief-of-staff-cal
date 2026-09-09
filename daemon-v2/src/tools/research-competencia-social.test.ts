@@ -11,7 +11,7 @@ import {
   type SocialPost,
   type EnrichedPost,
 } from "./research-competencia-social.js";
-import { getEntity } from "./research-competencia-entities.js";
+import { getEntity, type EntityConfig } from "./research-competencia-entities.js";
 
 function post(overrides: Partial<SocialPost> = {}): SocialPost {
   return {
@@ -371,6 +371,46 @@ describe("fetchSocialText", () => {
   it("devuelve null si ninguna plataforma trajo posts", async () => {
     const scrapers = { instagram: async () => [], tiktok: async () => [], facebook: async () => [], x: async () => [] };
     expect(await fetchSocialText(getEntity("takenos"), 7, { ...deps, scrapers })).toBeNull();
+  });
+
+  it("no vuelve a enriquecer un post cuya URL ya existe en el histórico D1 — lo reusa desde ahí", async () => {
+    const entity = { id: "takenos", social: { instagram: ["takenosapp.bo"], tiktok: [], facebook: [], x: [] } } as unknown as EntityConfig;
+    const postYaVisto = { platform: "instagram" as const, handle: "takenosapp.bo", url: "https://ig.com/p/1", fecha: "2026-09-01", caption: "vieja", mediaUrls: [], esVideo: false };
+    const postNuevo = { platform: "instagram" as const, handle: "takenosapp.bo", url: "https://ig.com/p/2", fecha: "2026-09-08", caption: "nueva", mediaUrls: [], esVideo: false };
+    const scrapers = { instagram: vi.fn().mockResolvedValue([postYaVisto, postNuevo]), tiktok: vi.fn(), facebook: vi.fn(), x: vi.fn() };
+    const enrichFn = vi.fn().mockImplementation(async (posts: SocialPost[]) => posts.map((p) => ({ ...p, imagenes: [`analizado:${p.url}`] })));
+    const findExistingUrlsFn = vi.fn().mockResolvedValue(new Map([["https://ig.com/p/1", { url: "https://ig.com/p/1", fecha: "2026-09-01", caption: "vieja", esVideo: false, mediaUrls: [], imagenes: ["ya analizado antes"], videoTranscripcion: null, videoFrames: [] }]]));
+    const insertPostsFn = vi.fn().mockResolvedValue(undefined);
+
+    const texto = await fetchSocialText(entity, 90, {
+      context: {} as never,
+      scrapers,
+      enrichFn,
+      findExistingUrlsFn,
+      insertPostsFn,
+      runId: "run-test",
+    });
+
+    // enrichFn solo se llamó con el post NUEVO, no con el ya visto
+    expect(enrichFn).toHaveBeenCalledWith([postNuevo]);
+    // el texto final incluye AMBOS — el viejo reusado desde D1, el nuevo recién analizado
+    expect(texto).toContain("ya analizado antes");
+    expect(texto).toContain("analizado:https://ig.com/p/2");
+    // solo el nuevo se insertó a D1
+    expect(insertPostsFn).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ url: "https://ig.com/p/2" })]),
+      "run-test",
+      undefined,
+    );
+  });
+
+  it("si findExistingUrlsFn no se pasa (deps opcionales), enriquece todo igual que hoy — comportamiento sin cambios", async () => {
+    const entity = { id: "takenos", social: { instagram: ["takenosapp.bo"], tiktok: [], facebook: [], x: [] } } as unknown as EntityConfig;
+    const post = { platform: "instagram" as const, handle: "takenosapp.bo", url: "https://ig.com/p/1", fecha: "2026-09-01", caption: "x", mediaUrls: [], esVideo: false };
+    const scrapers = { instagram: vi.fn().mockResolvedValue([post]), tiktok: vi.fn(), facebook: vi.fn(), x: vi.fn() };
+    const enrichFn = vi.fn().mockResolvedValue([{ ...post, imagenes: [] }]);
+    await fetchSocialText(entity, 90, { context: {} as never, scrapers, enrichFn });
+    expect(enrichFn).toHaveBeenCalledWith([post]);
   });
 });
 
