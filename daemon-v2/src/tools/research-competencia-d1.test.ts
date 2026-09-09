@@ -66,4 +66,13 @@ describe("queryD1", () => {
     const body = JSON.parse((fetchFn.mock.calls[0][1] as RequestInit).body as string);
     expect(body.params).toEqual([]);
   });
+
+  it("devuelve null si la respuesta trae success:true en top-level pero success:false en statement", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, result: [{ success: false }] }),
+    });
+    const rows = await queryD1("SELECT 1", [], deps({ fetchFn }));
+    expect(rows).toBeNull();
+  });
 });

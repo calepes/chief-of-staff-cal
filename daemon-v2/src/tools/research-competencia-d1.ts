@@ -50,7 +50,7 @@ export async function queryD1(
       return null;
     }
     const data = (await res.json()) as D1ApiResponse;
-    if (!data.success || !data.result?.[0]) {
+    if (!data.success || !data.result?.[0] || !data.result[0].success) {
       console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_d1_query_error", errors: data.errors }));
       return null;
     }
