@@ -409,25 +409,40 @@ export async function fetchSocialText(
             });
           const nuevosEnriquecidos = nuevos.length > 0 ? await enrichFn(nuevos) : [];
           enriquecidos = [...reusados, ...nuevosEnriquecidos];
+          todos.push(...enriquecidos);
+
+          // Try/catch PROPIO para la escritura a D1 — `enriquecidos` ya se empujó a `todos` arriba,
+          // ANTES de este intento. Sin este aislamiento, un fallo de `insertPostsFn` (dependencia
+          // inyectada, no necesariamente el `insertPosts` real de research-competencia-history.ts,
+          // que ya perdona por-fila internamente) caería al catch de afuera y tiraría a la basura
+          // `reusados` (gratis, ya venía de D1) Y `nuevosEnriquecidos` (visión/transcripción real ya
+          // pagada) — antes de esta feature, un throw en este bloque solo significaba "no se pudo
+          // enriquecer"; ahora podría significar "se pagó el análisis y se descartó por un error de
+          // guardado no relacionado". Un fallo de persistencia acá solo implica que esta tanda no
+          // queda en el histórico esta corrida — no afecta lo que vuelve al caller.
           if (deps.insertPostsFn && nuevosEnriquecidos.length > 0 && deps.runId) {
-            const historyPosts: HistoryPost[] = nuevosEnriquecidos.map((p) => ({
-              entityId: deps.entityId ?? entity.id,
-              platform: p.platform,
-              handle: p.handle,
-              url: p.url,
-              fecha: p.fecha,
-              caption: p.caption,
-              esVideo: p.esVideo,
-              mediaUrls: p.mediaUrls,
-              imagenes: p.imagenes,
-              video: p.video,
-            }));
-            await deps.insertPostsFn(historyPosts, deps.runId, undefined);
+            try {
+              const historyPosts: HistoryPost[] = nuevosEnriquecidos.map((p) => ({
+                entityId: deps.entityId ?? entity.id,
+                platform: p.platform,
+                handle: p.handle,
+                url: p.url,
+                fecha: p.fecha,
+                caption: p.caption,
+                esVideo: p.esVideo,
+                mediaUrls: p.mediaUrls,
+                imagenes: p.imagenes,
+                video: p.video,
+              }));
+              await deps.insertPostsFn(historyPosts, deps.runId, undefined);
+            } catch (err) {
+              console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_history_insert_call_error", platform, handle, err: String(err) }));
+            }
           }
         } else {
           enriquecidos = await enrichFn(enVentana);
+          todos.push(...enriquecidos);
         }
-        todos.push(...enriquecidos);
       } catch (err) {
         console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_enrich_error", platform, handle, err: String(err) }));
       }

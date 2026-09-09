@@ -412,6 +412,51 @@ describe("fetchSocialText", () => {
     await fetchSocialText(entity, 90, { context: {} as never, scrapers, enrichFn });
     expect(enrichFn).toHaveBeenCalledWith([post]);
   });
+
+  it("un post reusado de video (con transcripción y frames en la fila D1) reconstruye EnrichedPost.video correctamente", async () => {
+    const entity = { id: "takenos", social: { instagram: ["takenosapp.bo"], tiktok: [], facebook: [], x: [] } } as unknown as EntityConfig;
+    const postVideoVisto = { platform: "instagram" as const, handle: "takenosapp.bo", url: "https://ig.com/p/vid", fecha: "2026-09-01", caption: "video viejo", mediaUrls: ["https://cdn/v.mp4"], esVideo: true };
+    const scrapers = { instagram: vi.fn().mockResolvedValue([postVideoVisto]), tiktok: vi.fn(), facebook: vi.fn(), x: vi.fn() };
+    const enrichFn = vi.fn();
+    const findExistingUrlsFn = vi.fn().mockResolvedValue(new Map([[
+      "https://ig.com/p/vid",
+      { url: "https://ig.com/p/vid", fecha: "2026-09-01", caption: "video viejo", esVideo: true, mediaUrls: ["https://cdn/v.mp4"], imagenes: [], videoTranscripcion: "hola desde el video", videoFrames: ["frame 1", "frame 2"] },
+    ]]));
+
+    const texto = await fetchSocialText(entity, 90, {
+      context: {} as never,
+      scrapers,
+      enrichFn,
+      findExistingUrlsFn,
+    });
+
+    // enrichFn nunca se llama — el único post está reusado desde D1
+    expect(enrichFn).not.toHaveBeenCalled();
+    expect(texto).toContain("hola desde el video");
+    expect(texto).toContain("frame 1");
+    expect(texto).toContain("frame 2");
+  });
+
+  it("si insertPostsFn tira, el post recién enriquecido igual llega al texto final — la escritura a D1 no descarta el análisis ya pagado", async () => {
+    const entity = { id: "takenos", social: { instagram: ["takenosapp.bo"], tiktok: [], facebook: [], x: [] } } as unknown as EntityConfig;
+    const postNuevo = { platform: "instagram" as const, handle: "takenosapp.bo", url: "https://ig.com/p/nuevo", fecha: "2026-09-08", caption: "nueva", mediaUrls: [], esVideo: false };
+    const scrapers = { instagram: vi.fn().mockResolvedValue([postNuevo]), tiktok: vi.fn(), facebook: vi.fn(), x: vi.fn() };
+    const enrichFn = vi.fn().mockImplementation(async (posts: SocialPost[]) => posts.map((p) => ({ ...p, imagenes: [`analizado:${p.url}`] })));
+    const findExistingUrlsFn = vi.fn().mockResolvedValue(new Map());
+    const insertPostsFn = vi.fn().mockRejectedValue(new Error("D1 caído"));
+
+    const texto = await fetchSocialText(entity, 90, {
+      context: {} as never,
+      scrapers,
+      enrichFn,
+      findExistingUrlsFn,
+      insertPostsFn,
+      runId: "run-test",
+    });
+
+    // el análisis ya pagado (enrichFn) llega al texto final, aunque insertPostsFn haya tirado
+    expect(texto).toContain("analizado:https://ig.com/p/nuevo");
+  });
 });
 
 describe("interleaveByPlatform", () => {
