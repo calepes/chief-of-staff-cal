@@ -75,6 +75,13 @@ describe("getAggregateStats", () => {
     const queryD1Fn = vi.fn().mockResolvedValue([{ total: 12, primera_fecha: "2026-06-01", ultima_fecha: "2026-09-01" }]);
     const stats = await getAggregateStats("takenos", 90, { queryD1Fn });
     expect(stats).toEqual({ total: 12, primeraFecha: "2026-06-01", ultimaFecha: "2026-09-01", promedioSemanal: expect.any(Number) });
+    expect(stats?.promedioSemanal).toBeCloseTo(0.9, 1);
+  });
+
+  it("calcula promedioSemanal correctamente cuando todos los posts están en el mismo día", async () => {
+    const queryD1Fn = vi.fn().mockResolvedValue([{ total: 1, primera_fecha: "2026-09-01", ultima_fecha: "2026-09-01" }]);
+    const stats = await getAggregateStats("takenos", 90, { queryD1Fn });
+    expect(stats?.promedioSemanal).toBe(7); // 1 post en 1 día → extrapolación de 7 posts/semana
   });
 
   it("devuelve null si D1 no responde — fail-soft", async () => {
