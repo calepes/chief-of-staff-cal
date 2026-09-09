@@ -245,6 +245,11 @@ describe("fetchSocialText", () => {
     scrapers: scrapersOk,
     context: fakeContext,
     enrichFn: async (posts: SocialPost[]) => posts.map((p) => ({ ...p, imagenes: [] })),
+    // Reloj fijo dentro de la ventana de 7 días del fixture (post() hardcodea fecha 2026-09-01) —
+    // sin esto, filterPostsByTimeframe cae al default `new Date()` real, y la ventana expira sola
+    // apenas pasan 7 días desde que se escribió el test (encontrado 2026-09-08: 7 tests fallando
+    // por reloj real ya en 2026-09-09, un día después del corte).
+    ahora: new Date("2026-09-02T12:00:00Z"),
   };
 
   it("recorre todas las plataformas y handles declarados de la entidad", async () => {
