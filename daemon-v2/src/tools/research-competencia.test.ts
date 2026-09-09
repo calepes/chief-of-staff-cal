@@ -53,7 +53,7 @@ import { buildEntityPrompt, runEntityAgent, parseAgentJson } from "./research-co
 import { fetchSocialText } from "./research-competencia-social.js";
 import { fetchAdsText } from "./research-competencia-ads.js";
 import { openResearchBrowserSession } from "./research-competencia-browser.js";
-import { getAggregateStats } from "./research-competencia-history.js";
+import { findExistingUrls, insertPosts, getAggregateStats } from "./research-competencia-history.js";
 import { runResearchCompetencia, formatSummaryHtml, SOCIAL_TIMEOUT_MS, ADS_TIMEOUT_MS } from "./research-competencia.js";
 
 const mockReadState = vi.mocked(readEntityState);
@@ -199,7 +199,7 @@ describe("runResearchCompetencia", () => {
   });
 
   it("pasa historyText a MechanicalFacts a partir de getAggregateStats", async () => {
-    vi.mocked(getAggregateStats).mockResolvedValue({ total: 5, primeraFecha: "2026-08-01", ultimaFecha: "2026-09-01", promedioSemanal: 1.1 });
+    vi.mocked(getAggregateStats).mockResolvedValueOnce({ total: 5, primeraFecha: "2026-08-01", ultimaFecha: "2026-09-01", promedioSemanal: 1.1 });
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
     expect(buildEntityPrompt).toHaveBeenCalledWith(
       expect.anything(),
@@ -210,9 +210,22 @@ describe("runResearchCompetencia", () => {
   });
 
   it("un fallo de getAggregateStats no aborta la entidad — historyText queda null", async () => {
-    vi.mocked(getAggregateStats).mockRejectedValue(new Error("d1 down"));
+    vi.mocked(getAggregateStats).mockRejectedValueOnce(new Error("d1 down"));
     const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
     expect(result.entidades[0].error).toBeUndefined();
+  });
+
+  it("pasa findExistingUrlsFn/insertPostsFn/runId/entityId a fetchSocialText", async () => {
+    await runResearchCompetencia({ entidadIds: ["takenos"] });
+    expect(fetchSocialText).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.objectContaining({
+        findExistingUrlsFn: findExistingUrls,
+        insertPostsFn: insertPosts,
+        runId: expect.any(String),
+        entityId: "takenos",
+      }),
+    );
   });
 
   it("incluye yapeAdsKpis en el resultado — referencia propia, corre en paralelo con el lote de entidades", async () => {

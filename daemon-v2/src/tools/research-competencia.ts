@@ -77,6 +77,12 @@ const AGENT_TIMEOUT_MS = 5 * 60 * 1000;
 // dejar una entidad colgada indefinidamente si Google deja de responder.
 export const ADS_TIMEOUT_MS = 2 * 60 * 1000;
 
+// Deadline del agregado histórico de D1 (research-competencia-history.ts, `getAggregateStats` →
+// `queryD1` → `fetch()` sin timeout propio) — mismo patrón y mismo motivo que los tres de arriba:
+// un `await` colgado ahí bloquearía la entidad, la tanda y el cron entero para siempre. Presupuesto
+// corto a propósito: es un solo `COUNT(*)` agregado, sin descargas ni paginación de por medio.
+export const HISTORY_TIMEOUT_MS = 20 * 1000;
+
 /**
  * Envuelve `promise` con un deadline que resuelve `null` y loguea `msg` si `promise` no resolvió a
  * tiempo. Node no cancela promesas de verdad, así que sin `clearTimeout` acá el timer sigue vivo
@@ -198,12 +204,17 @@ async function processEntity(
           return null;
         })
       : Promise.resolve(null);
-    const historyTextPromise = getAggregateStats(entity.id, 90)
-      .then(formatHistoryText)
-      .catch((err) => {
-        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_history_stats_error", entityId: entity.id, err: String(err) }));
-        return null;
-      });
+    const historyTextPromise = raceWithLoggedTimeout(
+      getAggregateStats(entity.id, 90)
+        .then(formatHistoryText)
+        .catch((err) => {
+          console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_history_stats_error", entityId: entity.id, err: String(err) }));
+          return null;
+        }),
+      HISTORY_TIMEOUT_MS,
+      "research_competencia_history_timeout",
+      entity.id,
+    );
     const [ios, android, siteText, socialText, adsBlock, instagramFollowers, facebookFollowers, historyText] = await Promise.all([
       entity.ios ? fetchIosAppInfo(entity.ios) : Promise.resolve(null),
       entity.android ? fetchAndroidAppInfo(entity.android.packageName) : Promise.resolve(null),
