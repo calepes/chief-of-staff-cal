@@ -6,22 +6,20 @@
 
 **Architecture:** Un cliente D1 puro (`research-competencia-d1.ts`) que hace `fetch` directo a la REST API de Cloudflare (sin Worker, sin wrangler). Una capa de dominio (`research-competencia-history.ts`) construida sobre ese cliente: dedupe por URL, inserción, agregación. `research-competencia-social.ts` consulta el histórico antes de enriquecer cada post; `research-competencia-agent.ts` recibe un bloque de tendencias agregadas en el prompt. Todo fail-soft: si D1 no responde, el research sigue funcionando exactamente igual que hoy.
 
-**Tech Stack:** TypeScript, Node `fetch` nativo, Vitest, Cloudflare D1 (REST API), 1Password CLI (`op`) para el token nuevo.
+**Tech Stack:** TypeScript, Node `fetch` nativo, Vitest, Cloudflare D1 (REST API).
 
 **Referencia:** spec completo en `docs/superpowers/specs/2026-09-08-research-competencia-historico-design.md`. Este plan cubre la infraestructura D1 + el flujo semanal ajustado (secciones "Arquitectura", "Modelo de datos", "Flujo semanal ajustado" del spec) — el backfill inicial de 6 meses (sección "Backfill inicial") es un plan separado, posterior a que esto esté validado en producción.
 
 ---
 
-## Provisioning manual previo (Cal, antes de la Task 2)
+## Decisión revisada (2026-09-08, durante la ejecución): reusar `DIGEST_CF_API_TOKEN` en vez de un token nuevo
 
-Esto no es código — es una acción única en el dashboard de Cloudflare que solo Cal puede hacer (crear un token de API es una operación de cuenta, no algo que un script pueda hacer por sí mismo):
+El plan original (ver Task 2, más abajo, DESCARTADA) preveía crear un token de Cloudflare nuevo con scope D1:Edit, guardado en 1Password. Al llegar a Task 3 se descubrió que Cal no había creado ese ítem — y en la conversación se resolvió de otra forma: **`DIGEST_CF_API_TOKEN` ya existe** (`~/.claude/secrets/apps.env`, usado hoy por los crons del Digest) **y ya tiene scope D1+KV** — alcanza sin crear nada nuevo. Trade-off aceptado explícitamente por Cal: research-competencia queda acoplado al ciclo de vida de ese token (si el Digest lo rota/revoca, esto se rompe también) — se prioriza cero fricción de setup sobre aislamiento entre proyectos.
 
-1. Ir a `dash.cloudflare.com` → My Profile → API Tokens → Create Custom Token.
-2. Nombre: `research-competencia-d1`. Permisos: **Account → D1 → Edit**. Scope: la cuenta de Cal (la misma donde ya viven los otros Workers/D1 del workspace).
-3. Copiar el token generado.
-4. Guardarlo en 1Password, vault `Daemons`, ítem nuevo `Research Competencia D1`, campo `credential` — vía `op item create --vault Daemons --category "API Credential" --title "Research Competencia D1" credential=<token pegado desde el propio dashboard, nunca en el chat>` (regla dura del repo: ningún secreto se pega en la conversación).
-
-Task 3 de este plan (el script de setup) depende de que este ítem ya exista.
+Consecuencia sobre el resto del plan:
+- **Task 2 (resolver de token vía 1Password) queda descartada por completo** — ya no hace falta resolver nada, `DIGEST_CF_API_TOKEN` ya llega vía el `loadEnv(apps.env)` que `research-competencia-now.ts` ya hace. Los commits de Task 2 fueron revertidos (`git revert`, commits `b286c58`/`322122b`) — el archivo `research-competencia-cf-token.ts` NO existe en el repo.
+- **Task 1 (cliente D1) no cambia** — sigue leyendo `CF_API_TOKEN_D1_RESEARCH_COMPETENCIA` de `process.env` como fallback; ese nombre de variable se mantiene agnóstico de qué token real lo llena.
+- **Task 3 y Task 9** (más abajo) ya están actualizadas en este documento para asignar `process.env.CF_API_TOKEN_D1_RESEARCH_COMPETENCIA = process.env.DIGEST_CF_API_TOKEN` en vez de llamar a `resolveD1Token()`.
 
 ---
 
@@ -194,13 +192,12 @@ git commit -m "feat(research-competencia): cliente D1 vía REST API de Cloudflar
 
 ---
 
-### Task 2: Resolver del token D1 desde 1Password
+### Task 2 — DESCARTADA
 
-**Files:**
-- Create: `daemon-v2/scripts/research-competencia-cf-token.ts`
-- Test: `daemon-v2/scripts/research-competencia-cf-token.test.ts`
+Preveía crear `daemon-v2/scripts/research-competencia-cf-token.ts` para resolver un token de Cloudflare nuevo desde 1Password. Descartada durante la ejecución (ver "Decisión revisada" al inicio de este documento) — se reusa `DIGEST_CF_API_TOKEN`, ya presente en `apps.env`, sin necesitar resolución vía 1Password. El código que se había llegado a escribir e implementar para esta task fue revertido (`git revert`, commits `b286c58`/`322122b`) — no existe en el repo.
 
-Mismo patrón exacto que `research-competencia-apify-token.ts` (mismo Service Account de solo lectura, mismo mecanismo de `op read` puntual) — solo cambia la referencia de 1Password.
+<details>
+<summary>Contenido original de la Task 2 (solo como referencia histórica — NO ejecutar)</summary>
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
@@ -312,6 +309,8 @@ git add daemon-v2/scripts/research-competencia-cf-token.ts daemon-v2/scripts/res
 git commit -m "feat(research-competencia): resolver del token D1 desde 1Password"
 ```
 
+</details>
+
 ---
 
 ### Task 3: Script de provisioning (crear la D1 database + tabla)
@@ -319,7 +318,7 @@ git commit -m "feat(research-competencia): resolver del token D1 desde 1Password
 **Files:**
 - Create: `daemon-v2/scripts/setup-d1-research-competencia.ts`
 
-Script imperativo one-off, sin test — mismo patrón que `setup-notion-research-competencia.ts` (provisioning, no lógica de dominio). Requiere que el ítem de 1Password ya exista (paso manual de arriba) y que `CF_ACCOUNT_ID` esté en el entorno (ya vive en `~/.claude/secrets/apps.env`).
+Script imperativo one-off, sin test — mismo patrón que `setup-notion-research-competencia.ts` (provisioning, no lógica de dominio). Requiere `CF_ACCOUNT_ID` y `DIGEST_CF_API_TOKEN` en el entorno (ambos ya viven en `~/.claude/secrets/apps.env`, ya cargados por el `loadEnv` de arriba) — NO usa `resolveD1Token()` (Task 2, descartada).
 
 - [ ] **Step 1: Implementar el script**
 
@@ -328,9 +327,11 @@ Script imperativo one-off, sin test — mismo patrón que `setup-notion-research
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: `${process.env.HOME}/.claude/secrets/apps.env` });
 
-import { resolveD1Token } from "./research-competencia-cf-token.js";
-
 const ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
+// Reusa el token del Digest (ya tiene scope D1+KV) en vez de un token propio — decisión de Cal
+// 2026-09-08, ver "Decisión revisada" al inicio de este plan. Trade-off aceptado: research-
+// competencia queda acoplado al ciclo de vida de ese token.
+const TOKEN = process.env.DIGEST_CF_API_TOKEN;
 const DB_NAME = "research-competencia";
 
 const SCHEMA_SQL = `
@@ -358,16 +359,15 @@ async function main(): Promise<void> {
     console.error("❌ Falta CF_ACCOUNT_ID en el entorno (~/.claude/secrets/apps.env).");
     process.exit(1);
   }
-  const token = resolveD1Token();
-  if (!token) {
-    console.error("❌ No pude resolver el token D1 desde 1Password (vault Daemons, ítem 'Research Competencia D1'). ¿Ya lo creaste con `op item create`?");
+  if (!TOKEN) {
+    console.error("❌ Falta DIGEST_CF_API_TOKEN en el entorno (~/.claude/secrets/apps.env).");
     process.exit(1);
   }
 
   console.log(`Creando (o reusando) la D1 database "${DB_NAME}"...`);
   const createRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({ name: DB_NAME }),
   });
   const createData = (await createRes.json()) as { success: boolean; result?: { uuid: string }; errors?: unknown[] };
@@ -380,7 +380,7 @@ async function main(): Promise<void> {
     // Ya existe — listar para encontrar el uuid en vez de fallar.
     console.log("La database ya existe (o el create falló por otro motivo) — buscándola en la lista...");
     const listRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database?name=${DB_NAME}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${TOKEN}` },
     });
     const listData = (await listRes.json()) as { success: boolean; result?: Array<{ uuid: string; name: string }> };
     const found = listData.result?.find((d) => d.name === DB_NAME);
@@ -395,7 +395,7 @@ async function main(): Promise<void> {
   console.log("Aplicando el schema (CREATE TABLE posts)...");
   const schemaRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database/${databaseId}/query`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({ sql: SCHEMA_SQL }),
   });
   const schemaData = (await schemaRes.json()) as { success: boolean; errors?: unknown[] };
@@ -421,7 +421,7 @@ Modify: `daemon-v2/package.json` — agregar en `scripts`:
 "setup:d1-research-competencia": "tsx scripts/setup-d1-research-competencia.ts"
 ```
 
-- [ ] **Step 3: Correr el script una vez (acción real, requiere el token de 1Password ya creado)**
+- [ ] **Step 3: Correr el script una vez (acción real contra la cuenta de Cloudflare de Cal)**
 
 Run: `cd daemon-v2 && npm run setup:d1-research-competencia`
 Expected: imprime el `database_id` nuevo. Pegar ese valor en `~/.claude/secrets/apps.env` como `D1_RESEARCH_COMPETENCIA_DATABASE_ID=...` antes de seguir a la Task 4.
@@ -1155,29 +1155,26 @@ git commit -m "feat(research-competencia): conectar el histórico D1 al orquesta
 
 ---
 
-### Task 9: Resolver el token D1 en el entrypoint del cron
+### Task 9: Poblar el token D1 en el entrypoint del cron
 
 **Files:**
 - Modify: `daemon-v2/scripts/research-competencia-now.ts`
 
+No usa `resolveD1Token()` (Task 2, descartada) — `DIGEST_CF_API_TOKEN` ya llega vía el `loadEnv(apps.env)` que este script ya hace al inicio, solo hace falta copiarlo al nombre de variable que lee `research-competencia-d1.ts`.
+
 - [ ] **Step 1: Modificar `main()`**
-
-Agregar el import (junto a `resolveApifyToken`):
-
-```typescript
-import { resolveD1Token } from "./research-competencia-cf-token.js";
-```
 
 Agregar, junto al bloque existente de `resolveApifyToken` dentro de `main()`:
 
 ```typescript
-  if (!process.env.CF_API_TOKEN_D1_RESEARCH_COMPETENCIA) {
-    const d1Token = resolveD1Token();
-    if (d1Token) process.env.CF_API_TOKEN_D1_RESEARCH_COMPETENCIA = d1Token;
+  // Reusa el token del Digest (ya tiene scope D1+KV) — ver "Decisión revisada" en el plan de
+  // este feature (docs/superpowers/plans/2026-09-08-research-competencia-historico.md).
+  if (!process.env.CF_API_TOKEN_D1_RESEARCH_COMPETENCIA && process.env.DIGEST_CF_API_TOKEN) {
+    process.env.CF_API_TOKEN_D1_RESEARCH_COMPETENCIA = process.env.DIGEST_CF_API_TOKEN;
   }
 ```
 
-Esto va inmediatamente después del bloque equivalente de `APIFY_TOKEN` (antes de `findMissingEnvVars`). No se agrega a `REQUIRED_ENV_VARS` — el histórico es fail-soft, no bloqueante (si falta, el research corre igual sin dedupe ni agregación, como hoy).
+Esto va inmediatamente después del bloque equivalente de `APIFY_TOKEN` (antes de `findMissingEnvVars`). No se agrega a `REQUIRED_ENV_VARS` — el histórico es fail-soft, no bloqueante (si falta, el research corre igual sin dedupe ni agregación, como hoy). No hace falta ningún import nuevo — no hay ninguna función a resolver, solo copiar la env var.
 
 - [ ] **Step 2: Verificar en vivo (corrida real, on-demand, timeframe chico)**
 
