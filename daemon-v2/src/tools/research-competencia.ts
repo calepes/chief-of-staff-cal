@@ -206,6 +206,9 @@ async function processEntity(
       siteText,
       socialText,
       adsText: adsBlock?.texto ?? null,
+      // ponytail: Tarea 8 conecta esto al histórico real de D1 (getAggregateStats/formatHistoryText,
+      // ya implementados en research-competencia-history.ts) — hasta entonces, sin dato.
+      historyText: null,
     };
     const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
     // BLOQUEANTE 2 (revisión de salud, 2026-09-03): deadline externo contra `AGENT_TIMEOUT_MS`
