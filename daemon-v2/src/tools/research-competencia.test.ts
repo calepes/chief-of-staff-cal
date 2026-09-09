@@ -41,12 +41,19 @@ vi.mock("./research-competencia-scrapers.js", () => ({
 vi.mock("./research-competencia-browser.js", () => ({
   openResearchBrowserSession: vi.fn(async () => ({ context: {}, close: vi.fn(async () => {}) })),
 }));
+vi.mock("./research-competencia-history.js", () => ({
+  findExistingUrls: vi.fn().mockResolvedValue(new Map()),
+  insertPosts: vi.fn().mockResolvedValue(undefined),
+  getAggregateStats: vi.fn().mockResolvedValue(null),
+  formatHistoryText: vi.fn((stats) => (stats ? `${stats.total} posts detectados` : null)),
+}));
 
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
 import { buildEntityPrompt, runEntityAgent, parseAgentJson } from "./research-competencia-agent.js";
 import { fetchSocialText } from "./research-competencia-social.js";
 import { fetchAdsText } from "./research-competencia-ads.js";
 import { openResearchBrowserSession } from "./research-competencia-browser.js";
+import { getAggregateStats } from "./research-competencia-history.js";
 import { runResearchCompetencia, formatSummaryHtml, SOCIAL_TIMEOUT_MS, ADS_TIMEOUT_MS } from "./research-competencia.js";
 
 const mockReadState = vi.mocked(readEntityState);
@@ -189,6 +196,23 @@ describe("runResearchCompetencia", () => {
     await runResearchCompetencia({ entidadIds: ["takenos"] });
     const facts = vi.mocked(buildEntityPrompt).mock.calls[0][2];
     expect(facts.adsText).toBe("[google-ads · Banco Solidario S.A.] https://adstransparency.google.com/x");
+  });
+
+  it("pasa historyText a MechanicalFacts a partir de getAggregateStats", async () => {
+    vi.mocked(getAggregateStats).mockResolvedValue({ total: 5, primeraFecha: "2026-08-01", ultimaFecha: "2026-09-01", promedioSemanal: 1.1 });
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+    expect(buildEntityPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ historyText: expect.stringContaining("5 posts") }),
+      expect.anything(),
+    );
+  });
+
+  it("un fallo de getAggregateStats no aborta la entidad — historyText queda null", async () => {
+    vi.mocked(getAggregateStats).mockRejectedValue(new Error("d1 down"));
+    const result = await runResearchCompetencia({ entidadIds: ["takenos"] });
+    expect(result.entidades[0].error).toBeUndefined();
   });
 
   it("incluye yapeAdsKpis en el resultado — referencia propia, corre en paralelo con el lote de entidades", async () => {

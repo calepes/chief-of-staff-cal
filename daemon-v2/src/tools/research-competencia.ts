@@ -7,6 +7,7 @@ import { fetchMetaAdsText, type MetaAdCreative } from "./research-competencia-me
 import { fetchInstagramFollowers, fetchFacebookFollowers } from "./research-competencia-scrapers.js";
 import { openResearchBrowserSession, type ResearchBrowserSession } from "./research-competencia-browser.js";
 import { readEntityState, writeEntityState, appendCambios, createInformePage } from "./research-competencia-notion.js";
+import { findExistingUrls, insertPosts, getAggregateStats, formatHistoryText } from "./research-competencia-history.js";
 import { nowInLaPaz } from "../journal-capture.js";
 import type { EntityRunResult, RunResult, FollowerPoint } from "./research-competencia-types.js";
 
@@ -135,11 +136,18 @@ async function processEntity(
   timeframeDias: number,
   fecha: string,
   browserSession: ResearchBrowserSession | null,
+  runId: string,
 ): Promise<EntityRunResult> {
   try {
     const baseline = await readEntityState(entity.id);
     const socialTextPromise = browserSession
-      ? fetchSocialText(entity, timeframeDias, { context: browserSession.context }).catch((err) => {
+      ? fetchSocialText(entity, timeframeDias, {
+          context: browserSession.context,
+          findExistingUrlsFn: findExistingUrls,
+          insertPostsFn: insertPosts,
+          runId,
+          entityId: entity.id,
+        }).catch((err) => {
           console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_social_error", entityId: entity.id, err: String(err) }));
           return null;
         })
@@ -190,7 +198,13 @@ async function processEntity(
           return null;
         })
       : Promise.resolve(null);
-    const [ios, android, siteText, socialText, adsBlock, instagramFollowers, facebookFollowers] = await Promise.all([
+    const historyTextPromise = getAggregateStats(entity.id, 90)
+      .then(formatHistoryText)
+      .catch((err) => {
+        console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_history_stats_error", entityId: entity.id, err: String(err) }));
+        return null;
+      });
+    const [ios, android, siteText, socialText, adsBlock, instagramFollowers, facebookFollowers, historyText] = await Promise.all([
       entity.ios ? fetchIosAppInfo(entity.ios) : Promise.resolve(null),
       entity.android ? fetchAndroidAppInfo(entity.android.packageName) : Promise.resolve(null),
       entity.siteUrl ? fetchSiteText(entity.siteUrl) : Promise.resolve(null),
@@ -198,6 +212,7 @@ async function processEntity(
       adsBlockWithDeadline,
       instagramFollowersPromise,
       facebookFollowersPromise,
+      historyTextPromise,
     ]);
     const adsKpis = computeAdsKpis(adsBlock?.googleCreativos ?? [], adsBlock?.metaCreativos ?? [], timeframeDias);
     const facts: MechanicalFacts = {
@@ -206,9 +221,7 @@ async function processEntity(
       siteText,
       socialText,
       adsText: adsBlock?.texto ?? null,
-      // ponytail: Tarea 8 conecta esto al histórico real de D1 (getAggregateStats/formatHistoryText,
-      // ya implementados en research-competencia-history.ts) — hasta entonces, sin dato.
-      historyText: null,
+      historyText,
     };
     const prompt = buildEntityPrompt(entity, baseline, facts, timeframeDias);
     // BLOQUEANTE 2 (revisión de salud, 2026-09-03): deadline externo contra `AGENT_TIMEOUT_MS`
@@ -298,6 +311,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
     const timeframeDias = opts.timeframeDias ?? 7;
     const targetIds = opts.entidadIds?.length ? opts.entidadIds : ENTITIES.map((e) => e.id);
     const fecha = nowInLaPaz().slice(0, 10);
+    const runId = new Date().toISOString();
 
     try {
       browserSession = await openResearchBrowserSession();
@@ -350,7 +364,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
       runWithConcurrency(targetIds, CONCURRENCY, async (entityId) => {
         try {
           const entity = getEntity(entityId);
-          return await processEntity(entity, timeframeDias, fecha, browserSession);
+          return await processEntity(entity, timeframeDias, fecha, browserSession, runId);
         } catch (err) {
           return {
             entityId,
