@@ -341,6 +341,21 @@ antes de esta feature (sin dedupe, sin bloque de tendencia).
 Retención: indefinida, sin purga — el volumen (≤8 posts/semana × 22 handles) nunca justifica un
 tope rodante.
 
+**Primera corrida real de validación (2026-09-09, on-demand, `--timeframe=7`, 6 entidades) —
+resultado mixto, esperado:**
+- **Confirmado en producción:** las 5 credenciales (Apify, D1, OpenRouter, ElevenLabs, Notif)
+  resolvieron bien desde 1Password; `insertPosts` escribió **79 posts reales** sin ningún error
+  (`research_competencia_history_insert_error`/`d1_missing_config` con cero apariciones en el log);
+  `UNIQUE(url)` + `INSERT OR IGNORE` no duplicó nada.
+- **Todavía SIN validar — el dedupe/reuso real:** antes de esta corrida D1 estaba prácticamente
+  vacío (1 solo post de una prueba anterior, con `fecha: null` — no contaba ni para
+  `getAggregateStats`, que filtra por fecha no-nula). Los 79 posts de esta corrida fueron, en la
+  práctica, todos NUEVOS — el camino "ya lo vi, reuso sin re-enriquecer" no tuvo nada real para
+  reusar, y el bloque de tendencia que recibió el agente LLM salió vacío
+  ("sin histórico acumulado todavía") en las 6 entidades. El ahorro real (y el bloque de tendencia
+  con contenido) recién se puede comprobar en la corrida semanal siguiente (cron del lunes),
+  comparando contra estos 79 posts como baseline.
+
 ---
 
 ## Historial resumido (fechas clave — detalle completo en `Jano/CLAUDE.md`)
@@ -356,3 +371,4 @@ tope rodante.
 | 2026-09-08 | Histórico D1: dedupe de posts por URL + bloque de tendencia agregada en el prompt del agente |
 | 2026-09-09 | Credenciales D1 migradas de `apps.env` (texto plano) al vault `Daemons` de 1Password |
 | 2026-09-09 | OPENROUTER_API_KEY/ELEVENLABS_API_KEY/NOTIF_BOT_TOKEN migrados a 1Password (sobreescriben apps.env, que queda como red de seguridad) |
+| 2026-09-09 | Primera corrida on-demand con D1 real en producción: 79 posts insertados, 0 errores — dedupe/reuso todavía sin ejercitarse (D1 estaba casi vacío antes de esta corrida) |
