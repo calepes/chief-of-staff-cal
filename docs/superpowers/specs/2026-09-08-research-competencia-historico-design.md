@@ -96,7 +96,7 @@ D1 es una capa adicional, nunca bloqueante — mismo criterio fail-soft que el r
 
 ## Backfill inicial
 
-**Alcance acordado: 6 meses hacia atrás, en las 22 cuentas (Instagram 8 · Facebook 6 · TikTok 4 · X 4).**
+**Alcance acordado: 12 meses hacia atrás, en las 22 cuentas (Instagram 8 · Facebook 6 · TikTok 4 · X 4).** (Ajustado de 6 a 12 meses el 2026-09-09, sin re-derivar el resto del análisis salvo el pricing más abajo.)
 
 ### Asimetría por plataforma
 
@@ -107,7 +107,7 @@ D1 es una capa adicional, nunca bloqueante — mismo criterio fail-soft que el r
 
 La cadencia real de publicación varía demasiado entre cuentas para estimar volumen "a ojo" — evidencia real: `altoke.bo` publicó 8 posts en Facebook en 5 días (~1.3/día) durante la prueba de dedupe, muy por encima de lo asumible a priori. En vez de comprometerse a un costo estimado sobre una suposición:
 
-1. **Pasada de conteo (metadata cruda, sin enriquecer):** recolectar solo `url`/`fecha`/`caption` de los 6 meses en las 22 cuentas. Da el número REAL de posts por cuenta. Costo despreciable (ver tabla de pricing) — el enriquecimiento es lo caro, no el scraping.
+1. **Pasada de conteo (metadata cruda, sin enriquecer):** recolectar solo `url`/`fecha`/`caption` de los 12 meses en las 22 cuentas. Da el número REAL de posts por cuenta. Costo despreciable (ver tabla de pricing) — el enriquecimiento es lo caro, no el scraping.
 2. **Con el conteo real en mano**, se calcula el costo exacto de enriquecer todo (o se poda deliberadamente — ej. solo los N más recientes por cuenta más activa) antes de gastarlo.
 
 ### Pricing verificado (2026-09-08)
@@ -122,11 +122,11 @@ La cadencia real de publicación varía demasiado entre cuentas para estimar vol
 
 Costo unitario de enriquecer un post ya scrapeado: **~$0.0024** (post de imagen, hasta 4 imágenes) a **~$0.008-0.015** (post de video, transcripción + hasta 6 frames).
 
-**Orden de magnitud, no cifra prometida:** incluso en un escenario generoso (~1.500 posts totales en 6 meses, asumiendo varias cuentas tan activas como `altoke.bo`/Facebook), el enriquecimiento completo cae en **~$15-30 total**, más unos pocos dólares de scraping. El dinero no es la restricción real de este backfill — el tiempo de ejecución (fuera de los timeouts pensados para una corrida semanal chica, ver abajo) y el riesgo de scroll en Instagram/X sí lo son.
+**Orden de magnitud, no cifra prometida:** incluso en un escenario generoso (~3.000 posts totales en 12 meses, asumiendo varias cuentas tan activas como `altoke.bo`/Facebook), el enriquecimiento completo cae en **~$30-60 total**, más unos pocos dólares de scraping. El dinero no es la restricción real de este backfill — el tiempo de ejecución (fuera de los timeouts pensados para una corrida semanal chica, ver abajo) y el riesgo de scroll en Instagram/X sí lo son.
 
 ### Ejecución
 
-Corrida separada del cron semanal — usa `research-competencia-run-detached.sh` (ya existe, `nohup`+`disown`) porque el volumen de un backfill de 6 meses excede largamente los timeouts pensados para la corrida semanal (`SOCIAL_TIMEOUT_MS`/`PER_ENTITY_BUDGET_MS`, dimensionados para 8 posts/cuenta, no cientos). No se tocan esos timeouts para el flujo regular — el backfill corre con sus propios límites, más generosos, en un modo separado.
+Corrida separada del cron semanal — usa `research-competencia-run-detached.sh` (ya existe, `nohup`+`disown`) porque el volumen de un backfill de 12 meses excede largamente los timeouts pensados para la corrida semanal (`SOCIAL_TIMEOUT_MS`/`PER_ENTITY_BUDGET_MS`, dimensionados para 8 posts/cuenta, no cientos). No se tocan esos timeouts para el flujo regular — el backfill corre con sus propios límites, más generosos, en un modo separado.
 
 ---
 

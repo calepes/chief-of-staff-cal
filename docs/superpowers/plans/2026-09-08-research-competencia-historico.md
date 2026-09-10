@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Node `fetch` nativo, Vitest, Cloudflare D1 (REST API).
 
-**Referencia:** spec completo en `docs/superpowers/specs/2026-09-08-research-competencia-historico-design.md`. Este plan cubre la infraestructura D1 + el flujo semanal ajustado (secciones "Arquitectura", "Modelo de datos", "Flujo semanal ajustado" del spec) — el backfill inicial de 6 meses (sección "Backfill inicial") es un plan separado, posterior a que esto esté validado en producción.
+**Referencia:** spec completo en `docs/superpowers/specs/2026-09-08-research-competencia-historico-design.md`. Este plan cubre la infraestructura D1 + el flujo semanal ajustado (secciones "Arquitectura", "Modelo de datos", "Flujo semanal ajustado" del spec) — el backfill inicial de 12 meses (sección "Backfill inicial") es un plan separado, posterior a que esto esté validado en producción.
 
 ---
 
@@ -1252,6 +1252,6 @@ git commit -m "docs(research-competencia): documentar el histórico D1 en el map
 
 ## Fuera de alcance de este plan (queda para el plan de backfill)
 
-- Scroll en `scrapeInstagram`/`scrapeX` (necesario solo para el backfill de 6 meses, no para el flujo semanal regular).
+- Scroll en `scrapeInstagram`/`scrapeX` (necesario solo para el backfill de 12 meses, no para el flujo semanal regular).
 - El script de backfill en sí (pasada de conteo + pasada de enriquecimiento, `resultsLimit` alto en Apify).
 - Cualquier ajuste a `MAX_POSTS_PER_ACCOUNT`/`MAX_VIDEOS_PER_ACCOUNT` — esos topes no cambian con este plan.
