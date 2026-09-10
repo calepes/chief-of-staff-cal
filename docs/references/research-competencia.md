@@ -111,9 +111,11 @@ daemon-v2/
 │   ├── research-competencia-chrome-login.ts  # login manual único al perfil de Chrome
 │   ├── research-competencia-run-detached.sh  # corrida on-demand desacoplada (nohup+disown)
 │   ├── research-competencia-apify-token.ts   # resuelve APIFY_TOKEN vía 1Password
+│   ├── research-competencia-cf-token.ts      # resuelve token CF + database_id de D1 vía 1Password
 │   ├── research-competencia-notify.ts        # envío del resumen / aviso de error a Telegram
 │   ├── research-competencia-env.ts           # valida env vars requeridas antes de arrancar
-│   └── setup-notion-research-competencia.ts  # provisioning one-off de las DBs/páginas de Notion
+│   ├── setup-notion-research-competencia.ts  # provisioning one-off de las DBs/páginas de Notion
+│   └── setup-d1-research-competencia.ts      # provisioning one-off de la D1 database
 └── src/tools/
     ├── research-competencia.ts            # ORQUESTADOR — concurrencia, timeouts, guard, resumen
     ├── research-competencia-entities.ts   # las 6 entidades + Yape (config fija, IDs de ads)
@@ -128,6 +130,8 @@ daemon-v2/
     ├── research-competencia-meta-ads.ts   # Meta Ad Library (scraping DOM, headless fresco)
     ├── research-competencia-notion.ts     # lectura/escritura de Notion (3 tipos de página/DB)
     ├── research-competencia-ids.ts        # IDs de las DBs/páginas de Notion (hardcoded)
+    ├── research-competencia-d1.ts         # cliente D1 puro — fetch directo a la REST API de Cloudflare
+    ├── research-competencia-history.ts    # dedupe por URL, inserción, agregación de tendencia
     └── research-competencia-types.ts      # tipos compartidos (Hallazgo, Battlecard, AdsKpis...)
 ```
 
@@ -271,9 +275,13 @@ npm run research:chrome-login   # una vez, o cuando la sesión de Chrome expire 
 - **Logs:** `~/Library/Logs/jano-research-competencia.{out,err}.log`.
 - **Secretos:** `OPENROUTER_API_KEY`/`ELEVENLABS_API_KEY`/`NOTION_TOKEN`/`NOTIF_BOT_TOKEN` vía
   `dotenv` desde `~/.cos-agent/.env` + `~/.claude/notifications/.env` + `~/.claude/secrets/apps.env`
-  (deuda conocida, sin migrar a 1Password). **`APIFY_TOKEN` es la excepción** — por ser un secreto
-  nuevo, va al vault `Daemons` de 1Password y se resuelve con `op read` puntual
-  (`resolveApifyToken`), sin `op run` para todo el script.
+  (deuda conocida, sin migrar a 1Password). **`APIFY_TOKEN` y las credenciales D1
+  (`CF_API_TOKEN_D1_RESEARCH_COMPETENCIA`/`D1_RESEARCH_COMPETENCIA_DATABASE_ID`) son la
+  excepción** — por ser secretos nuevos, van al vault `Daemons` de 1Password y se resuelven con
+  `op read` puntual (`resolveApifyToken`/`resolveD1Credentials`), sin `op run` para todo el script.
+  Las credenciales D1 arrancaron reusando `DIGEST_CF_API_TOKEN` en texto plano (2026-09-08, ver
+  historial abajo) y se migraron al vault el 2026-09-09 (ítem "Research Competencia D1", campos
+  `credential`+`database_id`) — ya no queda ningún secreto de research-competencia en `apps.env`.
 - **Corrida desacoplada de una sesión de Claude Code:** `scripts/research-competencia-run-detached.sh`
   (`nohup ... & disown`) — evita que el proceso muera si el harness de background del Bash tool lo
   mata (visto en vivo, causa exacta sin confirmar del todo).
@@ -295,6 +303,29 @@ npm run research:chrome-login   # una vez, o cuando la sesión de Chrome expire 
   (`formatSummaryHtml`) — el split Google/Meta vive solo en la tabla de Notion. Extender el resumen
   de Telegram con el mismo split sería un cambio aparte, no incluido acá.
 
+### 3.11 Histórico acumulado (D1)
+
+Desde 2026-09-08: cada post enriquecido (visión/transcripción) se guarda en una D1 database
+(`research-competencia`, tabla `posts`, dedupe por `url UNIQUE`) — spec completo en
+`docs/superpowers/specs/2026-09-08-research-competencia-historico-design.md`. Antes de enriquecer
+un post, `fetchSocialText` consulta D1 por su URL; si ya existe, reusa el análisis guardado en vez
+de re-pagar visión/transcripción. El agente LLM recibe un resumen agregado (conteo/promedio
+semanal de los últimos 90 días, `getAggregateStats`) como contexto de tendencia — nunca posts
+crudos históricos completos.
+
+Acceso vía REST API de Cloudflare directa (sin Worker, sin wrangler). Token + `database_id`
+resueltos desde el vault `Daemons` de 1Password (ítem "Research Competencia D1", campos
+`credential`/`database_id`) por `resolveD1Credentials()` (`research-competencia-cf-token.ts`) —
+mismo patrón que `APIFY_TOKEN`. Migrado el 2026-09-09 desde el diseño original (2026-09-08), que
+reusaba `DIGEST_CF_API_TOKEN` en texto plano de `apps.env` para evitar crear un ítem 1Password
+nuevo — ver "Decisión revisada" en el plan de implementación para el razonamiento original.
+
+Fail-soft en toda la cadena: si 1Password/D1 no responde, el research corre exactamente igual que
+antes de esta feature (sin dedupe, sin bloque de tendencia).
+
+Retención: indefinida, sin purga — el volumen (≤8 posts/semana × 22 handles) nunca justifica un
+tope rodante.
+
 ---
 
 ## Historial resumido (fechas clave — detalle completo en `Jano/CLAUDE.md`)
@@ -307,3 +338,5 @@ npm run research:chrome-login   # una vez, o cuando la sesión de Chrome expire 
 | 2026-09-04/05 | Meta Ad Library agregado; Facebook/TikTok migrados a Apify |
 | 2026-09-05/06 | Paralelización de entidades (3 a la vez); presupuesto social dividido por plataforma; dimensión Pricing + contexto de Yape; KPIs de ads propios (referencia Yape) |
 | 2026-09-08 | Split Google/Meta nuevos/existentes en la tabla de ads llevado a producción (antes era ad-hoc, fuera del código) |
+| 2026-09-08 | Histórico D1: dedupe de posts por URL + bloque de tendencia agregada en el prompt del agente |
+| 2026-09-09 | Credenciales D1 migradas de `apps.env` (texto plano) al vault `Daemons` de 1Password |
