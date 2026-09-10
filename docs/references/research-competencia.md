@@ -273,12 +273,16 @@ npm run research:chrome-login   # una vez, o cuando la sesión de Chrome expire 
 - **Cron:** `launchd/com.cal.jano-research-competencia.plist` — lunes 06:00 La Paz. Instalación
   manual (no se autoinstala); ver comentarios del propio plist para instalar/verificar/desactivar.
 - **Logs:** `~/Library/Logs/jano-research-competencia.{out,err}.log`.
-- **Secretos:** `OPENROUTER_API_KEY`/`ELEVENLABS_API_KEY`/`NOTION_TOKEN`/`NOTIF_BOT_TOKEN` vía
-  `dotenv` desde `~/.cos-agent/.env` + `~/.claude/notifications/.env` + `~/.claude/secrets/apps.env`
-  (deuda conocida, sin migrar a 1Password). **`APIFY_TOKEN` y las credenciales D1
-  (`CF_API_TOKEN_D1_RESEARCH_COMPETENCIA`/`D1_RESEARCH_COMPETENCIA_DATABASE_ID`) son la
-  excepción** — por ser secretos nuevos, van al vault `Daemons` de 1Password y se resuelven con
-  `op read` puntual (`resolveApifyToken`/`resolveD1Credentials`), sin `op run` para todo el script.
+- **Secretos:** `OPENROUTER_API_KEY`/`ELEVENLABS_API_KEY`/`NOTIF_BOT_TOKEN` llegan primero en texto
+  plano vía `dotenv` (`~/.cos-agent/.env` + `~/.claude/notifications/.env` +
+  `~/.claude/secrets/apps.env`, como red de seguridad) y se **sobreescriben** con el valor real del
+  vault `Daemons` de 1Password (`resolveSharedSecrets()`, migrado 2026-09-09 — los 4 ítems ya
+  existían porque el daemon real los usa vía `apps-env.1password.tpl`). Fail-soft por credencial: si
+  `op`/el Service Account fallan, cada una queda con el valor de `apps.env`. `NOTION_TOKEN` no lo usa
+  este script (pasa por el CLI `ntn`). **`APIFY_TOKEN` y las credenciales D1
+  (`CF_API_TOKEN_D1_RESEARCH_COMPETENCIA`/`D1_RESEARCH_COMPETENCIA_DATABASE_ID`) son distintas** —
+  secretos NUEVOS sin copia previa en `apps.env`, así que 1Password es su ÚNICA fuente
+  (`resolveApifyToken`/`resolveD1Credentials`), sin `op run` para todo el script.
   Las credenciales D1 arrancaron reusando `DIGEST_CF_API_TOKEN` en texto plano (2026-09-08, ver
   historial abajo) y se migraron al vault el 2026-09-09 (ítem "Research Competencia D1", campos
   `credential`+`database_id`) — ya no queda ningún secreto de research-competencia en `apps.env`.
@@ -340,3 +344,4 @@ tope rodante.
 | 2026-09-08 | Split Google/Meta nuevos/existentes en la tabla de ads llevado a producción (antes era ad-hoc, fuera del código) |
 | 2026-09-08 | Histórico D1: dedupe de posts por URL + bloque de tendencia agregada en el prompt del agente |
 | 2026-09-09 | Credenciales D1 migradas de `apps.env` (texto plano) al vault `Daemons` de 1Password |
+| 2026-09-09 | OPENROUTER_API_KEY/ELEVENLABS_API_KEY/NOTIF_BOT_TOKEN migrados a 1Password (sobreescriben apps.env, que queda como red de seguridad) |

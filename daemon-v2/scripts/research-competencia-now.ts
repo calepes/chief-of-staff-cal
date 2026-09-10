@@ -21,6 +21,7 @@ import { sendNotifySummary, notifyFatalError, wantsNoNotify } from "./research-c
 import { findMissingEnvVars, formatMissingEnvError } from "./research-competencia-env.js";
 import { resolveApifyToken } from "./research-competencia-apify-token.js";
 import { resolveD1Credentials } from "./research-competencia-cf-token.js";
+import { resolveSharedSecrets } from "./research-competencia-shared-secrets.js";
 
 /**
  * Corre el research de competencia fuera del daemon de Jano — ya no vive ahí, corre standalone
@@ -42,24 +43,27 @@ import { resolveD1Credentials } from "./research-competencia-cf-token.js";
  * el binario sigue invocándose vía `node-fda` (`research:now` en `package.json`) porque no hace
  * daño tenerlo y evita otro cambio de infra sin necesidad real, no porque siga siendo requisito.
  *
- * Ya NO hace falta `op run` para las credenciales YA existentes: sin el Cookie Broker (Cloudflare
- * KV) de por medio, OPENROUTER_API_KEY/ELEVENLABS_API_KEY/NOTIF_BOT_TOKEN ya llegan en texto plano
- * por los `loadEnv()` de arriba — validadas al arranque más abajo (`findMissingEnvVars`), para
- * fallar fuerte y temprano en vez de a mitad de camino: Jano ya migró a 1Password, y el día que se
- * limpie apps.env este script se rompería en silencio (vision.ts/whisper.ts tragan el error
- * tool-por-tool y el informe sale incompleto sin avisar). Deuda ya documentada, sin resolver acá.
+ * OPENROUTER_API_KEY/ELEVENLABS_API_KEY/NOTIF_BOT_TOKEN llegan primero en texto plano por los
+ * `loadEnv()` de arriba (apps.env) — se mantiene como red de seguridad — pero `resolveSharedSecrets()`
+ * (research-competencia-shared-secrets.ts) las SOBREESCRIBE con el valor real leído del vault
+ * `Daemons` de 1Password (pedido de Cal 2026-09-09, los 4 ítems ya existían ahí porque el daemon
+ * real los usa vía apps-env.1password.tpl). Fail-soft por credencial: si `op`/el Service Account
+ * fallan, cada una queda con el valor de apps.env que ya tenía cargado — nunca rompe el arranque.
  *
  * `APIFY_TOKEN` (Facebook/TikTok orgánico, research-competencia-apify.ts) y las credenciales D1
- * (`CF_API_TOKEN_D1_RESEARCH_COMPETENCIA`/`D1_RESEARCH_COMPETENCIA_DATABASE_ID`) son la EXCEPCIÓN:
- * por ser secretos NUEVOS, la regla dura del repo (Personal/Agents/CLAUDE.md) exige vault `Daemons`
- * en 1Password, nunca sumarlos a apps.env en texto plano — `resolveApifyToken()`/
- * `resolveD1Credentials()` (research-competencia-apify-token.ts / research-competencia-cf-token.ts)
- * los resuelven con una llamada puntual a `op read` usando el Service Account de solo lectura del
- * daemon, sin requerir `op run` para todo el script ni tocar el plist/wrapper de producción.
- * Fail-soft: si no resuelven, el research sigue corriendo igual — Facebook/TikTok orgánico quedan
- * sin datos, y D1 (histórico/dedupe de posts) degrada sin bloquear el resto del research.
+ * (`CF_API_TOKEN_D1_RESEARCH_COMPETENCIA`/`D1_RESEARCH_COMPETENCIA_DATABASE_ID`) son distintas: son
+ * secretos NUEVOS (nunca existieron en apps.env), así que ahí NO hay red de seguridad en texto
+ * plano que caiga si 1Password falla — `resolveApifyToken()`/`resolveD1Credentials()`
+ * (research-competencia-apify-token.ts / research-competencia-cf-token.ts) son la ÚNICA fuente.
+ * Mismo mecanismo de Service Account que `resolveSharedSecrets()`. Fail-soft: si no resuelven, el
+ * research sigue corriendo igual — Facebook/TikTok orgánico quedan sin datos, y D1
+ * (histórico/dedupe de posts) degrada sin bloquear el resto del research.
  */
 async function main(): Promise<void> {
+  for (const [envVar, value] of resolveSharedSecrets()) {
+    process.env[envVar] = value;
+  }
+
   if (!process.env.APIFY_TOKEN) {
     const token = resolveApifyToken();
     if (token) process.env.APIFY_TOKEN = token;
