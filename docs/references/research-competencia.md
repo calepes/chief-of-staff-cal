@@ -289,6 +289,17 @@ npm run research:chrome-login   # una vez, o cuando la sesión de Chrome expire 
 - **Corrida desacoplada de una sesión de Claude Code:** `scripts/research-competencia-run-detached.sh`
   (`nohup ... & disown`) — evita que el proceso muera si el harness de background del Bash tool lo
   mata (visto en vivo, causa exacta sin confirmar del todo).
+  - **Gotcha encontrado 2026-09-09: lanzarla así deja a la sesión ciega hasta que Cal ve el
+    Telegram.** El `nohup+disown` es correcto (necesario para sobrevivir a la sesión), pero como
+    consecuencia el harness de Claude Code no tiene ningún proceso que trackear — no hay
+    notificación de vuelta a la sesión cuando termina, solo el Telegram que manda el script.
+    **Patrón a seguir la próxima vez:** lanzar el proceso real desacoplado como siempre, y ADEMÁS
+    lanzar un segundo comando con `run_in_background` del Bash tool que solo hace polling del PID o
+    del log hasta que el proceso real termine (ej. `while kill -0 $PID 2>/dev/null; do sleep 15;
+    done; tail -40 "$LOG"`) — ese wrapper es descartable: si el harness lo mata (mismo bug de
+    2026-09-05), no importa, no hizo ningún trabajo real. Si sobrevive, el harness manda una
+    notificación de tarea cuando termina y la sesión se entera sola, sin que Cal tenga que
+    preguntar "cómo va". Sin implementar todavía — próxima corrida real.
 
 ### 3.10 Resiliencia y límites conocidos
 
