@@ -20,6 +20,7 @@ import { stripHtmlTags } from "../src/proactive/rich-send.js";
 import { sendNotifySummary, notifyFatalError, wantsNoNotify } from "./research-competencia-notify.js";
 import { findMissingEnvVars, formatMissingEnvError } from "./research-competencia-env.js";
 import { resolveApifyToken } from "./research-competencia-apify-token.js";
+import { resolveD1Credentials } from "./research-competencia-cf-token.js";
 
 /**
  * Corre el research de competencia fuera del daemon de Jano — ya no vive ahí, corre standalone
@@ -48,18 +49,28 @@ import { resolveApifyToken } from "./research-competencia-apify-token.js";
  * limpie apps.env este script se rompería en silencio (vision.ts/whisper.ts tragan el error
  * tool-por-tool y el informe sale incompleto sin avisar). Deuda ya documentada, sin resolver acá.
  *
- * `APIFY_TOKEN` (Facebook/TikTok orgánico, research-competencia-apify.ts) es la EXCEPCIÓN: por ser
- * un secreto NUEVO, la regla dura del repo (Personal/Agents/CLAUDE.md) exige vault `Daemons` en
- * 1Password, nunca sumarlo a apps.env en texto plano — `resolveApifyToken()`
- * (research-competencia-apify-token.ts) lo resuelve con una llamada puntual a `op read` usando el
- * Service Account de solo lectura del daemon, sin requerir `op run` para todo el script ni tocar
- * el plist/wrapper de producción. Fail-soft: si no resuelve, el research sigue corriendo igual —
- * Facebook/TikTok orgánico quedan sin datos esta corrida.
+ * `APIFY_TOKEN` (Facebook/TikTok orgánico, research-competencia-apify.ts) y las credenciales D1
+ * (`CF_API_TOKEN_D1_RESEARCH_COMPETENCIA`/`D1_RESEARCH_COMPETENCIA_DATABASE_ID`) son la EXCEPCIÓN:
+ * por ser secretos NUEVOS, la regla dura del repo (Personal/Agents/CLAUDE.md) exige vault `Daemons`
+ * en 1Password, nunca sumarlos a apps.env en texto plano — `resolveApifyToken()`/
+ * `resolveD1Credentials()` (research-competencia-apify-token.ts / research-competencia-cf-token.ts)
+ * los resuelven con una llamada puntual a `op read` usando el Service Account de solo lectura del
+ * daemon, sin requerir `op run` para todo el script ni tocar el plist/wrapper de producción.
+ * Fail-soft: si no resuelven, el research sigue corriendo igual — Facebook/TikTok orgánico quedan
+ * sin datos, y D1 (histórico/dedupe de posts) degrada sin bloquear el resto del research.
  */
 async function main(): Promise<void> {
   if (!process.env.APIFY_TOKEN) {
     const token = resolveApifyToken();
     if (token) process.env.APIFY_TOKEN = token;
+  }
+
+  if (!process.env.CF_API_TOKEN_D1_RESEARCH_COMPETENCIA || !process.env.D1_RESEARCH_COMPETENCIA_DATABASE_ID) {
+    const d1Credentials = resolveD1Credentials();
+    if (d1Credentials) {
+      process.env.CF_API_TOKEN_D1_RESEARCH_COMPETENCIA = d1Credentials.token;
+      process.env.D1_RESEARCH_COMPETENCIA_DATABASE_ID = d1Credentials.databaseId;
+    }
   }
 
   const faltantes = findMissingEnvVars(process.env);

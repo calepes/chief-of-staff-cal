@@ -1,12 +1,14 @@
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: `${process.env.HOME}/.claude/secrets/apps.env` });
 
+import { resolveD1Credentials } from "./research-competencia-cf-token.js";
+
 const ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
-// Reusa el token del Digest (ya tiene scope D1+KV) en vez de un token propio — decisión de Cal
-// 2026-09-08, ver "Decisión revisada" al inicio de docs/superpowers/plans/2026-09-08-research-
-// competencia-historico.md. Trade-off aceptado: research-competencia queda acoplado al ciclo de
-// vida de ese token.
-const TOKEN = process.env.DIGEST_CF_API_TOKEN;
+// Token de CF resuelto desde 1Password (vault Daemons, ítem "Research Competencia D1") en vez de
+// DIGEST_CF_API_TOKEN en texto plano — decisión de Cal 2026-09-09. Mismo valor que antes (reusa el
+// token del Digest, copiado al ítem nuevo), solo cambia de dónde se lee.
+const d1Credentials = resolveD1Credentials();
+const TOKEN = d1Credentials?.token;
 const DB_NAME = "research-competencia";
 
 const SCHEMA_SQL = `
@@ -35,7 +37,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   if (!TOKEN) {
-    console.error("❌ Falta DIGEST_CF_API_TOKEN en el entorno (~/.claude/secrets/apps.env).");
+    console.error("❌ No pude resolver el token de Cloudflare desde 1Password (vault Daemons, ítem \"Research Competencia D1\").");
     process.exit(1);
   }
 
@@ -79,7 +81,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  console.log(`\n✅ Listo. Agregá esta línea a ~/.claude/secrets/apps.env:\n\nD1_RESEARCH_COMPETENCIA_DATABASE_ID=${databaseId}\n`);
+  if (databaseId !== d1Credentials?.databaseId) {
+    console.log(`\n⚠️ El database_id devuelto (${databaseId}) no coincide con el guardado en 1Password (${d1Credentials?.databaseId}) — actualizá el campo "database_id" del ítem "Research Competencia D1" en el vault Daemons.`);
+  } else {
+    console.log(`\n✅ Listo. database_id: ${databaseId} (ya coincide con 1Password, vault Daemons).`);
+  }
 }
 
 main().catch((err) => {
