@@ -30,7 +30,6 @@ Cualquier usuario que encuentre `@cal_jano_bot` tiene acceso a las 164 tools (Gm
 - **RESUELTO 2026-07-14:** Cal decidió retirar la tool del registro (opción de menor riesgo). Eliminados: `daemon-v2/src/tools/briefing.ts` (archivo completo), el registro de la tool + import + `briefingDeps` en `agent-tools.ts`, la mención en `agent.ts` (`TOOL_MESSAGES`), y las 2 referencias en `system-prompt.ts`. `CLAUDE.md` actualizado (sacado del índice de tools). Build (`@cos/shared` + `@cos/daemon`) verificado limpio. Daemon reiniciado (`launchctl bootout`/`bootstrap`) y verificado en producción — logs limpios, sin rastro de `runBriefing`/`briefingDeps`, `state=running`.
 
 ## Moderados (después de los críticos)
-- **M1** — `POST /panini/register` sin auth real (`worker-v2/src/index.ts:30-59`) + no maneja `web_app_data` (ruta muerta). Validar `initData` (HMAC) o eliminar.
 - **M2** — `system-prompt.ts:128-129` referencia tools de salud viejas (`mcp__cos-tools__getHealthSummary/getHealthTrend`) que ya no existen. Borrar esas líneas (las correctas ya están en 514-516).
 - **M3** — Lock KV no atómico (`cf-kv.ts:67-73`, get-then-set) + comentario stale sobre TTL de 20s (es 60s desde 2026-07-03).
 - **M4** — Form 250 Aduana por HTTP plano (`tools/qr-aduana.ts:9`) — verificar si el sitio de la Aduana tiene HTTPS.
