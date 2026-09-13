@@ -59,6 +59,10 @@ Las tools `searchBooks`, `getReadingHistory`, `addBook`, `updateBook`, `confirmC
 `logReadingProgress` y `setBookCover` gestionan la biblioteca de Notion. `searchBooks` devuelve título,
 estado, avance, total de páginas cuando existe y enlace; `getReadingHistory` devuelve fecha,
 porcentajes y `Avance (pag)` exacto por sesión, permitiendo informar avances recientes en páginas.
+Las conciliaciones de capturas/listas de Kindle usan bullets compactos para 2–3 libros y una tabla
+Rich Message `Libro | Kindle | Notion | Resultado` para 4+; para un solo libro se usa una
+confirmación compacta de dos líneas. `📚` identifica biblioteca/listas y `📖` lectura/progreso;
+`📊` queda reservado para KPIs Yape.
 
 ### Resumidor (`tools/resumir.ts`) — checkpoint con tarjeta + colas
 Resumidor universal con checkpoint antes de guardar a Readwise. Reusa los scripts del skill `resumir` vía spawn (sin Bash); cookies Safari con `~/.Codex/bin/node-fda` (requiere FDA bajo launchd).

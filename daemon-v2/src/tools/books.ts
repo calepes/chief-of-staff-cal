@@ -642,9 +642,8 @@ export async function logReadingProgress(params: LogProgressParams): Promise<str
     : null;
 
   return (
-    `📊 Progreso registrado${bookName ? ` — <b>${esc(bookName)}</b>` : ""}\n` +
-    `${pctI}% → ${pctF}% <i>(+${delta}%)</i>${autoLine}\n` +
-    `Fecha: ${fecha ?? today}`
+    `📖 ${bookName ? `<b>${esc(bookName)}</b>` : "<b>Progreso de lectura</b>"}\n` +
+    `${pctI}% → ${pctF}% <i>(+${delta}%)</i>${autoLine} · ${fecha ?? today}`
   );
 }
 

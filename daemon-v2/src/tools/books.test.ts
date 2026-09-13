@@ -495,6 +495,9 @@ describe("logReadingProgress", () => {
     expect(result).toContain("10% → 25%");
     expect(result).toContain("+15%");
     expect(result).toContain("Leadership on the Line");
+    expect(result).toMatch(/^📖 <b>Leadership on the Line<\/b>/);
+    expect(result.split("\n")).toHaveLength(2);
+    expect(result).toContain("· 2026-06-04");
 
     const ntnArgs = mockSpawn.mock.calls[0][1] as string[];
     const body = JSON.parse(ntnArgs[ntnArgs.indexOf("-d") + 1]);

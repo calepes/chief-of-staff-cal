@@ -82,6 +82,12 @@ amplió `books.ts` de gestión básica a un set completo: crear/actualizar con r
 relaciones nuevas con gate real, buscar por cualquier campo (incluidos rollups), y ver historial de
 lectura.
 
+- **UX de conciliación Kindle → Notion:** 2–3 libros usan bullets compactos; 4+ usan una tabla Rich
+  Message `Libro | Kindle | Notion | Resultado`. Distingue `Actualizado`, `Sin cambios` y `Se
+  conserva · redondeo`. Para un solo libro, `logReadingProgress` devuelve una confirmación compacta
+  de dos líneas. Emojis de dominio: `📚` = biblioteca/lista de libros; `📖` = lectura o progreso de
+  lectura. `📊` queda reservado para actividad/DAU de KPIs Yape.
+
 - **Bug real encontrado y arreglado — "Estado" cambió de `select` a `status` en Notion, el código
   seguía tratándolo como `select`.** Rompía `searchBooks` con meta 2026 (`filter type mismatch`).
   Corregido en los 5 lugares que lo tocan (filtro de query, lectura en `pageToBookResult`, escritura en
