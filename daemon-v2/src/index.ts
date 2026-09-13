@@ -13,6 +13,7 @@ import { compactHistory } from "./compact.js";
 import { sanitizeForTelegram } from "./format.js";
 import { QueuePoller } from "./queue-poller.js";
 import { CfKv, tryAcquireLock, releaseLock } from "./cf-kv.js";
+import { createWebhookWatchdogTick, ensureTelegramWebhook, networkErrorCode } from "./webhook-watchdog.js";
 import { ConversationState } from "./state.js";
 import { clearSessionId, loadSessionId, saveSessionId } from "./session-store.js";
 import { defaultEffort, effortForMessage } from "./effort.js";
@@ -1806,9 +1807,6 @@ async function markWebhookHealthy(): Promise<void> {
   }
 }
 
-// Cuenta como "problema" tanto el drift confirmado (currentUrl != esperado) como no poder
-// ni siquiera chequear (timeout/fetch failed) — ambos significan "no puedo confirmar que
-// el webhook esté sano", que es la condición real que le importa a Cal.
 async function markWebhookBroken(): Promise<void> {
   const since = await kv.get<number>(WEBHOOK_BROKEN_SINCE_KEY);
   const brokenSince = since ?? Date.now();
@@ -1830,44 +1828,21 @@ async function markWebhookBroken(): Promise<void> {
 }
 
 async function ensureWebhook(): Promise<void> {
-  if (!env.COS_WEBHOOK_SECRET || !env.COS_WEBHOOK_URL) return;
-  try {
-    const info = await fetch(`https://api.telegram.org/bot${env.COS_TELEGRAM_BOT_TOKEN}/getWebhookInfo`, { signal: AbortSignal.timeout(10_000) }).then((r) =>
-      r.json() as Promise<{ ok: boolean; result?: { url?: string } }>,
-    );
-    const currentUrl = info.result?.url ?? "";
-    if (currentUrl === env.COS_WEBHOOK_URL) {
-      await markWebhookHealthy().catch((err) => log({ msg: "webhook_health_kv_error", err: String(err) }));
-      return;
-    }
-    log({ msg: "webhook_drift_detected", currentUrl, expected: env.COS_WEBHOOK_URL });
-    await markWebhookBroken().catch((err) => log({ msg: "webhook_health_kv_error", err: String(err) }));
-    const res = await fetch(`https://api.telegram.org/bot${env.COS_TELEGRAM_BOT_TOKEN}/setWebhook`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: env.COS_WEBHOOK_URL,
-        secret_token: env.COS_WEBHOOK_SECRET,
-        drop_pending_updates: false,
-        allowed_updates: ["message", "callback_query", "edited_message"],
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    const data = (await res.json()) as { ok: boolean; description?: string };
-    if (data.ok) {
-      log({ msg: "webhook_restored" });
-    } else {
-      log({ msg: "webhook_restore_failed", err: data.description });
-    }
-  } catch (err) {
-    log({ msg: "webhook_check_error", err: String(err) });
-    await markWebhookBroken().catch((kvErr) => log({ msg: "webhook_health_kv_error", err: String(kvErr) }));
-  }
+  await ensureTelegramWebhook({
+    botToken: env.COS_TELEGRAM_BOT_TOKEN,
+    expectedUrl: env.COS_WEBHOOK_URL,
+    secret: env.COS_WEBHOOK_SECRET,
+    markHealthy: markWebhookHealthy,
+    markBroken: markWebhookBroken,
+    log,
+  });
 }
+
+const webhookWatchdogTick = createWebhookWatchdogTick(ensureWebhook, log);
 
 function scheduleWebhookWatchdog(): void {
   cron.schedule("* * * * *", () => {
-    void ensureWebhook();
+    void webhookWatchdogTick();
   }, { timezone: "America/La_Paz" });
   log({ msg: "webhook_watchdog_scheduled", interval: "1min" });
 }
@@ -2224,7 +2199,7 @@ async function loop(): Promise<void> {
   // Proactividad DESACTIVADA 2026-06-17 — Cal va a repensar los flujos proactivos.
   // scheduleFlightCheckin();
   // scheduleFocoCheckinsLocal();
-  void ensureWebhook();
+  void webhookWatchdogTick();
   void registerBotCommands(env.COS_TELEGRAM_BOT_TOKEN);
 
   log({ msg: "cos-daemon-v2 ready", queueId: env.CF_QUEUE_ID });
@@ -2234,6 +2209,8 @@ async function loop(): Promise<void> {
   let alertedThisEpisode = false;
 
   while (true) {
+    const loopStartedAt = Date.now();
+    let queueOperation = "pull";
     try {
       const pollStart = Date.now();
       const messages = await poller.pull(10);
@@ -2293,11 +2270,23 @@ async function loop(): Promise<void> {
         }
       }
 
-      if (acks.length) await poller.ack(acks);
+      if (acks.length) {
+        queueOperation = "ack";
+        await poller.ack(acks);
+      }
     } catch (err) {
       consecutiveErrors++;
       const backoffMs = Math.min(BACKOFF_MAX_MS, 5000 * Math.pow(2, consecutiveErrors - 1));
-      log({ msg: "loop_error", err: String(err), consecutiveErrors, backoffMs });
+      log({
+        msg: "loop_error",
+        err: String(err),
+        errorCode: networkErrorCode(err),
+        operation: queueOperation,
+        host: "api.cloudflare.com",
+        durationMs: Date.now() - loopStartedAt,
+        consecutiveErrors,
+        backoffMs,
+      });
 
       if (consecutiveErrors >= ALERT_THRESHOLD && !alertedThisEpisode) {
         alertedThisEpisode = true;

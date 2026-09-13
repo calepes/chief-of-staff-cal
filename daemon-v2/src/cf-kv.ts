@@ -5,6 +5,7 @@ export interface CfKvDeps {
 }
 
 const BASE = "https://api.cloudflare.com/client/v4";
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export class CfKv {
   constructor(private deps: CfKvDeps) {}
@@ -19,7 +20,7 @@ export class CfKv {
   }
 
   async get<T = unknown>(key: string): Promise<T | null> {
-    const res = await fetch(this.url(key), { headers: this.headers() });
+    const res = await fetch(this.url(key), { headers: this.headers(), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`KV get failed: ${res.status}`);
     return (await res.json()) as T;
@@ -29,7 +30,7 @@ export class CfKv {
   // (sync-safari-cookies.mjs) guarda el header de cookies como texto plano vía `wrangler kv key put`,
   // no como JSON. get() fallaría acá porque res.json() no puede parsear "a=1; b=2" como JSON.
   async getText(key: string): Promise<string | null> {
-    const res = await fetch(this.url(key), { headers: this.headers() });
+    const res = await fetch(this.url(key), { headers: this.headers(), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`KV getText failed: ${res.status}`);
     return res.text();
@@ -44,6 +45,7 @@ export class CfKv {
       method: "PUT",
       headers: { ...this.headers(), "content-type": "application/json" },
       body,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
       // Diagnóstico (2026-07-03): "KV set failed: 400" venía sin detalle — capturamos el body
@@ -58,6 +60,7 @@ export class CfKv {
     const res = await fetch(this.url(key), {
       method: "DELETE",
       headers: this.headers(),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok && res.status !== 404) throw new Error(`KV delete failed: ${res.status}`);
   }
