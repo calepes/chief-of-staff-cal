@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, renameSync, unlinkSync, copyFileSync, mkdi
 import { homedir } from "node:os";
 import { join, extname } from "node:path";
 
-export const DESIGN_REFS_ROOT = join(homedir(), "Claude Projects", "Personal", "Referencias de Diseño");
+export const DESIGN_REFS_ROOT = join(homedir(), "AI Projects", "Personal", "Referencias de Diseño");
 
 const TIPOS_VALIDOS = ["dashboard", "landing", "componente", "paleta", "tipografia", "microinteraccion", "otro"] as const;
 export type TipoReferencia = (typeof TIPOS_VALIDOS)[number];

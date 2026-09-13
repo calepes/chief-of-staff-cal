@@ -13,7 +13,7 @@ export interface Persona {
   rol?: string;
 }
 
-// Mapping conocido (de ~/Claude Projects/notion-reference.md). Sirve como fallback
+// Mapping conocido (de ~/AI Projects/notion-reference.md). Sirve como fallback
 // si la query a la DB People falla (ej. permisos). El cache de la DB lo
 // sobrescribe en el siguiente fetch exitoso.
 const KNOWN: Persona[] = [

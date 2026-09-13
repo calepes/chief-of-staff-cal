@@ -17,13 +17,13 @@
 | Tools custom (implementación) | `daemon-v2/src/agent-tools.ts` |
 | Permisos / DISALLOWED_BUILTINS / allowlist | `daemon-v2/src/agent-options.ts` |
 | Registro de MCPs + su env | `daemon-v2/src/index.ts` (`BASE_OPTIONS.mcpServers`) |
-| Schema de MCPs custom | `~/Claude Projects/Personal/MCP Servers/mcp-servers/CLAUDE.md` |
+| Schema de MCPs custom | `~/AI Projects/Personal/MCP Servers/mcp-servers/CLAUDE.md` |
 | Worker CF (webhook/callbacks) | `worker-v2/src/index.ts` |
 | Arquitectura completa | `docs/ARCHITECTURE.md` |
 
 ## Comandos operativos
 ```bash
-cd "/Users/calepes/Claude Projects/Personal/Agents/Jano"
+cd "/Users/calepes/AI Projects/Personal/Agents/Jano"
 # Build (REQUERIDO antes de restart si tocaste shared/ o daemon/)
 npm -w @cos/shared run build && npm -w @cos/daemon run build
 # Tests / typecheck
@@ -359,7 +359,7 @@ Spec: `docs/superpowers/specs/2026-07-28-backlog-tool-y-self-learning-design.md`
 
 ## Backlogs de proyectos — agregado 2026-07-28
 
-Tres tools para que Jano lea y escriba los `BACKLOG.md` repartidos por `~/Claude Projects`:
+Tres tools para que Jano lea y escriba los `BACKLOG.md` repartidos por `~/AI Projects`:
 `mapaBacklogs` (mapa completo con conteos), `leerBacklog` (pendientes de uno) y
 `proponerItemBacklog` (propone agregar/tildar, **no escribe** — manda tarjeta y Cal confirma).
 Spec: `docs/superpowers/specs/2026-07-28-backlog-tool-y-self-learning-design.md`.
@@ -670,7 +670,7 @@ NOTIF_BOT_TOKEN, no el bot de Jano.
 ## Notion
 - Integración "Claude CoS" (DB Tareas + People). Prefijo MCP: `mcp__claude_ai_Notion__*`.
 - **Ese MCP es SOLO del daemon.** En sesión interactiva de Claude Code no existe — usar el CLI `ntn` (skill `notion-ntn`) para cualquier query/escritura a Notion sobre este repo (ej. sync de docs a la DB "Agentes AI").
-- Referencia cross-project: `~/Claude Projects/notion-reference.md` (bajo demanda).
+- Referencia cross-project: `~/AI Projects/notion-reference.md` (bajo demanda).
 
 ## Gap conocido — bulk review parcial en approval-flow (2026-07-02, familia 3)
 
@@ -687,8 +687,8 @@ frecuencia, reconsiderar.
 - Viajes, calendarios, briefings, health, audio, /today: `docs/references/viajes-calendarios.md`
 - Research de competencia (Yape Bolivia) — flujo de negocio + diseño funcional/técnico completo: `docs/references/research-competencia.md`
 - Arquitectura completa: `docs/ARCHITECTURE.md` · Backlog: `BACKLOG.md`
-- Telegram cross-project: `~/Claude Projects/telegram-reference.md`
-- Contexto Yape: `~/Claude Projects/Yape/CLAUDE.md`
+- Telegram cross-project: `~/AI Projects/telegram-reference.md`
+- Contexto Yape: `~/AI Projects/Yape/CLAUDE.md`
 - Specs/Planes: `docs/superpowers/specs/` y `docs/superpowers/plans/`
 
 ## Automatización — dos capas (NO confundir)
@@ -779,6 +779,6 @@ los 11. `scheduleKpiCardDaily` no es cron propio desde 2026-07-24 (absorbido en 
 arrancan: `grep -E "_scheduled" ~/Library/Logs/cos-agent-v2.out.log`.
 
 ## Monitor de combustible (alertas proactivas) — ⛔ APAGADO 2026-06-19
-> El cron de `combustible-proxy` quemaba ~576 writes/día de KV (≈57% del free tier) → Cloudflare disparó alerta "50% daily KV limit". Apagado con `crons = []` + `enabled:false` en KV (`monitor_config`). Ya NO llegan `fuel_alert` a la cola. Reactivar: ver `~/Claude Projects/Personal/Apps/Combustible/repo/CLAUDE.md` (restaurar cron a `*/5`, no cada minuto; hacer el `put monitor_state` condicional). El flujo descrito abajo queda como referencia de cómo funcionaba.
+> El cron de `combustible-proxy` quemaba ~576 writes/día de KV (≈57% del free tier) → Cloudflare disparó alerta "50% daily KV limit". Apagado con `crons = []` + `enabled:false` en KV (`monitor_config`). Ya NO llegan `fuel_alert` a la cola. Reactivar: ver `~/AI Projects/Personal/Apps/Combustible/repo/CLAUDE.md` (restaurar cron a `*/5`, no cada minuto; hacer el `put monitor_state` condicional). El flujo descrito abajo queda como referencia de cómo funcionaba.
 
-Cron en `combustible-proxy` (CF, externo) detecta "llegó gasolina" → `POST /fuel/alert` (Service Binding) al worker de Jano → `QueueMessage{kind:"fuel_alert"}` → daemon `proactive/fuel-alert.ts` re-verifica litros y avisa a Cal. Config editable **por texto** vía tools del MCP `combustible` (`getFuelMonitorConfig/Status/setFuelMonitorConfig`); el menú es texto (los botones tappables se revirtieron 2026-06-18, no funcionaron en el Telegram de Cal). Endpoint `/fuel/alert` en `worker-v2/src/index.ts`; tipo `FuelEvent` en `shared-v2/src/types.ts`. Detalle: `~/Claude Projects/Personal/Apps/Combustible/repo/CLAUDE.md`.
+Cron en `combustible-proxy` (CF, externo) detecta "llegó gasolina" → `POST /fuel/alert` (Service Binding) al worker de Jano → `QueueMessage{kind:"fuel_alert"}` → daemon `proactive/fuel-alert.ts` re-verifica litros y avisa a Cal. Config editable **por texto** vía tools del MCP `combustible` (`getFuelMonitorConfig/Status/setFuelMonitorConfig`); el menú es texto (los botones tappables se revirtieron 2026-06-18, no funcionaron en el Telegram de Cal). Endpoint `/fuel/alert` en `worker-v2/src/index.ts`; tipo `FuelEvent` en `shared-v2/src/types.ts`. Detalle: `~/AI Projects/Personal/Apps/Combustible/repo/CLAUDE.md`.

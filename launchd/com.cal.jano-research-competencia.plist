@@ -68,7 +68,7 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/calepes/Claude Projects/Personal/Agents/Jano/daemon-v2</string>
+  <string>/Users/calepes/AI Projects/Personal/Agents/Jano/daemon-v2</string>
 
   <key>StartCalendarInterval</key>
   <dict>

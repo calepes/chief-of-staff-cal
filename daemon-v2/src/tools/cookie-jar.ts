@@ -5,7 +5,7 @@ import type { CfKv } from "../cf-kv.js";
 
 // Cookie Broker — lado lector/administrador para Jano. La cookie real se escribe por un proceso
 // externo (~/.claude/scripts/sync-safari-cookies.mjs, cron 05:40 con FDA — ver Fase 1 en
-// ~/Claude Projects/HANDOFF-cookie-broker-kv.md); acá solo se LEE del KV neutral "cookie-jar" y,
+// ~/AI Projects/HANDOFF-cookie-broker-kv.md); acá solo se LEE del KV neutral "cookie-jar" y,
 // cuando aparece un dominio nuevo (con el conforme de Cal en el chat), se dispara una sincronización
 // puntual reusando ese mismo script — Jano no vuelve a parsear Cookies.binarycookies directamente.
 const HOME = homedir();
@@ -20,7 +20,7 @@ const CONFIG_COMMENT =
   "Whitelist de dominios permitidos en el Cookie Broker KV (namespace 'cookie-jar', Cloudflare " +
   "account id de Cal). REGLA DURA: solo medios de noticias/lectura. NUNCA banca, financieras, " +
   "Gmail/email, ni ningun sitio con datos sensibles. Editar a mano para sumar/quitar dominios -- " +
-  "ver ~/Claude Projects/HANDOFF-cookie-broker-kv.md.";
+  "ver ~/AI Projects/HANDOFF-cookie-broker-kv.md.";
 
 // Defensa en profundidad de la regla dura de seguridad: aunque el system prompt ya instruye a Jano
 // a no proponer nunca estos dominios, addDomainAndSync() los rechaza por código igual — no depende

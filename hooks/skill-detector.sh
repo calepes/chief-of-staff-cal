@@ -5,7 +5,7 @@ set -u
 
 source "$HOME/.claude/channels/telegram/.env"
 
-REPO="$HOME/Claude Projects/Personal/Agents/Chief of Staff Cal"
+REPO="$HOME/AI Projects/Personal/Agents/Jano"
 PROPOSALS_DIR="$HOME/.claude/skill-proposals"
 TRANSCRIPTS_DIR="$HOME/.claude/projects/-Users-calepes-Claude-Projects-Personal-Agents-Chief-of-Staff-Cal"
 LOG="$HOME/.claude/logs/skill-detector.log"

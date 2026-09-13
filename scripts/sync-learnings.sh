@@ -2,7 +2,7 @@
 # sync-learnings.sh — copia ~/.claude/learnings/cos/ → repo docs/learnings/, commit, push
 set -euo pipefail
 
-REPO="$HOME/Claude Projects/Personal/Agents/Chief of Staff Cal"
+REPO="$HOME/AI Projects/Personal/Agents/Jano"
 SOURCE="$HOME/.claude/learnings/cos"
 DEST="$REPO/docs/learnings"
 ENV_FILE="$HOME/.claude/channels/telegram/.env"

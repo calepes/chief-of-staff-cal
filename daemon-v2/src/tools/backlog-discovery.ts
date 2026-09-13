@@ -45,7 +45,7 @@ import { homedir } from "node:os";
 import { basename, dirname, relative, sep } from "node:path";
 import type { BacklogEntry } from "../backlog-types.js";
 
-export const BACKLOG_ROOT = `${homedir()}/Claude Projects`;
+export const BACKLOG_ROOT = `${homedir()}/AI Projects`;
 
 /** Mismo criterio que el find, a propósito: un solo patrón para descubrir y para validar. */
 const BACKLOG_BASENAME_RE = /^backlog\.md$/i;
@@ -200,7 +200,7 @@ export function discoverBacklogs(root: string = BACKLOG_ROOT, now: number = Date
     // find se parsea por \n sin -print0: un directorio con un salto de línea en el nombre parte
     // la ruta en dos líneas y produce una entrada con path RELATIVO. Ese relativo se resolvería
     // (más abajo, en resolveBacklogPath, vía realpathSync) contra el cwd DEL DAEMON — que vive
-    // dentro de ~/Claude Projects (Personal/Agents/Jano) — y podría terminar pasando los demás
+    // dentro de ~/AI Projects (Personal/Agents/Jano) — y podría terminar pasando los demás
     // invariantes sin colgar en realidad del root pedido. Se descarta toda línea que no cuelgue
     // literalmente de `root`.
     if (path !== root && !path.startsWith(rootPrefix)) continue;

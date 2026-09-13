@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const RSS_SOURCES_PATH =
-  "/Users/calepes/Claude Projects/Personal/Apps/Digest/digest-project/src/rss-sources.js";
+  "/Users/calepes/AI Projects/Personal/Apps/Digest/digest-project/src/rss-sources.js";
 
 export type DigestSection = "bolivia" | "peru" | "colombia" | "fintech";
 

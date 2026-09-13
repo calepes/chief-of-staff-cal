@@ -897,7 +897,7 @@ export function buildSdkTools(deps: ToolDeps) {
     ),
     tool(
       "mapaBacklogs",
-      "Muestra el MAPA COMPLETO de backlogs de Cal: todos los proyectos del árbol ~/Claude Projects " +
+      "Muestra el MAPA COMPLETO de backlogs de Cal: todos los proyectos del árbol ~/AI Projects " +
       "con su cantidad de pendientes, agrupados por Raíz / Agentes / Apps. " +
       "Usar cuando Cal pregunte qué tiene pendiente SIN nombrar un proyecto, pida 'el mapa de backlogs', " +
       "'qué hay en los backlogs', o quiera una vista general antes de bajar a uno concreto. " +
@@ -1973,7 +1973,7 @@ export function buildSdkTools(deps: ToolDeps) {
     // ── Claude Launcher (abrir proyectos en VS Code / cmux) ─────────────────────
     tool(
       "listarProyectosClaude",
-      "Lista los proyectos registrados en el Claude Launcher de Cal (Jano, Pecunia, Vesta, Learning, Achoradazos, Inversiones, Guadalajara 205, 'Claude Projects (root)', etc.) con su path y si están preparados para auto-arrancar Claude Code. Llamar cuando Cal pida ver las opciones, el nombre que dio no matchee ninguno, o necesites resolver cuál es el nombre exacto antes de abrirProyectoClaude. " +
+      "Lista los proyectos registrados en el Claude Launcher de Cal (Jano, Pecunia, Vesta, Learning, Achoradazos, Inversiones, Guadalajara 205, 'AI Projects (root)', etc.) con su path y si están preparados para auto-arrancar Claude Code. Llamar cuando Cal pida ver las opciones, el nombre que dio no matchee ninguno, o necesites resolver cuál es el nombre exacto antes de abrirProyectoClaude. " +
       "Al mostrar la lista a Cal: formato telegram-bot-ux — bullets '•' (nunca '-'), emoji 📁 (uno solo, de header, no por línea), marcar con ⚠️ los que salgan 'preparado:false'. Nunca pegues el JSON crudo.",
       {},
       async () => ({ content: [{ type: "text" as const, text: await listClaudeProjects() }] }),
@@ -1989,7 +1989,7 @@ export function buildSdkTools(deps: ToolDeps) {
       "NO (esto incluye CUALQUIER pedido que no la nombre, aunque sea liso como 'abrí X' — 'no la nombró' es la única condición que importa, no evalúes 'ambigüedad') → preguntale en texto plano: '¿lo abro en VS Code o en una sesión paralela de cmux? (cmux corre un agente de Claude Code SIN gate de permisos sobre ese repo)' y NO llames la tool en este turno; recién en el mensaje siguiente de Cal resolvés 'modo'. " +
       "Además, modo='paralelo' (abre SIEMPRE una sesión NUEVA de cmux corriendo `claude --dangerously-skip-permissions`, sin dedupe) requiere confirmación explícita de Cal en un mensaje POSTERIOR a esta llamada, sin excepción — con una sola excepción a esa excepción: si ya le preguntaste con el texto de arriba (que ya revela el riesgo) y Cal respondió eligiendo cmux, esa respuesta ES la confirmación, no reiteres la pregunta. Si en cambio Cal escribió 'paralelo'/'cmux' explícito desde su pedido original (rama SI de arriba), ahí sí falta confirmar — preguntale '¿confirmás abrir la sesión paralela en <proyecto>? corre sin gate de permisos' y esperá el mensaje siguiente antes de llamar la tool.",
       {
-        nombre: z.string().describe("Nombre exacto del proyecto tal como aparece en listarProyectosClaude, ej. 'Vesta', 'Claude Projects (root)'"),
+        nombre: z.string().describe("Nombre exacto del proyecto tal como aparece en listarProyectosClaude, ej. 'Vesta', 'AI Projects (root)'"),
         modo: z.enum(["vscode", "paralelo"]).describe("Resolvé cuál corresponde ANTES de llamar (ver regla dura en la descripción de la tool) — no hay valor por default implícito."),
       },
       async ({ nombre, modo }) => ({ content: [{ type: "text" as const, text: await openClaudeProject({ nombre, modo }) }] }),

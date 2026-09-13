@@ -6,7 +6,7 @@ set -u
 
 source "$HOME/.claude/channels/telegram/.env"
 
-REPO="$HOME/Claude Projects/Personal/Agents/Chief of Staff Cal"
+REPO="$HOME/AI Projects/Personal/Agents/Jano"
 PROPOSALS_DIR="$HOME/.claude/morning-builds/proposals"
 LOG="$HOME/.claude/logs/morning-build.log"
 PROMPT_FILE="$HOME/.claude/hooks/morning-build-prompt.md"

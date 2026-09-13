@@ -2,7 +2,7 @@ import { config as loadEnv } from "dotenv";
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
 // notifications/.env ANTES de apps.env a propósito: NOTIF_BOT_TOKEN vive nativamente en
 // ~/.claude/notifications/.env (es la config propia del bot @ClaudeCalbot — ver
-// ~/Claude Projects/telegram-reference.md), y apps.env solo tiene una COPIA para que loaders
+// ~/AI Projects/telegram-reference.md), y apps.env solo tiene una COPIA para que loaders
 // que no conocen notifications/.env (como el resto de los scripts cross-project) igual lo
 // encuentren. dotenv es no-override (primer loadEnv gana), así que el orden importa: con
 // apps.env cargado primero, la copia gana siempre y notifications/.env nunca aplica — hoy da

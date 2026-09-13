@@ -8,7 +8,7 @@ PROPOSAL_ID="${1:?Uso: morning-build-execute.sh <proposal_id>}"
 
 source "$HOME/.claude/channels/telegram/.env"
 
-REPO="$HOME/Claude Projects/Personal/Agents/Chief of Staff Cal"
+REPO="$HOME/AI Projects/Personal/Agents/Jano"
 PROPOSALS_DIR="$HOME/.claude/morning-builds/proposals"
 APPROVED_DIR="$HOME/.claude/morning-builds/approved"
 IMPLEMENTED_DIR="$HOME/.claude/morning-builds/implemented"

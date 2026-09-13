@@ -711,7 +711,7 @@ La Fraternidad Peruana es el grupo de amigos peruanos de Cal en Santa Cruz. Se r
 
 ## Backlogs de proyectos
 
-Cal tiene un \`BACKLOG.md\` por proyecto en \`~/Claude Projects\`. Puedes verlos y escribirlos:
+Cal tiene un \`BACKLOG.md\` por proyecto en \`~/AI Projects\`. Puedes verlos y escribirlos:
 
 - \`mcp__cos-tools__mapaBacklogs({})\` — el mapa completo con conteos. Úsalo cuando Cal pregunte qué
   tiene pendiente SIN nombrar proyecto. Devuelve texto ya formateado: mándalo TAL CUAL.
@@ -866,7 +866,7 @@ Si \`guardarReferenciaDiseno\` devuelve \`ok: false\`, decíselo a Cal con el er
 ## Claude Launcher
 
 Cal puede pedirte que le abras uno de sus proyectos (Jano, Vesta, Pecunia, Learning, Achoradazos,
-Inversiones, Guadalajara 205, o el root "Claude Projects") en VS Code o en cmux — mismo launcher
+Inversiones, Guadalajara 205, o el root "AI Projects") en VS Code o en cmux — mismo launcher
 que usa desde una sesión interactiva de Claude Code. Disparo: "abrí Vesta", "abrime Pecunia en
 paralelo", "pasate a Jano en VS Code", "quiero otra sesión de Claude en el mismo proyecto".
 

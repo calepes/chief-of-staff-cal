@@ -8,7 +8,7 @@ PROPOSAL_ID="${1:?Uso: skill-install.sh <proposal_id>}"
 
 source "$HOME/.claude/channels/telegram/.env"
 
-REPO="$HOME/Claude Projects/Personal/Agents/Chief of Staff Cal"
+REPO="$HOME/AI Projects/Personal/Agents/Jano"
 PROPOSALS_DIR="$HOME/.claude/skill-proposals"
 INSTALLED_DIR="$HOME/.claude/skill-proposals/installed"
 FAILED_DIR="$HOME/.claude/skill-proposals/failed"

@@ -8,7 +8,7 @@ mkdir -p "$LOGDIR"
 LOG="$LOGDIR/nightly-$(date +%Y%m%d).log"
 
 CLAUDE="/Users/calepes/.local/bin/claude"
-PROJECT_DIR="/Users/calepes/Claude Projects/Personal/Agents/Chief of Staff Cal"
+PROJECT_DIR="/Users/calepes/AI Projects/Personal/Agents/Jano"
 TIMEOUT=600
 GTIMEOUT="/opt/homebrew/bin/timeout"
 TELEGRAM_BOT_TOKEN=$(grep TELEGRAM_BOT_TOKEN "$HOME/.claude/channels/telegram/.env" | cut -d= -f2)

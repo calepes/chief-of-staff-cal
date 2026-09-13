@@ -165,7 +165,7 @@ export interface FetchAsUserResult {
   domainWhitelisted: boolean;
 }
 
-// Lee cookies del Cookie Broker (KV neutral "cookie-jar", ver ~/Claude Projects/HANDOFF-cookie-broker-kv.md)
+// Lee cookies del Cookie Broker (KV neutral "cookie-jar", ver ~/AI Projects/HANDOFF-cookie-broker-kv.md)
 // en vez de leer Cookies.binarycookies de Safari directo — ya no depende de Full Disk Access para el
 // caso normal (dominio ya whitelisteado). Dominios no whitelisteados se fetchean igual, sin cookie
 // (mismo comportamiento de siempre para contenido público).

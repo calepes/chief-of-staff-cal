@@ -1,7 +1,7 @@
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
 
-// DB Tareas schema (ver ~/Claude Projects/notion-reference.md):
+// DB Tareas schema (ver ~/AI Projects/notion-reference.md):
 // - "Nombre de tarea" (title)
 // - "Estado" (status): Backlog | Sin empezar | En curso | Focus | Waiting for | Cancelada | Listo
 // - "Asignado a" (relation → People DB) — array de page_ids

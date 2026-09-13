@@ -205,7 +205,7 @@ const kv = new CfKv({
   namespaceId: env.CF_KV_NAMESPACE_ID,
   apiToken: env.CF_API_TOKEN,
 });
-// Cookie Broker (ver ~/Claude Projects/HANDOFF-cookie-broker-kv.md) — namespace KV neutral,
+// Cookie Broker (ver ~/AI Projects/HANDOFF-cookie-broker-kv.md) — namespace KV neutral,
 // distinto del propio de Jano (env.CF_KV_NAMESPACE_ID), compartido con el Digest.
 const cookieJarKv = new CfKv({
   accountId: env.CF_ACCOUNT_ID,
@@ -280,28 +280,28 @@ function createFreshMcpServer() {
 }
 
 const YT_TRANSCRIBE_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/youtube-transcribe/dist/index.js";
 const EXCHANGE_RATE_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/exchange-rate-bolivia/dist/index.js";
 const LLUVIA_BOLIVIA_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/lluvia-bolivia/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/lluvia-bolivia/dist/index.js";
 const MCP_REMOTE = "/Users/calepes/.npm-global/bin/mcp-remote";
 const HEALTH_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/health/dist/index.js";
 const AGENT_LEARNINGS_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/agent-learnings/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/agent-learnings/dist/index.js";
 const COMBUSTIBLE_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/combustible/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/combustible/dist/index.js";
 const SERPAPI_FLIGHTS_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/serpapi-flights/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/serpapi-flights/dist/index.js";
 const APPLE_NOTES_BIN =
   "/Users/calepes/.npm-global/lib/node_modules/apple-notes-mcp/build/index.js";
 const INVERSIONES_QUERY_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/inversiones-query/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/inversiones-query/dist/index.js";
 const SPARK_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/spark/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/spark/dist/index.js";
 const ACHORADAZOS_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/achoradazos/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/achoradazos/dist/index.js";
 const ACHORADAZOS_BASE_ID = "appufIxiXnYESHhzi";
 const ACHORADAZOS_EVENTOS_TABLE = "tblTpDPaBRFN8JXOQ";
 
@@ -323,7 +323,7 @@ async function listAchoradazosJuntes(): Promise<ExpenseJunte[]> {
   }));
 }
 const BOA_CHECKIN_DIST =
-  "/Users/calepes/Claude Projects/Personal/MCP Servers/mcp-servers/servers/boa-checkin/dist/index.js";
+  "/Users/calepes/AI Projects/Personal/MCP Servers/mcp-servers/servers/boa-checkin/dist/index.js";
 
 // launchd arranca los daemons con un PATH minimo (/usr/bin:/bin) que NO incluye
 // /usr/local/bin. Con command: "node" el spawn del MCP falla EN SILENCIO: el server
@@ -1981,7 +1981,7 @@ function scheduleTopicsProfileRefresh(): void {
 /**
  * Reporte diario de lluvia + confirmación del cron de ingesta + alertas (2026-08-16,
  * pedido de Cal). 09:50 La Paz — 20 min después del cron Python de ingesta (09:30,
- * launchd, ver ~/Claude Projects/Personal/Apps/lluvia-bolivia/). 3 mensajes separados,
+ * launchd, ver ~/AI Projects/Personal/Apps/lluvia-bolivia/). 3 mensajes separados,
  * el de confirmación sale TODOS los días (éxito o falla) — a diferencia del criterio
  * "solo reportar la excepción" de health-sync-check/kpi-ingest-check, acá Cal pidió
  * explícitamente la confirmación diaria. Detalle: docs/superpowers/specs/2026-08-16-
