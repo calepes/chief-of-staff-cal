@@ -31,6 +31,20 @@ const REAL_TEXT_2026_07_26 =
 const REAL_TEXT_2026_07_27 =
   "Power BI Desktop\nLEADS ENVIADOS\n0 \t29.090\n17.220\nNOTIFICACIONES\n0,00K \t17,22K\n14K\nCLICK POP UP\n0,00K \t13,75K\n2358\nCONTACTADOS\n0 \t2358\n1179\nFUNNEL PILOTO YAPE LENDING\nDERIVADOS AGENCIA\n0 \t1179\n459\nDESEMBOLSOS\n0 \t166\n86\nLEADS\n17.220\n100 %\nVISTOS\n13.746\n79,8 %\nNO VISTOS\n3.474\n20,2 %\nME INTERESA\n2.358\nNO ME INTERESA\n4.606\n17,2 %\n33,5 %\nCONTACTADO\n1.179\nNO CONTACTADO\n1K\n50,0 %\n50,0 %\nMONTO APROBADO\nAll \t\nCIUDAD\nAll \t\nDESEMBOLSO\n86\nEN PROCESO\n69\n51,8 %\n41,6 %NO DERIVADOS\n720\nDERIVADOS\n459\n61,1 %\n38,9 %\nEN PROCESO\n293\n63,8 %\nAGENCIA\n166\n36,2 %\nRECHAZADO\n11\n6,6 %\nSIN INTERACCIÓN\n6.782\n49,3 %\n\n-- 1 of 1 --\n\n";
 
+// Texto real del PDF CMSBio del 2026-09-10. Este formato reemplaza LEADS/TOTAL por ENVIADOS
+// y abre dos ramas de RE CONTACTADOS que deben participar en la reconciliación aritmética.
+const REAL_TEXT_CMSBIO_2026_09_10 =
+  "Power BI Desktop\nPOP UPS ENVIADOS\n0 \t49.368\n39.085\nPOP UPS VISTOS\n0 \t39.085\n34.371\n" +
+  "CLICK POP UP\n00 \t34.371\n6.631\nCONTACTADOS\n00 \t6.631\n4.900\nFUNNEL PILOTO YAPE LENDING\n" +
+  "DERIVADOS AGENCIA\n0 \t4.900\n907\nDESEMBOLSOS\n0 \t475\n393\nENVIADOS\n39.085\n100 %\n" +
+  "VISTOS\n34.371\n87,9 %\nNO VISTOS\n4.714\n12,1 %\nME INTERESA\n6.631\nNO ME INTERESA\n19.421\n" +
+  "19,3 %\n56,5 %\nCONTACTADO\n4.900\nNO CONTACTADO\n1.731\n73,9 %\n26,1 %\nMONTO APROBADO\n" +
+  "Todas\nCIUDAD\nTodas\nDESEMBOLSO\n393\nEN PROCESO\n38\n82,7 %\n8,0 %\nNO DERIVADOS\n770\n" +
+  "DERIVADOS\n907\n15,7 %\n18,5 %\nSIN VISITA\n75\n8,3 %\nAGENCIA\n475\n52,4 %\nRECHAZADO\n44\n" +
+  "9,3 %\nSIN INTERACCIÓN\n8.319\n24,2 %\nRE AGENDADO\n116NO INTERESADO241\nRE AGENDADO\n" +
+  "94NO INTERESADO590\n12,8 %\t26,6 %\nRE CONTACTADOS\n1,9 %\t12,0 %\nRE CONTACTADOS\n" +
+  "NO INTERESADOS\n2.539\n51,8 %\nLote1 \tLote2\n\n-- 1 of 1 --\n";
+
 describe("extractLendingFunnel", () => {
   it("parsea los 15 nodos del 2026-07-21 (label 'SIN INTERACCION' sin tilde)", () => {
     const { fields, issues } = extractLendingFunnel(REAL_TEXT_2026_07_21);
@@ -281,5 +295,30 @@ describe("parseAndValidateLendingReport", () => {
     const broken = REAL_TEXT_2026_07_27.replace("AGENCIA\n166", "AGENCIA\nXYZ");
     const result = parseAndValidateLendingReport(broken);
     expect(result.ok).toBe(false);
+  });
+
+  it("parsea y reconcilia el formato CMSBio con ENVIADOS y las dos ramas de recontacto", () => {
+    const result = parseAndValidateLendingReport(REAL_TEXT_CMSBIO_2026_09_10);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result).toMatchObject({
+      format: "cmsbio",
+      fields: {
+        leads: 39085,
+        contactado: 4900,
+        derivados: 907,
+        noDerivados: 770,
+        enProcesoDerivados: 75,
+        agencia: 475,
+      },
+      cmsBioFields: {
+        reAgendadoDerivados: 116,
+        noInteresadoDerivados: 241,
+        noInteresadosContactado: 2539,
+        reAgendadoContactado: 94,
+        noInteresadoContactado: 590,
+      },
+    });
   });
 });

@@ -9,8 +9,10 @@ import {
   computeIncrementoAgencia,
   computeIncrementoEnProcesoAgencia,
   fillLendingDerivedFields,
+  lendingFieldsToRaw,
   type LendingHistoryRow,
 } from "./kpi-lending-notion.js";
+import type { LendingFunnelFields } from "./kpi-ingest-lending-pdf.js";
 
 function row(overrides: Partial<LendingHistoryRow>): LendingHistoryRow {
   return {
@@ -29,6 +31,60 @@ function row(overrides: Partial<LendingHistoryRow>): LendingHistoryRow {
     ...overrides,
   };
 }
+
+const funnelFields: LendingFunnelFields = {
+  leads: 39085,
+  vistos: 34371,
+  noVistos: 4714,
+  meInteresa: 6631,
+  noMeInteresa: 19421,
+  sinInteraccion: 8319,
+  contactado: 4900,
+  noContactado: 1731,
+  derivados: 907,
+  noDerivados: 770,
+  enProcesoDerivados: 75,
+  agencia: 475,
+  desembolso: 393,
+  enProcesoAgencia: 38,
+  rechazado: 44,
+};
+
+describe("lendingFieldsToRaw", () => {
+  it("conserva En Proceso (Derivados) exclusivamente en el formato histórico", () => {
+    const raw = lendingFieldsToRaw(funnelFields, "legacy", null);
+
+    expect(raw["En Proceso (Derivados)"]).toBe(75);
+    expect(raw["Sin Visita (Derivados)"]).toBeUndefined();
+  });
+
+  it("separa Sin Visita del campo histórico en el formato intermedio", () => {
+    const raw = lendingFieldsToRaw(funnelFields, "sin-visita", null);
+
+    expect(raw["En Proceso (Derivados)"]).toBeUndefined();
+    expect(raw["Sin Visita (Derivados)"]).toBe(75);
+  });
+
+  it("separa Sin Visita del campo histórico En Proceso y agrega las ramas CMSBio", () => {
+    const raw = lendingFieldsToRaw(funnelFields, "cmsbio", {
+      reAgendadoDerivados: 116,
+      noInteresadoDerivados: 241,
+      noInteresadosContactado: 2539,
+      reAgendadoContactado: 94,
+      noInteresadoContactado: 590,
+    });
+
+    expect(raw["En Proceso (Derivados)"]).toBeUndefined();
+    expect(raw).toMatchObject({
+      "Sin Visita (Derivados)": 75,
+      "Re Agendado (Derivados)": 116,
+      "No Interesado (Derivados)": 241,
+      "No Interesados (Contactado)": 2539,
+      "Re Agendado (Contactado)": 94,
+      "No Interesado (Contactado)": 590,
+    });
+  });
+});
 
 describe("upsertLendingRow", () => {
   it("crea una fila nueva si no existe la Fecha", async () => {
@@ -61,6 +117,34 @@ describe("upsertLendingRow", () => {
 
     const result = await upsertLendingRow("tok", "2026-07-26", { Desembolso: 85 }, fetchFn);
     expect(result).toEqual({ fecha: "2026-07-26", created: false, fieldsWritten: ["Desembolso"] });
+  });
+
+  it("escribe todas las propiedades nuevas del funnel CMSBio", async () => {
+    const calls: Array<{ method: string; url: string; body: any }> = [];
+    const fetchFn = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ method: init?.method ?? "GET", url: String(url), body });
+      if (String(url).includes("/query")) {
+        return new Response(JSON.stringify({ results: [{ id: "existing-page", properties: {} }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const cmsBio = {
+      "Sin Visita (Derivados)": 75,
+      "Re Agendado (Derivados)": 116,
+      "No Interesado (Derivados)": 241,
+      "No Interesados (Contactado)": 2539,
+      "Re Agendado (Contactado)": 94,
+      "No Interesado (Contactado)": 590,
+    };
+    const result = await upsertLendingRow("tok", "2026-09-10", cmsBio, fetchFn);
+
+    expect(result.fieldsWritten).toEqual(Object.keys(cmsBio));
+    const patchCall = calls.find((c) => c.url.endsWith("/pages/existing-page"));
+    expect(patchCall?.body.properties).toEqual(
+      Object.fromEntries(Object.entries(cmsBio).map(([name, value]) => [name, { number: value }])),
+    );
   });
 });
 

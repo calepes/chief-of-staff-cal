@@ -32,6 +32,9 @@ const SIMPLE_LABELS: Record<string, SimpleKey> = {
   // resumen arriba del funnel principal, termina en "TOTAL" con el mismo valor que antes era
   // "Leads" — verificado: Vistos+NoVistos=TOTAL, igual que antes era Vistos+NoVistos=Leads).
   TOTAL: "leads",
+  // CMSBio reemplazó TOTAL por ENVIADOS desde septiembre de 2026. "POP UPS ENVIADOS" no hace
+  // falso positivo porque matchLabelSuffix rechaza residuos con letras.
+  ENVIADOS: "leads",
   VISTOS: "vistos",
   "NO VISTOS": "noVistos",
   "ME INTERESA": "meInteresa",
@@ -94,9 +97,57 @@ export interface LendingParseIssue {
   motivo: string;
 }
 
+export interface LendingCmsBioFields {
+  reAgendadoDerivados: number;
+  noInteresadoDerivados: number;
+  noInteresadosContactado: number;
+  reAgendadoContactado: number;
+  noInteresadoContactado: number;
+}
+
+export type LendingReportFormat = "legacy" | "sin-visita" | "cmsbio";
+
 export interface LendingExtractResult {
   fields: LendingFunnelFields;
+  cmsBioFields: LendingCmsBioFields | null;
+  format: LendingReportFormat;
   issues: LendingParseIssue[];
+}
+
+function extractCmsBioFields(text: string): { fields: LendingCmsBioFields | null; issues: LendingParseIssue[] } {
+  const normalized = normalizeLabel(text);
+  const hasCmsBioMarkers = normalized.includes("RE CONTACTADOS");
+  if (!hasCmsBioMarkers) return { fields: null, issues: [] };
+
+  const pairs = Array.from(
+    normalized.matchAll(/RE AGENDADO\s+([\d.,]+)\s*NO INTERESADO\s*([\d.,]+)/g),
+    (m) => [parseNumber(m[1]), parseNumber(m[2])] as const,
+  );
+  const noInteresadosMatch = /NO INTERESADOS\s+([\d.,]+)/.exec(normalized);
+  const noInteresadosContactado = parseNumber(noInteresadosMatch?.[1] ?? "");
+
+  if (pairs.length !== 2 || pairs.some(([reAgendado, noInteresado]) => reAgendado == null || noInteresado == null) || noInteresadosContactado == null) {
+    return {
+      fields: null,
+      issues: [
+        {
+          campo: "cmsBio",
+          motivo: `ramas de recontacto incompletas (pares: ${pairs.length}, noInteresados: ${noInteresadosContactado ?? "ilegible"})`,
+        },
+      ],
+    };
+  }
+
+  return {
+    fields: {
+      reAgendadoDerivados: pairs[0][0]!,
+      noInteresadoDerivados: pairs[0][1]!,
+      reAgendadoContactado: pairs[1][0]!,
+      noInteresadoContactado: pairs[1][1]!,
+      noInteresadosContactado,
+    },
+    issues: [],
+  };
 }
 
 /**
@@ -126,8 +177,11 @@ export function extractLendingFunnel(text: string): LendingExtractResult {
     rechazado: null,
   };
   const issues: LendingParseIssue[] = [];
+  const cmsBio = extractCmsBioFields(text);
+  issues.push(...cmsBio.issues);
 
   let lastAnchor: SimpleKey | null = null;
+  let usedSinVisita = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -153,6 +207,7 @@ export function extractLendingFunnel(text: string): LendingExtractResult {
     }
 
     if (matchLabelSuffix(line, SIN_VISITA_LABEL) !== null) {
+      usedSinVisita = true;
       if (fields.enProcesoDerivados != null) continue; // ya resuelto (ej. por el "EN PROCESO" viejo)
       const num = parseNumber(lines[i + 1] ?? "");
       if (num === null) {
@@ -186,7 +241,8 @@ export function extractLendingFunnel(text: string): LendingExtractResult {
   // renombró una de las dos ramas a "SIN VISITA", ver arriba). Un branch sin resolver queda null y
   // lo atrapa el chequeo genérico de "campos faltantes" en parseAndValidateLendingReport() más
   // abajo — mismo mecanismo que cualquier otro campo del funnel, sin un caso especial acá.
-  return { fields, issues };
+  const format: LendingReportFormat = cmsBio.fields ? "cmsbio" : usedSinVisita ? "sin-visita" : "legacy";
+  return { fields, cmsBioFields: cmsBio.fields, format, issues };
 }
 
 export interface LendingReconcileResult {
@@ -224,10 +280,49 @@ function checkSum(label: string, parts: Array<[string, number | null]>, total: n
   return null;
 }
 
-export function reconcileLendingFunnel(f: LendingFunnelFields): LendingReconcileResult {
-  const errors = FUNNEL_EQUATIONS.map((eq) => checkSum(eq.label, eq.parts.map((k) => [k, f[k]]), f[eq.total])).filter(
-    (e): e is string => e !== null,
+export function reconcileLendingFunnel(
+  f: LendingFunnelFields,
+  cmsBioFields: LendingCmsBioFields | null = null,
+): LendingReconcileResult {
+  const commonEquations = FUNNEL_EQUATIONS.filter(
+    (eq) => eq.label !== "Derivados+NoDerivados=Contactado" && eq.label !== "Agencia+EnProcesoDerivados=Derivados",
   );
+  const errors = commonEquations
+    .map((eq) => checkSum(eq.label, eq.parts.map((k) => [k, f[k]]), f[eq.total]))
+    .filter((e): e is string => e !== null);
+
+  if (cmsBioFields) {
+    const contactado = checkSum(
+      "Derivados+NoDerivados+NoInteresados+ReAgendado+NoInteresado=Contactado",
+      [
+        ["derivados", f.derivados],
+        ["noDerivados", f.noDerivados],
+        ["noInteresadosContactado", cmsBioFields.noInteresadosContactado],
+        ["reAgendadoContactado", cmsBioFields.reAgendadoContactado],
+        ["noInteresadoContactado", cmsBioFields.noInteresadoContactado],
+      ],
+      f.contactado,
+    );
+    const derivados = checkSum(
+      "Agencia+SinVisita+ReAgendado+NoInteresado=Derivados",
+      [
+        ["agencia", f.agencia],
+        ["sinVisita", f.enProcesoDerivados],
+        ["reAgendadoDerivados", cmsBioFields.reAgendadoDerivados],
+        ["noInteresadoDerivados", cmsBioFields.noInteresadoDerivados],
+      ],
+      f.derivados,
+    );
+    if (contactado) errors.push(contactado);
+    if (derivados) errors.push(derivados);
+  } else {
+    for (const eq of FUNNEL_EQUATIONS.filter(
+      (candidate) => candidate.label === "Derivados+NoDerivados=Contactado" || candidate.label === "Agencia+EnProcesoDerivados=Derivados",
+    )) {
+      const error = checkSum(eq.label, eq.parts.map((k) => [k, f[k]]), f[eq.total]);
+      if (error) errors.push(error);
+    }
+  }
   return { ok: errors.length === 0, errors };
 }
 
@@ -284,16 +379,21 @@ export function parseReportDateFromBody(bodyText: string): string | null {
 }
 
 export type LendingParseOutcome =
-  | { ok: true; fields: LendingFunnelFields }
+  | {
+      ok: true;
+      fields: LendingFunnelFields;
+      cmsBioFields: LendingCmsBioFields | null;
+      format: LendingReportFormat;
+    }
   | { ok: false; errors: string[] };
 
 export function parseAndValidateLendingReport(text: string): LendingParseOutcome {
-  const { fields, issues } = extractLendingFunnel(text);
+  const { fields, cmsBioFields, format, issues } = extractLendingFunnel(text);
   if (issues.length > 0) {
     // Un único campo ilegible (ver deriveMissingField) es recuperable por aritmética — cualquier
     // otra combinación (2+ campos, o "EN PROCESO sin ancla"/conteo raro) sigue rechazando el
     // reporte entero como antes.
-    const derived = issues.length === 1 ? deriveMissingField(fields) : null;
+    const derived = issues.length === 1 && format !== "cmsbio" ? deriveMissingField(fields) : null;
     if (derived) {
       const repaired = { ...fields, [derived.campo]: derived.valor };
       if (reconcileLendingFunnel(repaired).ok) {
@@ -307,7 +407,7 @@ export function parseAndValidateLendingReport(text: string): LendingParseOutcome
             motivoOriginal: issues[0],
           }),
         );
-        return { ok: true, fields: repaired };
+        return { ok: true, fields: repaired, cmsBioFields, format };
       }
     }
     return { ok: false, errors: issues.map((i) => `${i.campo}: ${i.motivo}`) };
@@ -316,9 +416,9 @@ export function parseAndValidateLendingReport(text: string): LendingParseOutcome
   if (missing.length > 0) {
     return { ok: false, errors: [`campos faltantes: ${missing.join(", ")}`] };
   }
-  const reconcile = reconcileLendingFunnel(fields);
+  const reconcile = reconcileLendingFunnel(fields, cmsBioFields);
   if (!reconcile.ok) {
     return { ok: false, errors: reconcile.errors };
   }
-  return { ok: true, fields };
+  return { ok: true, fields, cmsBioFields, format };
 }

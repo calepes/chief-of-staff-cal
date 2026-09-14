@@ -728,6 +728,10 @@ Hay dos mecanismos de proactividad independientes:
     inconsistente entre bloques) — si falta EXACTAMENTE un campo de los 15 y las ecuaciones lo
     determinan sin ambigüedad, se completa por reparación (`deriveMissingField()`) en vez de
     rechazar. "EN PROCESO" aparece 2 veces en el PDF — se resuelve por ancla de contexto, no orden.
+    Desde 2026-09-03 soporta además el formato CMSBio: `ENVIADOS` reemplaza `LEADS`/`TOTAL` y las
+    dos ramas `RE CONTACTADOS` se extraen y reconcilian como cinco nodos adicionales. `SIN VISITA`
+    se guarda en su propia propiedad de Notion y ya no se mezcla con el histórico `En Proceso
+    (Derivados)`. La DB tiene seis propiedades numéricas nuevas para preservar esos nodos exactos.
   - **Gotcha sin auditar, riesgo latente real:** `fillDerivedFields()`/`fillLendingDerivedFields()`
     saltan cualquier derivado D-1 que ya tenga valor — un reenvío del mismo reporte con números
     CORREGIDOS deja el derivado viejo stale (bug real, resuelto solo para Lending vía `onlyFechas`

@@ -1,3 +1,9 @@
+import type {
+  LendingCmsBioFields,
+  LendingFunnelFields,
+  LendingReportFormat,
+} from "./kpi-ingest-lending-pdf.js";
+
 export const KPI_LENDING_DB_ID = "3aac4876-09dd-8164-8905-e287a7b16f40";
 
 // Nombres de propiedad EXACTOS de la DB Notion "KPIs Yape Lending" (bajo el mismo parent page
@@ -15,6 +21,12 @@ const RAW_PROPS = [
   "Derivados",
   "No Derivados",
   "En Proceso (Derivados)",
+  "Sin Visita (Derivados)",
+  "Re Agendado (Derivados)",
+  "No Interesado (Derivados)",
+  "No Interesados (Contactado)",
+  "Re Agendado (Contactado)",
+  "No Interesado (Contactado)",
   "Agencia",
   "Desembolso",
   "En Proceso (Agencia)",
@@ -26,6 +38,42 @@ const RAW_PROPS = [
   "Incremento Agencia (D-1)",
   "Incremento En Proceso (Agencia) (D-1)",
 ] as const;
+
+export function lendingFieldsToRaw(
+  fields: LendingFunnelFields,
+  format: LendingReportFormat,
+  cmsBioFields: LendingCmsBioFields | null,
+): Record<string, number | null> {
+  const raw: Record<string, number | null> = {
+    Leads: fields.leads,
+    "Ofertas Vistas": fields.vistos,
+    "Ofertas No Vistas": fields.noVistos,
+    "Me Interesa": fields.meInteresa,
+    "No Me Interesa": fields.noMeInteresa,
+    "Sin Interacción": fields.sinInteraccion,
+    Contactado: fields.contactado,
+    "No Contactado": fields.noContactado,
+    Derivados: fields.derivados,
+    "No Derivados": fields.noDerivados,
+    Agencia: fields.agencia,
+    Desembolso: fields.desembolso,
+    "En Proceso (Agencia)": fields.enProcesoAgencia,
+    Rechazado: fields.rechazado,
+  };
+  if (format === "legacy") {
+    raw["En Proceso (Derivados)"] = fields.enProcesoDerivados;
+  } else {
+    raw["Sin Visita (Derivados)"] = fields.enProcesoDerivados;
+  }
+  if (cmsBioFields) {
+    raw["Re Agendado (Derivados)"] = cmsBioFields.reAgendadoDerivados;
+    raw["No Interesado (Derivados)"] = cmsBioFields.noInteresadoDerivados;
+    raw["No Interesados (Contactado)"] = cmsBioFields.noInteresadosContactado;
+    raw["Re Agendado (Contactado)"] = cmsBioFields.reAgendadoContactado;
+    raw["No Interesado (Contactado)"] = cmsBioFields.noInteresadoContactado;
+  }
+  return raw;
+}
 
 interface NotionPage {
   id: string;

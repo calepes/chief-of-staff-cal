@@ -1,11 +1,25 @@
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: `${process.env.HOME}/.cos-agent/.env` });
-loadEnv({ path: `${process.env.HOME}/.claude/secrets/apps.env` });
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { parseAndValidateLendingReport } from "../src/proactive/kpi-ingest-lending-pdf.js";
-import { upsertLendingRow, clearLendingFailNote, fillLendingDerivedFields } from "../src/proactive/kpi-lending-notion.js";
+import {
+  upsertLendingRow,
+  clearLendingFailNote,
+  fillLendingDerivedFields,
+  lendingFieldsToRaw,
+} from "../src/proactive/kpi-lending-notion.js";
+
+// Adaptador de entorno para uso manual: permite una ruta compartida explícita y detecta las
+// ubicaciones locales de ambos runtimes sin cambiar el contrato portable del parser/backfill.
+for (const sharedEnvPath of [
+  process.env.JANO_SHARED_ENV_PATH,
+  `${process.env.HOME}/.Codex/secrets/apps.env`,
+  `${process.env.HOME}/.claude/secrets/apps.env`,
+]) {
+  if (sharedEnvPath && existsSync(sharedEnvPath)) loadEnv({ path: sharedEnvPath });
+}
 
 const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse") as {
@@ -30,7 +44,7 @@ async function main(): Promise<void> {
 
   const notionToken = process.env.NOTION_TOKEN;
   if (write && !notionToken) {
-    console.error("Falta NOTION_TOKEN en el entorno (~/.cos-agent/.env o ~/.claude/secrets/apps.env) para --write.");
+    console.error("Falta NOTION_TOKEN en ~/.cos-agent/.env o en JANO_SHARED_ENV_PATH para --write.");
     process.exit(1);
   }
 
@@ -59,23 +73,7 @@ async function main(): Promise<void> {
     for (const [k, v] of Object.entries(result.fields)) console.log(`  ${k}: ${v}`);
 
     if (write) {
-      const raw = {
-        Leads: result.fields.leads,
-        "Ofertas Vistas": result.fields.vistos,
-        "Ofertas No Vistas": result.fields.noVistos,
-        "Me Interesa": result.fields.meInteresa,
-        "No Me Interesa": result.fields.noMeInteresa,
-        "Sin Interacción": result.fields.sinInteraccion,
-        Contactado: result.fields.contactado,
-        "No Contactado": result.fields.noContactado,
-        Derivados: result.fields.derivados,
-        "No Derivados": result.fields.noDerivados,
-        "En Proceso (Derivados)": result.fields.enProcesoDerivados,
-        Agencia: result.fields.agencia,
-        Desembolso: result.fields.desembolso,
-        "En Proceso (Agencia)": result.fields.enProcesoAgencia,
-        Rechazado: result.fields.rechazado,
-      };
+      const raw = lendingFieldsToRaw(result.fields, result.format, result.cmsBioFields);
       const up = await upsertLendingRow(notionToken!, fecha, raw);
       await clearLendingFailNote(notionToken!, fecha);
       console.log(`  → Notion: ${up.created ? "creado" : "actualizado"} (${up.fieldsWritten.join(", ")})`);

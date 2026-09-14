@@ -1,5 +1,22 @@
 # CHANGELOG — Jano
 
+## 2026-09-13 — Lending: nuevo funnel CMSBio y backfill de Notion
+
+CMSBio cambió el PDF de Lending: `ENVIADOS` reemplazó `LEADS`/`TOTAL` y aparecieron dos ramas de
+`RE CONTACTADOS`. El parser anterior encontraba los 15 nodos viejos, pero rechazaba el reporte por
+`leads` faltante o porque las ecuaciones antiguas ya no cerraban.
+
+- `kpi-ingest-lending-pdf.ts` distingue `legacy`, `sin-visita` y `cmsbio`; extrae cinco nodos nuevos
+  y valida las ecuaciones completas de Contactado y Derivados sin usar porcentajes ni posiciones
+  visuales.
+- `kpi-lending-notion.ts` centraliza el payload usado por el cron y el script manual. `Sin Visita
+  (Derivados)` queda separado del campo histórico `En Proceso (Derivados)`.
+- La DB "KPIs Yape Lending" ganó seis propiedades numéricas. Se migraron 12 filas desde 2026-08-17
+  y se completaron los reportes CMSBio de 2026-09-03 y 2026-09-07 a 2026-09-10 desde sus PDFs
+  originales. Las marcas automáticas de fallo se limpiaron y los derivados D-1 disponibles se
+  recalcularon; 2026-09-07 sigue sin D-1 porque no existe reporte del 2026-09-06.
+- Regresión con texto real del PDF del 2026-09-10 y cobertura del mapping para los tres formatos.
+
 ## 2026-09-05/06 — Research de competencia: Apify (Facebook/TikTok), Pricing/vs-Yape, paralelización, ads de Yape como referencia
 
 Sesión larga sobre `research-competencia*` (standalone, ver `CLAUDE.md` sección homónima para el

@@ -28,12 +28,17 @@ import {
   type DerivedFillReport,
   type UpsertResult,
 } from "./kpi-ingest-notion.js";
-import { parseReportDateFromBody, parseAndValidateLendingReport, type LendingFunnelFields } from "./kpi-ingest-lending-pdf.js";
+import {
+  parseReportDateFromBody,
+  parseAndValidateLendingReport,
+  type LendingFunnelFields,
+} from "./kpi-ingest-lending-pdf.js";
 import {
   upsertLendingRow,
   markLendingReportFailed,
   clearLendingFailNote,
   fillLendingDerivedFields,
+  lendingFieldsToRaw,
   type DerivedFillReport as LendingDerivedFillReport,
 } from "./kpi-lending-notion.js";
 import { checkKpiCardDaily } from "./kpi-card-daily.js";
@@ -269,26 +274,6 @@ export function formatLendingSuccessReport(fecha: string, fields: LendingFunnelF
 
 function formatLendingFailedReport(fecha: string, detalle: string): string {
   return `⚠️ <b>Funnel Yape Lending — reporte fallido</b>\n📅 ${escapeHtml(fecha)}\n${escapeHtml(detalle)}\nNo se tocaron los KPIs de esa fecha (quedan en 0 filas nuevas). Revisar el PDF manualmente — el layout puede haber cambiado.`;
-}
-
-function lendingFieldsToRaw(f: LendingFunnelFields): Record<string, number | null> {
-  return {
-    Leads: f.leads,
-    "Ofertas Vistas": f.vistos,
-    "Ofertas No Vistas": f.noVistos,
-    "Me Interesa": f.meInteresa,
-    "No Me Interesa": f.noMeInteresa,
-    "Sin Interacción": f.sinInteraccion,
-    Contactado: f.contactado,
-    "No Contactado": f.noContactado,
-    Derivados: f.derivados,
-    "No Derivados": f.noDerivados,
-    "En Proceso (Derivados)": f.enProcesoDerivados,
-    Agencia: f.agencia,
-    Desembolso: f.desembolso,
-    "En Proceso (Agencia)": f.enProcesoAgencia,
-    Rechazado: f.rechazado,
-  };
 }
 
 function formatErrorReport(accion: string, motivo: string, sugerencia: string): string {
@@ -623,7 +608,11 @@ export async function ingestLendingReportForDate(
     return { ok: false };
   }
 
-  const result = await upsertLendingRow(notionToken, fecha, lendingFieldsToRaw(parsed.fields));
+  const result = await upsertLendingRow(
+    notionToken,
+    fecha,
+    lendingFieldsToRaw(parsed.fields, parsed.format, parsed.cmsBioFields),
+  );
   await clearLendingFailNote(notionToken, fecha);
   const derived: LendingDerivedFillReport = await fillLendingDerivedFields(notionToken, [fecha]);
 
