@@ -254,6 +254,40 @@ describe("addBook", () => {
     expect(body.properties.Estado.status.name).toBe("Reading");
   });
 
+  it("writes Google Books pageCount when totalPaginas is omitted", async () => {
+    process.env.GOOGLE_BOOKS_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [{
+          volumeInfo: {
+            title: "Cracking the PM Interview",
+            authors: ["Gayle Laakmann McDowell", "Jackie Bavaro"],
+            pageCount: 363,
+            imageLinks: { thumbnail: "https://books.google.com/thumb.jpg" },
+          },
+        }],
+      }),
+    }));
+    mockSpawn.mockReturnValue({
+      status: 0,
+      stdout: JSON.stringify({ id: "new-id", url: "https://notion.so/new" }),
+      stderr: "",
+    } as ReturnType<typeof childProcess.spawnSync>);
+
+    const { addBook } = await import("./books.js");
+    await addBook({
+      name: "Cracking the PM Interview",
+      estado: "Goal",
+      author: "Gayle Laakmann McDowell",
+    });
+    delete process.env.GOOGLE_BOOKS_API_KEY;
+
+    const ntnArgs = mockSpawn.mock.calls.at(-1)?.[1] as string[];
+    const body = JSON.parse(ntnArgs[ntnArgs.indexOf("-d") + 1]);
+    expect(body.properties["Total Páginas"].number).toBe(363);
+  });
+
   it("writes URL to the real 'URL' property, not 'userDefined:URL'", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 302, redirected: false }));
     mockSpawn.mockReturnValue({

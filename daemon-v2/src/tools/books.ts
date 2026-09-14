@@ -30,12 +30,18 @@ export interface BookResult {
   isbn?: string;
 }
 
-export async function searchCover(
+interface BookMetadata {
+  coverUrl: string | null;
+  totalPaginas?: number;
+}
+
+async function searchBookMetadata(
   isbn?: string,
   title?: string,
   author?: string
-): Promise<string | null> {
+): Promise<BookMetadata> {
   const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+  let totalPaginas: number | undefined;
 
   // Primary: Google Books API (higher quality, reliable)
   const gbQuery = isbn
@@ -51,12 +57,20 @@ export async function searchCover(
         { signal: AbortSignal.timeout(8_000) }
       );
       const data = (await res.json()) as {
-        items?: Array<{ volumeInfo: { imageLinks?: { thumbnail?: string } } }>;
+        items?: Array<{ volumeInfo: { pageCount?: number; imageLinks?: { thumbnail?: string } } }>;
       };
-      const thumb = data?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
+      const volumeInfo = data?.items?.[0]?.volumeInfo;
+      const thumb = volumeInfo?.imageLinks?.thumbnail;
+      const pageCount = volumeInfo?.pageCount;
+      if (typeof pageCount === "number" && Number.isInteger(pageCount) && pageCount > 0) {
+        totalPaginas = pageCount;
+      }
       if (thumb) {
         // zoom=6 = large image; strip curl effect. Replace https fallback (Notion blocks HTTP).
-        return thumb.replace("zoom=1", "zoom=6").replace("&edge=curl", "").replace("http://", "https://");
+        return {
+          coverUrl: thumb.replace("zoom=1", "zoom=6").replace("&edge=curl", "").replace("http://", "https://"),
+          totalPaginas,
+        };
       }
     } catch {
       // fall through to Open Library
@@ -71,7 +85,7 @@ export async function searchCover(
         method: "HEAD",
         signal: AbortSignal.timeout(5_000),
       });
-      if (res.ok) return url;
+      if (res.ok) return { coverUrl: url, totalPaginas };
     } catch {
       // fall through to Goodreads
     }
@@ -95,13 +109,21 @@ export async function searchCover(
       const match = html.match(
         /https?:\/\/[^"'\s]*compressed\.photo\.goodreads\.com\/books\/\d+i\/\d+\.[a-z]+/i
       );
-      if (match) return match[0].replace(/^http:/, "https:");
+      if (match) return { coverUrl: match[0].replace(/^http:/, "https:"), totalPaginas };
     } catch {
       // no cover found
     }
   }
 
-  return null;
+  return { coverUrl: null, totalPaginas };
+}
+
+export async function searchCover(
+  isbn?: string,
+  title?: string,
+  author?: string
+): Promise<string | null> {
+  return (await searchBookMetadata(isbn, title, author)).coverUrl;
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
@@ -440,8 +462,12 @@ export async function addBook(params: AddBookParams): Promise<string> {
   };
 
   let coverUrl: string | null = null;
+  let resolvedTotalPaginas = totalPaginas;
   if (fetchCover) {
-    coverUrl = await searchCover(isbn, name);
+    const metadata = await searchBookMetadata(isbn, name, author);
+    coverUrl = metadata.coverUrl;
+    resolvedTotalPaginas ??= metadata.totalPaginas;
+    if (resolvedTotalPaginas) properties["Total Páginas"] = { number: resolvedTotalPaginas };
     if (coverUrl) {
       body.cover = { type: "external", external: { url: coverUrl } };
       body.icon  = { type: "external", external: { url: coverUrl } };
@@ -453,7 +479,7 @@ export async function addBook(params: AddBookParams): Promise<string> {
 
   const page = res.data as { id: string; url: string };
   const coverLine = coverUrl ? "\n🖼️ Cover: cargado automáticamente" : "";
-  const paginasLine = totalPaginas ? ` · ${totalPaginas} págs` : "";
+  const paginasLine = resolvedTotalPaginas ? ` · ${resolvedTotalPaginas} págs` : "";
 
   for (const p of pending) addPendingRelation(page.id, p.tipo, p.nombre);
 
