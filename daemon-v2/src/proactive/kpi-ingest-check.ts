@@ -66,6 +66,8 @@ export interface KpiIngestState {
   lastErrorNotified: Record<string, number>;
   /** Fechas para las que ya se mandó la tarjeta automática (KPIs diarios — TRX/DAU). */
   cardSent: string[];
+  /** Fechas cuya tarjeta falló después de procesar el PDF y deben reintentarse. */
+  cardPending: string[];
   /** Fechas para las que ya se mandó la tarjeta de Lending — array propio, no comparte
    * dedup con `cardSent` (dominios y DBs distintas, aunque coincida la fecha string). */
   lendingCardSent: string[];
@@ -84,10 +86,11 @@ export function readState(path: string): KpiIngestState {
       pending: parsed.pending ?? {},
       lastErrorNotified: parsed.lastErrorNotified ?? {},
       cardSent: parsed.cardSent ?? [],
+      cardPending: parsed.cardPending ?? [],
       lendingCardSent: parsed.lendingCardSent ?? [],
     };
   } catch {
-    return { processed: [], pending: {}, lastErrorNotified: {}, cardSent: [], lendingCardSent: [] };
+    return { processed: [], pending: {}, lastErrorNotified: {}, cardSent: [], cardPending: [], lendingCardSent: [] };
   }
 }
 
@@ -376,6 +379,24 @@ export async function checkKpiIngest(opts: CheckKpiIngestOpts): Promise<void> {
     const statePath = opts.statePath ?? defaultStatePath();
     const state = readState(statePath);
 
+    for (const fecha of [...state.cardPending]) {
+      try {
+        if (await checkKpiCardDaily({
+          botToken: opts.botToken,
+          chatId: opts.chatId,
+          notionToken: opts.notionToken,
+          fecha,
+          notifyOnFailure: false,
+        })) {
+          if (!state.cardSent.includes(fecha)) state.cardSent.push(fecha);
+          state.cardPending = state.cardPending.filter((pending) => pending !== fecha);
+        }
+      } catch (err) {
+        console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_daily_retry_failed", fecha, err: String(err) }));
+      }
+    }
+    writeState(statePath, state);
+
     await pollAndProcess(state, statePath, opts.gmail, searchSelfServiceEmails, processCsvMessage, opts, "csv");
     await pollAndProcess(state, statePath, opts.gmail, searchSeguimientoDiarioEmails, processPdfMessage, opts, "pdf");
     await pollAndProcess(state, statePath, opts.gmail, searchLendingReportEmails, processLendingMessage, opts, "lending");
@@ -386,6 +407,10 @@ export async function checkKpiIngest(opts: CheckKpiIngestOpts): Promise<void> {
     }
     if (state.cardSent.length > MAX_CARD_SENT) {
       state.cardSent = state.cardSent.slice(-MAX_CARD_SENT);
+      writeState(statePath, state);
+    }
+    if (state.cardPending.length > MAX_CARD_SENT) {
+      state.cardPending = state.cardPending.slice(-MAX_CARD_SENT);
       writeState(statePath, state);
     }
     if (state.lendingCardSent.length > MAX_CARD_SENT) {
@@ -540,9 +565,13 @@ async function processPdfMessage(id: string, state: KpiIngestState, opts: CheckK
     // ingesta falló, ni bloquear markProcessed de un mail ya procesado con éxito).
     if (!state.cardSent.includes(fecha)) {
       try {
-        await checkKpiCardDaily({ botToken, chatId, notionToken, fecha });
-        state.cardSent.push(fecha);
+        if (await checkKpiCardDaily({ botToken, chatId, notionToken, fecha })) {
+          state.cardSent.push(fecha);
+        } else if (!state.cardPending.includes(fecha)) {
+          state.cardPending.push(fecha);
+        }
       } catch (err) {
+        if (!state.cardPending.includes(fecha)) state.cardPending.push(fecha);
         console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_daily_trigger_failed", fecha, err: String(err) }));
       }
     }

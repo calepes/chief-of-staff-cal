@@ -532,10 +532,11 @@ export function buildSdkTools(deps: ToolDeps) {
         if (!chatId || !botToken) return asText({ status: "error", error: "No chatId/token disponible" });
         if (!notionToken) return asText({ status: "error", error: "NOTION_TOKEN no configurado" });
         const lista = fechas && fechas.length ? fechas : [undefined];
+        let sent = true;
         for (const fecha of lista) {
-          await checkKpiCardDaily({ botToken, chatId, notionToken, fecha });
+          if (!(await checkKpiCardDaily({ botToken, chatId, notionToken, fecha }))) sent = false;
         }
-        return asText({ status: "sent", fechas: fechas ?? ["hoy"] });
+        return asText({ status: sent ? "sent" : "failed", fechas: fechas ?? ["hoy"] });
       },
     ),
     tool(

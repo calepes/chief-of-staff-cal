@@ -71,18 +71,20 @@ export interface CheckKpiCardDailyOpts {
   notionToken: string;
   /** Fecha YYYY-MM-DD a consultar. Sin esto, usa la fila más reciente (hoy). */
   fecha?: string;
+  /** Los reintentos del cron ya notificaron el primer fallo; siguen registrando logs sin spam. */
+  notifyOnFailure?: boolean;
 }
 
-export async function checkKpiCardDaily(opts: CheckKpiCardDailyOpts): Promise<void> {
-  const { botToken, chatId, notionToken, fecha } = opts;
+export async function checkKpiCardDaily(opts: CheckKpiCardDailyOpts): Promise<boolean> {
+  const { botToken, chatId, notionToken, fecha, notifyOnFailure = true } = opts;
   const motivoFecha = fecha ?? "hoy";
 
   let kpis: DailyKpis;
   try {
     kpis = await fetchDailyKpis(notionToken, fetch, fecha);
   } catch (err) {
-    await notifyFailure(botToken, chatId, `no pude leer los KPIs de ${motivoFecha} desde Notion`, err);
-    return;
+    await notifyFailure(botToken, chatId, `no pude leer los KPIs de ${motivoFecha} desde Notion`, err, notifyOnFailure);
+    return false;
   }
 
   let imagePath: string;
@@ -91,16 +93,17 @@ export async function checkKpiCardDaily(opts: CheckKpiCardDailyOpts): Promise<vo
     imagePath = join(tmpdir(), `kpi-card-${fecha ?? todayIso()}-${randomUUID()}.png`);
     await writeFile(imagePath, png);
   } catch (err) {
-    await notifyFailure(botToken, chatId, `no pude generar la imagen de la tarjeta de ${motivoFecha}`, err);
-    return;
+    await notifyFailure(botToken, chatId, `no pude generar la imagen de la tarjeta de ${motivoFecha}`, err, notifyOnFailure);
+    return false;
   }
 
   const sent = await enviarFotoLocal(botToken, chatId, imagePath, "kpi-card.png");
   if (!sent.ok) {
-    await notifyFailure(botToken, chatId, `no pude mandarte la tarjeta de ${motivoFecha} por Telegram`, sent.error);
+    await notifyFailure(botToken, chatId, `no pude mandarte la tarjeta de ${motivoFecha} por Telegram`, sent.error, notifyOnFailure);
   }
 
   await unlink(imagePath).catch(() => {});
+  return sent.ok;
 }
 
 function todayIso(): string {
@@ -112,8 +115,10 @@ async function notifyFailure(
   chatId: number,
   motivo: string,
   err: unknown,
+  notify: boolean,
 ): Promise<void> {
   console.error(JSON.stringify({ ts: Date.now(), msg: "kpi_card_daily_failure", motivo, err: String(err) }));
+  if (!notify) return;
   const text = `⚠️ No pude armar la tarjeta de KPIs (${motivo}). Revisa los logs del daemon.`;
   try {
     await sendMessage(botToken, { chatId, text });

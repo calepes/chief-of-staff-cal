@@ -115,8 +115,9 @@ describe("checkKpiCardDaily", () => {
   it("manda la tarjeta cuando todo sale bien", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(notionResponse()), { status: 200 })));
 
-    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
+    const sent = await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
 
+    expect(sent).toBe(true);
     expect(renderKpiCardImage).toHaveBeenCalledTimes(1);
     expect(enviarFotoLocal).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalled();
@@ -125,11 +126,26 @@ describe("checkKpiCardDaily", () => {
   it("avisa por texto si falla la consulta a Notion", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
 
-    await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
+    const sent = await checkKpiCardDaily({ botToken: "tok", chatId: 123, notionToken: "ntn" });
 
+    expect(sent).toBe(false);
     expect(renderKpiCardImage).not.toHaveBeenCalled();
     expect(enviarFotoLocal).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("permite reintentar en silencio después del primer aviso", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
+
+    const sent = await checkKpiCardDaily({
+      botToken: "tok",
+      chatId: 123,
+      notionToken: "ntn",
+      notifyOnFailure: false,
+    });
+
+    expect(sent).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("avisa por texto si falla el render de la imagen", async () => {
