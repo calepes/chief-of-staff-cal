@@ -174,12 +174,13 @@ async function processEntity(
       }),
       fetchMetaAdsText(entity, timeframeDias).catch((err) => {
         console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_meta_ads_error", entityId: entity.id, err: String(err) }));
-        return { texto: null, creativos: [] as MetaAdCreative[] };
+        return { texto: null, creativos: [] as MetaAdCreative[], status: "unavailable" as const };
       }),
     ]).then(([google, meta]) => ({
       texto: [google.texto, meta.texto].filter((t): t is string => !!t).join("\n\n") || null,
       googleCreativos: google.creativos,
       metaCreativos: meta.creativos,
+      metaStatus: meta.status,
     }));
     const adsBlockWithDeadline = raceWithLoggedTimeout(
       adsBlockPromise, ADS_TIMEOUT_MS, "research_competencia_ads_timeout", entity.id,
@@ -225,7 +226,10 @@ async function processEntity(
       facebookFollowersPromise,
       historyTextPromise,
     ]);
-    const adsKpis = computeAdsKpis(adsBlock?.googleCreativos ?? [], adsBlock?.metaCreativos ?? [], timeframeDias);
+    const adsKpis = computeAdsKpis(
+      adsBlock?.googleCreativos ?? [], adsBlock?.metaCreativos ?? [], timeframeDias, new Date(),
+      adsBlock?.metaStatus ?? "unavailable",
+    );
     const facts: MechanicalFacts = {
       ios: ios ? { version: ios.version, rating: ios.rating, releaseNotes: ios.releaseNotes } : null,
       android: android ? { version: android.version, rating: android.rating, releaseNotes: android.releaseNotes } : null,
@@ -361,7 +365,7 @@ export async function runResearchCompetencia(opts: RunOpts = {}): Promise<RunRes
           fetchAdsText(YAPE_ADS_REFERENCE, timeframeDias),
           fetchMetaAdsText(YAPE_ADS_REFERENCE, timeframeDias),
         ]);
-        return computeAdsKpis(google.creativos, meta.creativos, timeframeDias);
+        return computeAdsKpis(google.creativos, meta.creativos, timeframeDias, new Date(), meta.status);
       })().catch((err) => {
         console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_yape_ads_error", err: String(err) }));
         return null;

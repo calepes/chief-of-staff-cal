@@ -188,10 +188,14 @@ function tableRow(cells: string[]): unknown {
 }
 
 function adsKpisRow(nombre: string, k: AdsKpis | undefined): unknown {
+  const meta = !k ? "—"
+    : k.meta.status === "unavailable" ? "N/D"
+    : k.meta.status === "not_configured" ? "—"
+    : `${k.meta.nuevos} / ${k.meta.existentes}`;
   return tableRow([
     nombre,
     k ? `${k.google.nuevos} / ${k.google.existentes}` : "—",
-    k ? `${k.meta.nuevos} / ${k.meta.existentes}` : "—",
+    meta,
     k?.duracionPromedioDias != null ? String(k.duracionPromedioDias) : "—",
     k ? `${k.mixFormato.imagen} / ${k.mixFormato.display} / ${k.mixFormato.desconocido}` : "—",
   ]);

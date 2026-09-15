@@ -1,5 +1,6 @@
 import type { EntityConfig } from "./research-competencia-entities.js";
 import type { MetaAdCreative } from "./research-competencia-meta-ads.js";
+import type { MetaAdsStatus } from "./research-competencia-meta-ads.js";
 import type { AdsKpis } from "./research-competencia-types.js";
 
 /**
@@ -352,6 +353,7 @@ export function computeAdsKpis(
   meta: MetaAdCreative[],
   timeframeDias: number,
   ahora = new Date(),
+  metaStatus: MetaAdsStatus = "available",
 ): AdsKpis {
   const desdeCorte = new Date(ahora.getTime() - timeframeDias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const nuevosGoogle = google.filter((a) => esNuevo(a, timeframeDias, ahora)).length;
@@ -371,7 +373,11 @@ export function computeAdsKpis(
     creativosActivos: google.length + meta.length,
     campanasNuevas: nuevosGoogle + nuevosMeta,
     google: { nuevos: nuevosGoogle, existentes: google.length - nuevosGoogle },
-    meta: { nuevos: nuevosMeta, existentes: meta.length - nuevosMeta },
+    meta: {
+      nuevos: nuevosMeta,
+      existentes: meta.length - nuevosMeta,
+      ...(metaStatus === "available" ? {} : { status: metaStatus }),
+    },
     duracionPromedioDias,
     mixFormato,
   };

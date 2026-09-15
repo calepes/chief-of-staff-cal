@@ -66,7 +66,12 @@ export interface AdsKpis {
   campanasNuevas: number;
   /** Split por red — nuevos/existentes pedido por Cal para el informe (antes solo el total combinado de arriba). */
   google: { nuevos: number; existentes: number };
-  meta: { nuevos: number; existentes: number };
+  meta: {
+    nuevos: number;
+    existentes: number;
+    /** Ausente = lectura confirmada. `unavailable` evita presentar una falla transitoria como 0. */
+    status?: "unavailable" | "not_configured";
+  };
   duracionPromedioDias: number | null;
   mixFormato: { imagen: number; display: number; desconocido: number };
 }

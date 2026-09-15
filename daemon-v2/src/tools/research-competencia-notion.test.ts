@@ -157,6 +157,20 @@ describe("buildAdsKpisBlocks", () => {
     const blocks = buildAdsKpisBlocks([entityResult({})], kpisYape) as any[];
     expect(blocks.find((b) => b.type === "table")).toBeDefined();
   });
+
+  it("muestra N/D en Meta cuando la fuente no pudo verificarse", () => {
+    const kpisYape: AdsKpis = {
+      creativosActivos: 40, campanasNuevas: 1,
+      google: { nuevos: 1, existentes: 39 },
+      meta: { nuevos: 0, existentes: 0, status: "unavailable" },
+      duracionPromedioDias: 10, mixFormato: { imagen: 20, display: 20, desconocido: 0 },
+    };
+    const blocks = buildAdsKpisBlocks([], kpisYape) as any[];
+    const tabla = blocks.find((b) => b.type === "table");
+    const filaYape = tabla.table.children[1];
+
+    expect(filaYape.table_row.cells[2][0].text.content).toBe("N/D");
+  });
 });
 
 describe("buildBattlecardBlocks", () => {

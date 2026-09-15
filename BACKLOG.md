@@ -6,6 +6,15 @@
 
 ## Pendientes
 
+### Surgió en sesión 2026-09-14
+- [ ] **Crear capacidades de coaching ejecutivo basadas en el podcast *The Look & Sound of Leadership***
+  - Construir una base de conocimiento trazable desde episodios, notas y transcripciones disponibles legalmente, preservando episodio y enlace como fuente de cada recomendación.
+  - Diseñar flujos de coaching para preparar conversaciones difíciles, dar y recibir feedback, manejar presencia ejecutiva, delegar, influir y desarrollar equipos.
+  - Permitir sesiones estructuradas: aclarar objetivo y contexto, formular preguntas de reflexión, proponer ejercicios o guiones, acordar una acción y hacer seguimiento posterior.
+  - Separar claramente las enseñanzas de la fuente, la interpretación de Jano y las recomendaciones adaptadas a Cal; evitar atribuir al podcast contenido no verificado.
+  - Definir límites: coaching profesional, no terapia ni diagnóstico; mantener confidencialidad y pedir confirmación antes de guardar notas sensibles o crear tareas.
+  - Antes de implementar: inventariar fuentes accesibles, definir arquitectura portable Claude Code/Codex, mecanismo de actualización del conocimiento, UX en Telegram y criterios de evaluación con escenarios reales.
+
 ### Surgió en sesión 2026-08-22
 - [ ] **Ajustar el cron de salud (scheduleHealthSyncCheck / health-sync-check) para asegurar que la data de Apple Health esté al día y genere reportes de estado de salud**
 

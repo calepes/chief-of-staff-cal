@@ -5,6 +5,8 @@ import {
   parseMetaAdCards,
   formatMetaAdsText,
   fetchMetaAdsText,
+  fetchMetaAdsQueryWithRetry,
+  metaPageConfirmsEmpty,
   type RawMetaAdCard,
 } from "./research-competencia-meta-ads.js";
 import type { EntityConfig } from "./research-competencia-entities.js";
@@ -152,5 +154,58 @@ describe("fetchMetaAdsText", () => {
     const { texto, creativos } = await fetchMetaAdsText(ENTITY, 7, { fetchQuery: async () => [tigoCard()] });
     expect(texto).toBeNull();
     expect(creativos).toEqual([]);
+  });
+
+  it("marca la fuente unavailable si la consulta falla, en vez de reportar un cero confirmado", async () => {
+    const result = await fetchMetaAdsText(ENTITY, 7, {
+      fetchQuery: async () => { throw new Error("Meta no cargó tarjetas"); },
+    });
+
+    expect(result.status).toBe("unavailable");
+    expect(result.creativos).toEqual([]);
+  });
+});
+
+describe("fetchMetaAdsQueryWithRetry", () => {
+  it("reintenta una respuesta vacía ambigua y conserva el resultado del siguiente intento", async () => {
+    let intento = 0;
+    const cards = await fetchMetaAdsQueryWithRetry("Yape Bolivia", async () => {
+      intento++;
+      return intento === 1
+        ? { cards: [], confirmedEmpty: false }
+        : { cards: [tigoCard()], confirmedEmpty: false };
+    }, { maxAttempts: 3, wait: async () => {} });
+
+    expect(intento).toBe(2);
+    expect(cards).toHaveLength(1);
+  });
+
+  it("acepta un cero cuando la página confirma explícitamente que no hay resultados", async () => {
+    let intento = 0;
+    const cards = await fetchMetaAdsQueryWithRetry("Sin anuncios", async () => {
+      intento++;
+      return { cards: [], confirmedEmpty: true };
+    }, { maxAttempts: 3, wait: async () => {} });
+
+    expect(intento).toBe(1);
+    expect(cards).toEqual([]);
+  });
+
+  it("falla tras agotar los reintentos de respuestas vacías ambiguas", async () => {
+    await expect(fetchMetaAdsQueryWithRetry("Yape Bolivia", async () => (
+      { cards: [], confirmedEmpty: false }
+    ), { maxAttempts: 2, wait: async () => {} })).rejects.toThrow(/respuesta vacía ambigua/i);
+  });
+});
+
+describe("metaPageConfirmsEmpty", () => {
+  it("reconoce el estado vacío explícito de Meta en español o inglés", () => {
+    expect(metaPageConfirmsEmpty("No se encontraron anuncios que coincidan con tu búsqueda")).toBe(true);
+    expect(metaPageConfirmsEmpty("We didn't find any results matching your search")).toBe(true);
+  });
+
+  it("no confunde una página incompleta o un bloqueo con un cero confirmado", () => {
+    expect(metaPageConfirmsEmpty("Biblioteca de anuncios de Meta")).toBe(false);
+    expect(metaPageConfirmsEmpty("Something went wrong")).toBe(false);
   });
 });

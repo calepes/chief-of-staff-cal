@@ -10,8 +10,8 @@ import type { CfKv } from "../cf-kv.js";
 // puntual reusando ese mismo script — Jano no vuelve a parsear Cookies.binarycookies directamente.
 const HOME = homedir();
 const DOMAINS_CONFIG_PATH = `${HOME}/.claude/config/cookie-jar-domains.json`;
-const NODE_FDA = `${HOME}/.claude/bin/node-fda`;
-const SYNC_SCRIPT = `${HOME}/.claude/scripts/sync-safari-cookies.mjs`;
+const SYNC_OUTPUT_PATH = `${HOME}/.cookie-jar-sync/logs/sync-safari-cookies.out.log`;
+const SYNC_LAUNCH_AGENT = "com.cal.cookie-jar-sync";
 const SYNC_TIMEOUT_MS = 45_000;
 
 export const COOKIE_JAR_NAMESPACE_ID = "f6bfb90d3dbc48a29b4dc431e9d83c5b";
@@ -44,14 +44,14 @@ interface DomainsConfig {
   domains: { domain: string }[];
 }
 
-function loadConfig(): DomainsConfig {
-  const parsed = JSON.parse(readFileSync(DOMAINS_CONFIG_PATH, "utf8"));
+function loadConfig(path = DOMAINS_CONFIG_PATH): DomainsConfig {
+  const parsed = JSON.parse(readFileSync(path, "utf8"));
   return { ttlSeconds: parsed.ttlSeconds ?? 86400, domains: Array.isArray(parsed.domains) ? parsed.domains : [] };
 }
 
-function saveConfig(cfg: DomainsConfig): void {
+function saveConfig(cfg: DomainsConfig, path = DOMAINS_CONFIG_PATH): void {
   const out = { _comment: CONFIG_COMMENT, ttlSeconds: cfg.ttlSeconds, domains: cfg.domains };
-  writeFileSync(DOMAINS_CONFIG_PATH, JSON.stringify(out, null, 2) + "\n");
+  writeFileSync(path, JSON.stringify(out, null, 2) + "\n");
 }
 
 // true si candidateDomain y configuredDomain son el mismo dominio o uno es subdominio del otro.
@@ -80,63 +80,137 @@ export async function getCookieHeader(hostname: string, kv: CfKv): Promise<strin
   return kv.getText(`cookie:${domain}`);
 }
 
-function runSyncScript(): Promise<{ ok: boolean; output: string }> {
+function kickstartSyncLaunchAgent(): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn(NODE_FDA, [SYNC_SCRIPT], { stdio: ["ignore", "pipe", "pipe"] });
+    const uid = process.getuid?.();
+    if (uid == null) {
+      resolve({ ok: false, output: "UID de usuario no disponible" });
+      return;
+    }
+    const child = spawn("/bin/launchctl", ["kickstart", "-k", `gui/${uid}/${SYNC_LAUNCH_AGENT}`], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let out = "";
     let err = "";
     child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
     child.stderr.on("data", (d: Buffer) => { err += d.toString(); });
-    const timer = setTimeout(() => { child.kill(); resolve({ ok: false, output: "timeout esperando la sincronización" }); }, SYNC_TIMEOUT_MS);
     child.on("close", (code) => {
-      clearTimeout(timer);
       resolve({ ok: code === 0, output: code === 0 ? out : (err || out) });
     });
     child.on("error", (e) => {
-      clearTimeout(timer);
       resolve({ ok: false, output: e.message });
     });
   });
 }
 
+interface CookieJarSyncRuntime {
+  outputPath?: string;
+  kickstart?: () => Promise<{ ok: boolean; output: string }>;
+  wait?: (ms: number) => Promise<void>;
+  timeoutMs?: number;
+}
+
+// El lector de cookies necesita Full Disk Access. macOS no hereda ese permiso cuando Jano ejecuta
+// node-fda como hijo directo, así que se despierta el LaunchAgent que ya tiene el contexto TCC válido
+// y se observa únicamente la porción nueva de su log para no confundirla con un éxito anterior.
+export async function runCookieJarSync(
+  domain: string,
+  runtime: CookieJarSyncRuntime = {},
+): Promise<{ ok: boolean; output: string }> {
+  const outputPath = runtime.outputPath ?? SYNC_OUTPUT_PATH;
+  const kickstart = runtime.kickstart ?? kickstartSyncLaunchAgent;
+  const wait = runtime.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const timeoutMs = runtime.timeoutMs ?? SYNC_TIMEOUT_MS;
+  let before = "";
+  try { before = readFileSync(outputPath, "utf8"); } catch { /* el primer run puede no tener log */ }
+
+  const started = await kickstart();
+  if (!started.ok) return started;
+
+  const deadline = Date.now() + timeoutMs;
+  const domainPrefix = `[sync-safari-cookies] ${domain}:`;
+  do {
+    let full = "";
+    try { full = readFileSync(outputPath, "utf8"); } catch { /* esperar a que aparezca */ }
+    const appended = full.startsWith(before) ? full.slice(before.length) : full;
+    const domainLine = appended.split("\n").find((line) => line.startsWith(domainPrefix));
+    if (domainLine) return { ok: true, output: `${domainLine}\n` };
+    if (Date.now() >= deadline) break;
+    await wait(250);
+  } while (true);
+
+  return { ok: false, output: `timeout esperando el resultado de ${domain}` };
+}
+
 export interface AddDomainResult {
   added: boolean;
   synced: boolean;
+  reason: "invalid_domain" | "blocked_domain" | "sync_failed" | "no_cookie" | "synced";
   message: string;
 }
 
+interface AddDomainRuntime {
+  configPath?: string;
+  sync?: (domain: string) => Promise<{ ok: boolean; output: string }>;
+}
+
 // Agrega un dominio a la whitelist y sincroniza su cookie AHORA (sin esperar al cron 05:40),
-// reusando ~/.claude/scripts/sync-safari-cookies.mjs. Debe llamarse SOLO después de que Cal
+// despertando el LaunchAgent autorizado que ejecuta el sincronizador. Debe llamarse SOLO después de que Cal
 // confirme explícitamente en el chat — la tool que expone esto (agent-tools.ts) lo deja claro
 // en su descripción, y acá además se aplica el filtro DENY_PATTERNS como respaldo.
-export async function addDomainAndSync(domainRaw: string): Promise<AddDomainResult> {
+export async function addDomainAndSync(domainRaw: string, runtime: AddDomainRuntime = {}): Promise<AddDomainResult> {
   const domain = domainRaw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
   if (!domain || !domain.includes(".")) {
-    return { added: false, synced: false, message: `"${domainRaw}" no parece un dominio válido.` };
+    return { added: false, synced: false, reason: "invalid_domain", message: `"${domainRaw}" no parece un dominio válido.` };
   }
   if (!isDomainAllowed(domain)) {
-    return { added: false, synced: false, message: `Dominio "${domain}" bloqueado por regla dura de seguridad (solo medios de noticias/lectura — nunca banca, financieras ni email).` };
+    return { added: false, synced: false, reason: "blocked_domain", message: `Dominio "${domain}" bloqueado por regla dura de seguridad (solo medios de noticias/lectura — nunca banca, financieras ni email).` };
   }
 
-  const cfg = loadConfig();
+  const configPath = runtime.configPath ?? DOMAINS_CONFIG_PATH;
+  const cfg = loadConfig(configPath);
   const already = cfg.domains.some((d) => matchesDomain(domain, d.domain));
   if (!already) {
     cfg.domains.push({ domain });
-    saveConfig(cfg);
+    // El sincronizador solo procesa dominios presentes en esta lista. La escritura es provisional:
+    // si no consigue una cookie válida, se revierte para no dejar un dominio en estado engañoso.
+    saveConfig(cfg, configPath);
   }
 
-  const result = await runSyncScript();
+  const rollbackProvisionalDomain = () => {
+    if (!already) {
+      cfg.domains = cfg.domains.filter((d) => !matchesDomain(domain, d.domain));
+      saveConfig(cfg, configPath);
+    }
+  };
+
+  const result = await (runtime.sync?.(domain) ?? runCookieJarSync(domain));
   if (!result.ok) {
-    return { added: true, synced: false, message: `Agregué "${domain}" a la whitelist, pero la sincronización falló: ${result.output.slice(0, 300)}` };
+    rollbackProvisionalDomain();
+    return {
+      added: false,
+      synced: false,
+      reason: "sync_failed",
+      message: `No pude sincronizar la sesión de ${domain}. Inicia sesión en Safari y pulsa Reintentar.`,
+    };
   }
 
   const domainSynced = result.output.includes(`${domain}: cookie actualizada`);
+  if (!domainSynced) {
+    rollbackProvisionalDomain();
+    return {
+      added: false,
+      synced: false,
+      reason: "no_cookie",
+      message: `No encontré una sesión activa de ${domain} en Safari. Inicia sesión allí y pulsa Reintentar.`,
+    };
+  }
+
   return {
-    added: true,
-    synced: domainSynced,
-    message: domainSynced
-      ? `Agregué "${domain}" a la whitelist y sincronicé la cookie — ya puedo leer contenido paywalled de ahí.`
-      : `Agregué "${domain}" a la whitelist, pero no encontré sesión activa en Safari para ese dominio. Iniciá sesión ahí y pedime que reintente.`,
+    added: !already,
+    synced: true,
+    reason: "synced",
+    message: `${already ? `Sincronicé` : `Agregué "${domain}" a la whitelist y sincronicé`} la sesión — ahora verificaré si desbloquea el artículo.`,
   };
 }
 

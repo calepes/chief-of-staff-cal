@@ -219,7 +219,9 @@ fuente gratuita expone eso para anuncios comerciales en Bolivia.
   Telegram — "más activo en ads").
 - **`google: {nuevos, existentes}` / `meta: {nuevos, existentes}`** — el split por red que Cal pidió
   (2026-09-08, en producción desde entonces; antes de eso se calculaba ad-hoc con un script
-  descartable, fuera del pipeline real). `existentes = activos - nuevos` por red.
+  descartable, fuera del pipeline real). `existentes = activos - nuevos` por red. Meta agrega un
+  estado de disponibilidad: sin `status` la lectura fue confirmada; `unavailable` se presenta como
+  `N/D`; una entidad sin fuente Meta configurada se presenta como `—`.
 - `duracionPromedioDias` / `mixFormato`: SOLO de Google (Meta no expone fecha de fin ni formato).
 
 Ambas fuentes tienen throttle: Google vía una **cola global a nivel de módulo** (serializa TODOS los
@@ -372,3 +374,4 @@ resultado mixto, esperado:**
 | 2026-09-09 | Credenciales D1 migradas de `apps.env` (texto plano) al vault `Daemons` de 1Password |
 | 2026-09-09 | OPENROUTER_API_KEY/ELEVENLABS_API_KEY/NOTIF_BOT_TOKEN migrados a 1Password (sobreescriben apps.env, que queda como red de seguridad) |
 | 2026-09-09 | Primera corrida on-demand con D1 real en producción: 79 posts insertados, 0 errores — dedupe/reuso todavía sin ejercitarse (D1 estaba casi vacío antes de esta corrida) |
+| 2026-09-14 | Meta Ads deja de convertir respuestas vacías ambiguas en `0/0`: hasta 2 reintentos, cero solo con estado vacío explícito, `N/D` si la fuente no pudo verificarse y logs de tarjetas crudas/verificadas |

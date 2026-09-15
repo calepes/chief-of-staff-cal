@@ -1,5 +1,44 @@
 # CHANGELOG — Jano
 
+## 2026-09-14 — Resumidor: Cookie Broker confiable y fallback a transcripciones de fs.blog
+
+El flujo de resumen de un episodio de Farnam Street falló en dos límites distintos. Primero, Jano
+intentaba ejecutar el lector con Full Disk Access como hijo directo del daemon, pero macOS no
+hereda ese permiso. Después de sincronizar correctamente, seguía leyendo la ficha promocional del
+podcast, que conserva el gate de membresía aun cuando la transcripción separada sí está disponible
+para la sesión autenticada.
+
+- `addDomainAndSync()` ahora despierta `com.cal.cookie-jar-sync`, espera únicamente el resultado
+  nuevo del dominio y evita reutilizar éxitos viejos del log. Las altas nuevas son provisionales y
+  se revierten ante fallo de sync o ausencia de cookie; el pending y el botón `Reintentar` se
+  conservan cuando corresponde.
+- `classifyArticleAccess()` rechaza `Members Only` y otros marcadores explícitos aunque hayan
+  viajado cookies, evitando generar resúmenes falsos de una pantalla de paywall.
+- Para `fs.blog/knowledge-project-podcast/{slug}/`, `fetchArticleForSummary()` intenta la ruta
+  determinística del mismo origen `/knowledge-project-podcast-transcripts/{slug}/` y vuelve a
+  validar acceso antes de resumir. No sigue enlaces arbitrarios.
+- Validación real con el episodio de Tobi Lütke: 7 cookies, ficha bloqueada, transcripción
+  autenticada completa, resumen y propuesta de 5 tags/7 highlights entregados en Telegram.
+- TDD rojo→verde y suite completa: 93 archivos, 1.344 tests, typecheck y builds de shared/daemon
+  correctos; Jano reiniciado con arranque limpio.
+
+## 2026-09-14 — Research competitivo: Meta Ads sin falsos ceros
+
+La corrida semanal mostró `0 / 0` en Meta para Yape Bolivia aunque la fuente seguía teniendo
+anuncios activos. El fetcher usaba el mismo array vacío para un cero confirmado y para una página
+que no terminó de cargar, por lo que el agregador no podía distinguir disponibilidad de actividad.
+
+- Meta Ad Library reintenta hasta dos veces los errores y DOMs vacíos ambiguos. Solo acepta cero
+  cuando la propia página confirma que no hay resultados.
+- `fetchMetaAdsText` propaga `available`, `unavailable` o `not_configured`; el informe muestra `N/D`
+  cuando la fuente no pudo verificarse y `—` cuando no existe una fuente Meta configurada.
+- Nuevos logs por intento y por resultado registran tarjetas crudas, creativos que pasan el
+  allowlist y agotamiento de reintentos.
+- Verificación real de Yape: 25 tarjetas crudas y 20 creativos verificados. La fila del informe del
+  2026-09-14 se corrigió de `0 / 0` a `8 / 12` sin reemplazar el resto del body de Notion.
+- Cobertura TDD para reintento, cero explícito, agotamiento, propagación de estado y render `N/D`;
+  suite completa: 1.341 tests, typecheck y build correctos.
+
 ## 2026-09-13 — Lending: nuevo funnel CMSBio y backfill de Notion
 
 CMSBio cambió el PDF de Lending: `ENVIADOS` reemplazó `LEADS`/`TOTAL` y aparecieron dos ramas de

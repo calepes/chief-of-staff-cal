@@ -237,13 +237,71 @@ function collectMetaAdCards(page: Page): Promise<RawMetaAdCard[]> {
 
 export type MetaAdsFetcher = (query: string) => Promise<RawMetaAdCard[]>;
 
+export type MetaAdsStatus = "available" | "unavailable" | "not_configured";
+
+export interface MetaAdsQueryAttemptResult {
+  cards: RawMetaAdCard[];
+  /** `true` solo cuando Meta muestra un estado vacío explícito, no cuando el DOM quedó a medias. */
+  confirmedEmpty: boolean;
+}
+
+export function metaPageConfirmsEmpty(text: string): boolean {
+  const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return [
+    /no se encontraron (?:anuncios|resultados)/,
+    /no hay anuncios que (?:coincidan|mostrar)/,
+    /we didn'?t find any results/,
+    /no ads (?:match|to show)/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export interface MetaAdsRetryOptions {
+  maxAttempts?: number;
+  wait?: (ms: number) => Promise<void>;
+  log?: (entry: Record<string, unknown>) => void;
+}
+
+/**
+ * Reintenta errores y DOMs vacíos ambiguos. Un cero solo es válido cuando la propia página
+ * muestra su estado "sin resultados"; agotar intentos lanza para que el caller marque N/D.
+ */
+export async function fetchMetaAdsQueryWithRetry(
+  query: string,
+  attempt: (query: string) => Promise<MetaAdsQueryAttemptResult>,
+  opts: MetaAdsRetryOptions = {},
+): Promise<RawMetaAdCard[]> {
+  const maxAttempts = opts.maxAttempts ?? 3;
+  const wait = opts.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let lastReason = "respuesta vacía ambigua";
+
+  for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber++) {
+    try {
+      const result = await attempt(query);
+      opts.log?.({
+        ts: Date.now(), msg: "research_competencia_meta_ads_attempt", query,
+        attempt: attemptNumber, rawCards: result.cards.length, confirmedEmpty: result.confirmedEmpty,
+      });
+      if (result.cards.length > 0 || result.confirmedEmpty) return result.cards;
+      lastReason = "respuesta vacía ambigua";
+    } catch (err) {
+      lastReason = err instanceof Error ? err.message : String(err);
+      opts.log?.({
+        ts: Date.now(), msg: "research_competencia_meta_ads_attempt_error", query,
+        attempt: attemptNumber, err: lastReason,
+      });
+    }
+
+    if (attemptNumber < maxAttempts) await wait(attemptNumber * 1_500);
+  }
+
+  throw new Error(`Meta Ads: ${lastReason} tras ${maxAttempts} intentos (${query})`);
+}
+
 /**
  * Consulta real: un browser headless FRESCO (no la sesión logueada compartida de
- * research-competencia-browser.ts, no hace falta) por cada término de búsqueda. Fail-soft completo
- * — cualquier falla (Chromium no instalado, timeout, cambio de layout) devuelve `[]` y loguea, sin
- * tirar: este bloque es complementario, igual que research-competencia-ads.ts.
+ * research-competencia-browser.ts, no hace falta) por cada término de búsqueda.
  */
-async function fetchMetaAdsQueryReal(query: string): Promise<RawMetaAdCard[]> {
+async function fetchMetaAdsQueryAttemptReal(query: string): Promise<MetaAdsQueryAttemptResult> {
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   try {
     browser = await chromium.launch({ headless: true });
@@ -252,13 +310,18 @@ async function fetchMetaAdsQueryReal(query: string): Promise<RawMetaAdCard[]> {
     const url = `${ADS_LIBRARY_BASE}?active_status=active&ad_type=all&country=${COUNTRY_BOLIVIA}&q=${encodeURIComponent(query)}&search_type=keyword_unordered`;
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await page.waitForTimeout(PAGE_SETTLE_MS);
-    return await collectMetaAdCards(page);
-  } catch (err) {
-    console.log(JSON.stringify({ ts: Date.now(), msg: "research_competencia_meta_ads_error", query, err: String(err) }));
-    return [];
+    const cards = await collectMetaAdCards(page);
+    const bodyText = cards.length === 0 ? await page.locator("body").innerText().catch(() => "") : "";
+    return { cards, confirmedEmpty: cards.length === 0 && metaPageConfirmsEmpty(bodyText) };
   } finally {
     await browser?.close().catch(() => {});
   }
+}
+
+async function fetchMetaAdsQueryReal(query: string): Promise<RawMetaAdCard[]> {
+  return fetchMetaAdsQueryWithRetry(query, fetchMetaAdsQueryAttemptReal, {
+    log: (entry) => console.log(JSON.stringify(entry)),
+  });
 }
 
 export interface FetchMetaAdsDeps {
@@ -269,6 +332,7 @@ export interface FetchMetaAdsDeps {
 
 export interface FetchMetaAdsResult {
   texto: string | null;
+  status: MetaAdsStatus;
   /** Creativos ya deduplicados por `libraryId` — mismo dato que arma `texto`, expuesto aparte para
    * `computeAdsKpis` (research-competencia-ads.ts) sin repetir el fetch de red/browser. */
   creativos: MetaAdCreative[];
@@ -287,20 +351,44 @@ export async function fetchMetaAdsText(
   deps: FetchMetaAdsDeps = {},
 ): Promise<FetchMetaAdsResult> {
   const queries = entity.ads?.meta ?? [];
-  if (queries.length === 0) return { texto: null, creativos: [] };
+  if (queries.length === 0) return { texto: null, creativos: [], status: "not_configured" };
 
   const fetchQuery = deps.fetchQuery ?? fetchMetaAdsQueryReal;
   const ahora = deps.ahora ?? new Date();
 
   const todos: MetaAdCreative[] = [];
   const vistos = new Set<string>();
+  let unavailable = false;
   for (const query of queries) {
-    const crudos = await fetchQuery(query);
-    for (const ad of parseMetaAdCards(crudos, entity)) {
+    let crudos: RawMetaAdCard[];
+    try {
+      crudos = await fetchQuery(query);
+    } catch (err) {
+      unavailable = true;
+      if (!deps.fetchQuery) {
+        console.log(JSON.stringify({
+          ts: Date.now(), msg: "research_competencia_meta_ads_unavailable", entityId: entity.id,
+          query, err: err instanceof Error ? err.message : String(err),
+        }));
+      }
+      continue;
+    }
+    const verificados = parseMetaAdCards(crudos, entity);
+    if (!deps.fetchQuery) {
+      console.log(JSON.stringify({
+        ts: Date.now(), msg: "research_competencia_meta_ads_result", entityId: entity.id,
+        query, rawCards: crudos.length, verifiedCards: verificados.length,
+      }));
+    }
+    for (const ad of verificados) {
       if (vistos.has(ad.libraryId)) continue;
       vistos.add(ad.libraryId);
       todos.push(ad);
     }
   }
-  return { texto: formatMetaAdsText(todos, timeframeDias, ahora) || null, creativos: todos };
+  return {
+    texto: formatMetaAdsText(todos, timeframeDias, ahora) || null,
+    creativos: todos,
+    status: unavailable ? "unavailable" : "available",
+  };
 }

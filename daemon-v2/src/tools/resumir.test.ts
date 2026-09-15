@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildResumenHeader, buildQueueSelector } from "./resumir.js";
+import { buildResumenHeader, buildQueueSelector, classifyArticleAccess, fetchArticleForSummary } from "./resumir.js";
+import type { CfKv } from "../cf-kv.js";
+import type { FetchAsUserResult } from "./fetch-as-user.js";
 
 // Solo se testean las funciones PURAS (sin I/O: subprocess/filesystem/red). El resto de
 // resumir.ts (extracción vía yt-dlp/whisper/safari-fetch/Feedbin, selección real de la cola en
@@ -104,5 +106,58 @@ describe("buildQueueSelector", () => {
     const firstLine = sel.text.split("\n").find((l) => l.startsWith("1. "))!;
     // "1. " (3 chars) + hasta 80 chars de título
     expect(firstLine.length).toBeLessThanOrEqual(3 + 80);
+  });
+});
+
+describe("classifyArticleAccess", () => {
+  it("pide sesión cuando el contenido es corto y no se usó ninguna cookie", () => {
+    expect(classifyArticleAccess("Introducción breve", 0)).toBe("needs-session");
+  });
+
+  it("rechaza una pantalla Members Only aunque se haya enviado una cookie", () => {
+    const blocked = "Introducción. Members Only content. If you have an account, log in here.";
+    expect(classifyArticleAccess(blocked, 2)).toBe("session-not-unlocked");
+  });
+
+  it("permite contenido completo cuando la sesión sí desbloqueó el artículo", () => {
+    expect(classifyArticleAccess("Contenido completo ".repeat(200), 2)).toBe("ok");
+  });
+});
+
+describe("fetchArticleForSummary", () => {
+  it("usa la transcripción autenticada cuando la página de un podcast de fs.blog sigue mostrando el paywall", async () => {
+    const source = "https://fs.blog/knowledge-project-podcast/tobi-lutke-3/";
+    const transcript = "https://fs.blog/knowledge-project-podcast-transcripts/tobi-lutke-3/";
+    const requested: string[] = [];
+    const fetcher = async (url: string): Promise<FetchAsUserResult> => {
+      requested.push(url);
+      if (url === source) {
+        return {
+          ok: true,
+          status: 200,
+          url,
+          cookiesUsed: 7,
+          text: "Public Release. Members Only content. Become a Member.",
+          title: "Tobi Lütke",
+          domainWhitelisted: true,
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        url,
+        cookiesUsed: 7,
+        text: "Shane Parrish: Tobi, welcome back. ".repeat(100),
+        title: "Tobi Lütke transcript",
+        domainWhitelisted: true,
+      };
+    };
+
+    const result = await fetchArticleForSummary(source, {} as CfKv, fetcher);
+
+    expect(requested).toEqual([source, transcript]);
+    expect(result.source).toBe(transcript);
+    expect(result.result.text).toContain("Shane Parrish: Tobi, welcome back.");
+    expect(classifyArticleAccess(result.result.text, result.result.cookiesUsed)).toBe("ok");
   });
 });

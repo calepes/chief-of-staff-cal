@@ -318,4 +318,9 @@ describe("computeAdsKpis", () => {
     );
     expect(kpis.mixFormato).toEqual({ imagen: 1, display: 1, desconocido: 1 });
   });
+
+  it("propaga que Meta estuvo unavailable sin convertirlo en un cero confirmado", () => {
+    const kpis = computeAdsKpis([], [], 7, ahora, "unavailable");
+    expect(kpis.meta).toEqual({ nuevos: 0, existentes: 0, status: "unavailable" });
+  });
 });

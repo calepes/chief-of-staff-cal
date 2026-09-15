@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { sendMessage, editMessage, sendChatAction } from "@cos/shared";
 import { sanitizeForTelegram } from "../format.js";
 import type { CfKv } from "../cf-kv.js";
-import { fetchAsUser } from "./fetch-as-user.js";
+import { fetchAsUser, type FetchAsUserResult } from "./fetch-as-user.js";
 import { addDomainAndSync } from "./cookie-jar.js";
 import { extractPdfFromBuffer, fetchPdfBuffer, necesitaOcr } from "./pdf-extract.js";
 import { analyzePdf } from "./vision.js";
@@ -134,13 +134,69 @@ function cookieJarPendingPath(chatId: number): string {
   return join(PENDING_DIR, `cookiejar-pending-${chatId}.json`);
 }
 
-function cookieJarConfirmKeyboard(domain: string): unknown {
+function cookieJarConfirmKeyboard(domain: string, retry = false): unknown {
   return {
     inline_keyboard: [[
-      { text: `✅ Sí, agregar ${domain}`, callback_data: "j:cookiejar:add" },
+      { text: retry ? `🔄 Reintentar ${domain}` : `✅ Agregar ${domain}`, callback_data: "j:cookiejar:add" },
       { text: "❌ No", callback_data: "j:cookiejar:no" },
     ]],
   };
+}
+
+export type ArticleAccess = "ok" | "needs-session" | "session-not-unlocked";
+
+const PAYWALL_MARKERS = [
+  /members? only/i,
+  /subscriber[- ]only/i,
+  /subscribe to (?:continue|read)/i,
+  /log in (?:here )?to access/i,
+  /inicia sesi[oó]n .* para (?:acceder|continuar|leer)/i,
+];
+
+// Distingue falta de cookie de una cookie que sí viajó pero no desbloqueó el artículo. La segunda
+// rama evita que el resumidor convierta la pantalla "Members Only" en un resumen aparentemente válido.
+export function classifyArticleAccess(text: string, cookiesUsed: number): ArticleAccess {
+  const trimmed = text.trim();
+  const hasPaywallMarker = PAYWALL_MARKERS.some((pattern) => pattern.test(trimmed));
+  if (cookiesUsed <= 0 && (trimmed.length < LOOKS_BLOCKED_CHARS || hasPaywallMarker)) return "needs-session";
+  if (cookiesUsed > 0 && hasPaywallMarker) return "session-not-unlocked";
+  return "ok";
+}
+
+type ArticleFetcher = (url: string, cookieJarKv: CfKv) => Promise<FetchAsUserResult>;
+
+function fsBlogTranscriptUrl(source: string): string | null {
+  try {
+    const url = new URL(source);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const match = url.pathname.match(/^\/knowledge-project-podcast\/([^/]+)\/?$/i);
+    if (host !== "fs.blog" || !match) return null;
+    url.pathname = `/knowledge-project-podcast-transcripts/${match[1]}/`;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+// fs.blog publica el episodio y su transcripción en URLs separadas. La página del episodio conserva
+// el aviso de membresía incluso con una sesión válida; la transcripción enlazada sí se desbloquea.
+// Solo se intenta esta ruta determinística del mismo origen y se vuelve a validar el paywall.
+export async function fetchArticleForSummary(
+  source: string,
+  cookieJarKv: CfKv,
+  fetcher: ArticleFetcher = fetchAsUser,
+): Promise<{ source: string; result: FetchAsUserResult }> {
+  const initial = await fetcher(source, cookieJarKv);
+  if (!initial.ok || !initial.text || classifyArticleAccess(initial.text, initial.cookiesUsed) === "ok") {
+    return { source, result: initial };
+  }
+
+  const fallbackSource = fsBlogTranscriptUrl(source);
+  if (!fallbackSource) return { source, result: initial };
+
+  const fallback = await fetcher(fallbackSource, cookieJarKv);
+  if (!fallback.ok || !fallback.text) return { source, result: initial };
+  return { source: fallbackSource, result: fallback };
 }
 
 // Limpia locks de propuesta huérfanos (placeholder:true) que quedaron de un run matado por un
@@ -587,23 +643,39 @@ async function run(deps: ResumirDeps, chatId: number, kind: Kind, args: ResumirA
     await setAnchor("💭 Resumiendo...", progressKb);
   } else if (kind === "article") {
     await setAnchor("📥 Leyendo el artículo...", progressKb);
-    const r = await fetchAsUser(args.source, deps.cookieJarKv);
+    const article = await fetchArticleForSummary(args.source, deps.cookieJarKv);
+    const r = article.result;
     if (!r.ok || !r.text) {
       await setAnchor(`❌ No pude obtener el artículo (${r.error ?? r.status}).`);
       return;
     }
-    const looksBlocked = r.text.trim().length < LOOKS_BLOCKED_CHARS;
-    if (looksBlocked && !r.domainWhitelisted) {
+    const access = classifyArticleAccess(r.text, r.cookiesUsed);
+    if (access !== "ok") {
       let hostname = args.source;
       try { hostname = new URL(args.source).hostname; } catch { /* usar source tal cual */ }
       const domain = hostname.replace(/^www\./, "");
+      console.log(JSON.stringify({
+        ts: Date.now(),
+        msg: "article_paywall_detected",
+        domain,
+        access,
+        status: r.status,
+        chars: r.text.trim().length,
+        cookiesUsed: r.cookiesUsed,
+        domainWhitelisted: r.domainWhitelisted,
+      }));
       writeJsonSafe(cookieJarPendingPath(chatId), {
         domain, source: args.source, instruction: args.instruction, createdAt: Date.now(),
       } satisfies CookieJarPending);
+      const retry = r.domainWhitelisted || access === "session-not-unlocked";
+      const message = access === "session-not-unlocked"
+        ? `🔒 La sesión sincronizada de <b>${escapeHtml(domain)}</b> no desbloqueó el artículo. ` +
+          `Vuelve a iniciar sesión en Safari y pulsa Reintentar.`
+        : `🔒 El artículo está bloqueado y no tengo una sesión activa de <b>${escapeHtml(domain)}</b>. ` +
+          `Inicia sesión en Safari y luego ${retry ? "pulsa Reintentar" : "agrega el sitio"}.`;
       await setAnchor(
-        `🔒 El artículo se ve corto/bloqueado (posible paywall) y no tengo sesión guardada para <b>${domain}</b>. ` +
-        `¿Lo agrego a la whitelist de sitios paywalled?`,
-        cookieJarConfirmKeyboard(domain),
+        message,
+        cookieJarConfirmKeyboard(domain, retry),
       );
       return;
     }
@@ -1488,26 +1560,46 @@ export async function handleQueuePick(deps: ResumirDeps, chatId: number, kind: "
 export async function handleCookieJarConfirm(deps: ResumirDeps, chatId: number, confirm: boolean, anchorMsgId: number): Promise<void> {
   const path = cookieJarPendingPath(chatId);
   const pending = readJsonSafe<CookieJarPending | null>(path, null);
-  try { unlinkSync(path); } catch { /* noop */ }
 
   if (!pending) {
+    console.log(JSON.stringify({ ts: Date.now(), msg: "cookiejar_confirm_result", outcome: "missing_pending" }));
     await setCardMessage(deps.botToken, chatId, anchorMsgId, "🔒 Ya no tengo ese dominio pendiente guardado (pasó mucho tiempo). Pedime el resumen de nuevo y te vuelvo a preguntar.", { inline_keyboard: [] });
     return;
   }
 
   if (!confirm) {
+    try { unlinkSync(path); } catch { /* noop */ }
+    console.log(JSON.stringify({ ts: Date.now(), msg: "cookiejar_confirm_result", domain: pending.domain, outcome: "declined" }));
     await setCardMessage(deps.botToken, chatId, anchorMsgId, `Ok, no agrego <b>${escapeHtml(pending.domain)}</b> a la whitelist.`, { inline_keyboard: [] });
     return;
   }
 
   await setCardMessage(deps.botToken, chatId, anchorMsgId, `🔄 Agregando <b>${escapeHtml(pending.domain)}</b> y sincronizando...`, { inline_keyboard: [] });
   const result = await addDomainAndSync(pending.domain);
+  console.log(JSON.stringify({
+    ts: Date.now(),
+    msg: "cookiejar_confirm_result",
+    domain: pending.domain,
+    added: result.added,
+    synced: result.synced,
+    reason: result.reason,
+  }));
   if (!result.synced) {
-    await setCardMessage(deps.botToken, chatId, anchorMsgId, escapeHtml(result.message));
+    // Conserva el pending y el botón: Cal puede iniciar sesión y reintentar sin reenviar el enlace.
+    await setCardMessage(
+      deps.botToken,
+      chatId,
+      anchorMsgId,
+      `🔒 ${escapeHtml(result.message)}`,
+      cookieJarConfirmKeyboard(pending.domain, true),
+    );
     return;
   }
+  try { unlinkSync(path); } catch { /* noop */ }
   await setCardMessage(deps.botToken, chatId, anchorMsgId, `✅ ${escapeHtml(result.message)}\n\nReintentando el artículo...`);
+  console.log(JSON.stringify({ ts: Date.now(), msg: "cookiejar_article_retry", domain: pending.domain, outcome: "started" }));
   await run(deps, chatId, "article", { source: pending.source, instruction: pending.instruction }, { anchorMsgId });
+  console.log(JSON.stringify({ ts: Date.now(), msg: "cookiejar_article_retry", domain: pending.domain, outcome: "finished" }));
 }
 
 // Tool: reportar el estado del resumidor (propuesta en curso + cola de la playlist).
